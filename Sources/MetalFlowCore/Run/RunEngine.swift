@@ -28,6 +28,8 @@ public enum RunEngineError: Error, Equatable {
     case runBusy(RunID)
     /// The name is not a valid git branch name.
     case invalidBranchName(String)
+    /// The node has not failed, or the run is not in a state that can be retried.
+    case notRetryable(NodeKey)
 }
 
 extension RunEngineError: LocalizedError {
@@ -47,6 +49,7 @@ extension RunEngineError: LocalizedError {
         case .nothingToResume: return "nothing to resume: no node is interrupted or waiting"
         case .runBusy(let id): return "run \(id.rawValue) is running in another mflow"
         case .invalidBranchName(let name): return "'\(name)' is not a valid branch name"
+        case .notRetryable(let key): return "\(key) cannot be retried: it has not failed, or the run is busy or over"
         }
     }
 }
@@ -210,6 +213,13 @@ public actor RunEngine {
         if locks[id] != nil { return }
         guard let lock = store.tryLock(id) else { throw RunEngineError.runBusy(id) }
         locks[id] = lock
+        // Another engine may have changed the run since this one loaded it; never act on a stale snapshot.
+        // Holding the lock means nobody drives the run, so work still marked running was cut short.
+        if var fresh = try? store.load(id) {
+            for (key, node) in fresh.nodes where node.state == .running { fresh.nodes[key]?.state = .interrupted }
+            if fresh.status == .running { fresh.status = .needsYou }
+            runs[id] = fresh
+        }
     }
 
     /// Releases the lock once nothing is working on the run.

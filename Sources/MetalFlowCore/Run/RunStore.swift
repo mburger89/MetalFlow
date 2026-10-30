@@ -108,6 +108,12 @@ public struct RunStore: Sendable {
         }
     }
 
+    /// Loads one run exactly as stored: no running-to-interrupted mapping. Nil when the file is missing or undecodable.
+    public func load(_ id: RunID) throws -> Run? {
+        guard FileManager.default.fileExists(atPath: file(for: id).path) else { return nil }
+        return try? Self.decoder().decode(Run.self, from: Data(contentsOf: file(for: id)))
+    }
+
     /// Deletes the run's file; a missing file is not an error.
     public func delete(_ id: RunID) throws {
         let url = file(for: id)
