@@ -227,6 +227,15 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         self.revision = revision
     }
 
+    /// The run as it should appear when nothing is driving it: running nodes become interrupted and a running
+    /// run becomes needs-you.
+    public func markingCutShort() -> Run {
+        var run = self
+        for (key, node) in run.nodes where node.state == .running { run.nodes[key]?.state = .interrupted }
+        if run.status == .running { run.status = .needsYou }
+        return run
+    }
+
     /// Nodes waiting on the user, ordered by index in `flow.nodes`, then lane.
     public var needsYou: [(NodeKey, NeedsYou)] {
         var result: [(NodeKey, NeedsYou)] = []

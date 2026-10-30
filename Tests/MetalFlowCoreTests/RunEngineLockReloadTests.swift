@@ -33,7 +33,7 @@ import Testing
         let key = NodeKey(node: "implement", lane: "b")
         try await b.answer(id, node: key, reply: "Yes")
         var final: Run?
-        for await run in b.updates where run.id == id && run.status != .running { final = run; break }
+        for await run in b.updates where run.id == id && run.status != .running && run.nodes[key]?.state == .succeeded { final = run; break }
         #expect(final?.nodes[key]?.state == .succeeded)
         #expect(final?.nodes[NodeKey(node: "plan")]?.state == .succeeded)
         #expect(final?.nodes[NodeKey(node: "pick")]?.state == .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))
@@ -49,4 +49,26 @@ import Testing
         }
         #expect(h.engine.flows(in: h.repo.url).map(\.lastPathComponent) == ["a.flow", "b.flow"])
     }
+
+    @Test func reloadDoesNotRollBackNewerMemory() async throws {
+        let h = try Harness()
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        _ = await h.settled(id)
+        await h.engine.waitForPass(id)
+        let stored = try #require(h.store.load(id))
+        // Memory is ahead of disk, as after a failed save.
+        await h.engine.setDirect(id) { $0.title = "newer in memory" }
+        var older = stored
+        older.revision = (await h.engine.run(id)?.revision ?? 1) - 1
+        try h.store.save(older)
+        let engine = h.engine
+        await engine.dropLockForTest(id)
+        try await engine.ensureLock(id)
+        #expect(await engine.run(id)?.title == "newer in memory")
+        await engine.dropLockForTest(id)
+    }
+}
+
+extension RunEngine {
+    func dropLockForTest(_ id: RunID) { locks.removeValue(forKey: id)?.release() }
 }

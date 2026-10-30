@@ -95,12 +95,7 @@ public struct RunStore: Sendable {
         for url in urls where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url),
                   var run = try? decoder.decode(Run.self, from: data) else { continue }
-            if !isLocked(run.id) {
-                for (key, node) in run.nodes where node.state == .running {
-                    run.nodes[key]?.state = .interrupted
-                }
-                if run.status == .running { run.status = .needsYou }
-            }
+            if !isLocked(run.id) { run = run.markingCutShort() }
             runs.append(run)
         }
         return runs.sorted {
@@ -109,9 +104,10 @@ public struct RunStore: Sendable {
     }
 
     /// Loads one run exactly as stored: no running-to-interrupted mapping. Nil when the file is missing or undecodable.
-    public func load(_ id: RunID) throws -> Run? {
+    public func load(_ id: RunID) -> Run? {
         guard FileManager.default.fileExists(atPath: file(for: id).path) else { return nil }
-        return try? Self.decoder().decode(Run.self, from: Data(contentsOf: file(for: id)))
+        guard let data = try? Data(contentsOf: file(for: id)) else { return nil }
+        return try? Self.decoder().decode(Run.self, from: data)
     }
 
     /// Deletes the run's file; a missing file is not an error.

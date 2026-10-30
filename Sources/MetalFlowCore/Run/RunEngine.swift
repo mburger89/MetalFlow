@@ -215,10 +215,11 @@ public actor RunEngine {
         locks[id] = lock
         // Another engine may have changed the run since this one loaded it; never act on a stale snapshot.
         // Holding the lock means nobody drives the run, so work still marked running was cut short.
-        if var fresh = try? store.load(id) {
-            for (key, node) in fresh.nodes where node.state == .running { fresh.nodes[key]?.state = .interrupted }
-            if fresh.status == .running { fresh.status = .needsYou }
+        if let fresh = store.load(id)?.markingCutShort(), fresh.revision >= (runs[id]?.revision ?? 0) {
+            let newer = fresh.revision > (runs[id]?.revision ?? -1)
             runs[id] = fresh
+            // Only news if another engine saved since; an identical snapshot would look like a settled state.
+            if newer { continuation.yield(fresh) }
         }
     }
 

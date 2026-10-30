@@ -12,7 +12,7 @@ extension RunEngine {
         guard runs[id] != nil else { throw RunEngineError.unknownRun(id) }
         try ensureLock(id)
         defer { releaseLockIfIdle(id) }
-        guard let run = runs[id], !picking.contains(id),
+        guard let run = runs[id], !picking.contains(id), !deciding.contains(id),
               case .failed? = run.nodes[node]?.state else { throw RunEngineError.notRetryable(node) }
         switch run.status {
         case .needsYou, .failed, .completed: break
