@@ -77,11 +77,19 @@ extension AppModel {
         ensureDraft()
     }
 
+    /// What waits behind the unsaved-edits alert.
+    public enum PendingAction: Sendable, Equatable {
+        /// Open this flow file.
+        case open(URL)
+        /// Start a new, empty flow.
+        case newFlow
+    }
+
     /// The user's answer to the unsaved-edits alert.
     public enum PendingOpenChoice: Sendable {
-        /// Save the draft, then open the flow.
+        /// Save the draft, then carry on.
         case save
-        /// Throw the edits away and open the flow.
+        /// Throw the edits away and carry on.
         case discard
         /// Stay on the draft.
         case cancel
@@ -89,15 +97,27 @@ extension AppModel {
 
     /// Resolves a pending open of `url`: Save saves first (and stays put, with a notice, if that fails).
     public func resolvePendingOpen(_ url: URL, _ choice: PendingOpenChoice) async {
-        pendingOpen = nil
+        await resolvePending(.open(url), choice)
+    }
+
+    /// Resolves `action`, which was pending behind the unsaved-edits alert.
+    public func resolvePending(_ action: PendingAction, _ choice: PendingOpenChoice) async {
+        pendingAction = nil
         switch choice {
         case .cancel:
             return
         case .discard:
-            openWithoutAsking(url)
+            perform(action)
         case .save:
             if !draftIsValid { notice = Notice("Fix the flow's errors before saving it."); return }
-            if await saveDraft() { openWithoutAsking(url) }
+            if await saveDraft() { perform(action) }
+        }
+    }
+
+    private func perform(_ action: PendingAction) {
+        switch action {
+        case .open(let url): openWithoutAsking(url)
+        case .newFlow: newFlowWithoutAsking()
         }
     }
 
@@ -133,4 +153,66 @@ extension AppModel {
         if id != nil, studioIssue == typed { studioIssue = "" }
         return id
     }
+}
+
+extension AppModel {
+    /// File > New Flow: an empty "Untitled flow" in the selected repo. With unsaved edits it asks first.
+    public func newFlow() {
+        guard launchForm.repo != nil else {
+            notice = Notice("Add a repo on the dashboard first.")
+            return
+        }
+        if let draft, draft.isDirty {
+            pendingAction = .newFlow
+            screen = .studio
+            return
+        }
+        newFlowWithoutAsking()
+    }
+
+    func newFlowWithoutAsking() {
+        guard let repo = launchForm.repo else { return }
+        draft = FlowDraft(flow: Flow(name: "Untitled flow", nodes: [], wires: []), url: nil, repo: repo)
+        screen = .studio
+    }
+
+    /// File > Open Flow...: shows the repo / flow panel.
+    public func showOpenFlow() { isOpenFlowVisible = true }
+
+    /// Closes the Open Flow panel.
+    public func hideOpenFlow() { isOpenFlowVisible = false }
+
+    /// Opens a flow from the panel and closes it.
+    public func chooseFlow(_ url: URL) {
+        isOpenFlowVisible = false
+        open(flow: url)
+    }
+
+    /// Whether File > Save is enabled.
+    public var canSave: Bool { draft != nil && draftIsValid }
+
+    /// Whether Edit > Undo is enabled: the Studio shows a draft with something to undo.
+    public var canUndo: Bool { screen == .studio && draft.map { !$0.undoStack.isEmpty } == true }
+
+    /// Whether Edit > Redo is enabled.
+    public var canRedo: Bool { screen == .studio && draft.map { !$0.redoStack.isEmpty } == true }
+
+    /// Edit > Undo, on the Studio's draft.
+    public func undo() { if canUndo { draft?.undo() } }
+
+    /// Edit > Redo, on the Studio's draft.
+    public func redo() { if canRedo { draft?.redo() } }
+
+    /// Run > Launch...: the dashboard with the issue field focused.
+    public func focusLaunch() {
+        selectedRun = nil
+        screen = .dashboard
+        launchFocusRequested = true
+    }
+
+    /// Run > Go to Dashboard.
+    public func goToDashboard() { screen = .dashboard }
+
+    /// Run > Go to Studio.
+    public func goToStudio() { screen = .studio }
 }

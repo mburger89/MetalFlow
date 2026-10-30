@@ -47,7 +47,10 @@ public final class AppModel {
     public private(set) var order: [RunID] = []
     /// The visible screen.
     public var screen: Screen = .dashboard {
-        didSet { if screen == .studio { ensureDraft() } }
+        didSet {
+            if screen == .studio { ensureDraft() }
+            if screen != oldValue { detailMayHaveOpened() }
+        }
     }
     /// The flow open in the Studio, if any.
     public var draft: FlowDraft? {
@@ -62,15 +65,32 @@ public final class AppModel {
     /// The issue typed in the Studio's launch field.
     public var studioIssue = ""
     /// The run shown in detail, if any.
-    public var selectedRun: RunID?
+    public var selectedRun: RunID? {
+        didSet { if selectedRun != oldValue { detailMayHaveOpened() } }
+    }
     /// The feed, newest first, at most `activityLimit` items.
     public private(set) var activity: [ActivityItem] = []
     /// Flows and runs the user has open.
     public internal(set) var workingOn: [WorkingItem] = []
     /// The banner, if any.
     public var notice: Notice?
-    /// A flow the user asked to open while the draft has unsaved edits; the Save / Discard / Cancel alert is up.
-    public internal(set) var pendingOpen: URL?
+    /// What the user asked for while the draft has unsaved edits; the Save / Discard / Cancel alert is up.
+    public internal(set) var pendingAction: PendingAction?
+    /// The flow the user asked to open while the draft has unsaved edits, if that is what is pending.
+    public var pendingOpen: URL? {
+        if case .open(let url) = pendingAction { return url }
+        return nil
+    }
+    /// True while the Open Flow panel is showing.
+    public internal(set) var isOpenFlowVisible = false
+    /// True while the "runs are still running" quit alert is up.
+    public internal(set) var quitPending = false
+    /// Set by ⌘L; the launch bar's issue field takes focus and clears it.
+    public var launchFocusRequested = false
+    /// Brings the window forward. Called only in response to a notification click; the app sets it.
+    public var activateApp: @MainActor () -> Void = {}
+    /// Answers a pending termination request; the app sets it.
+    public var replyToTerminate: @MainActor (Bool) -> Void = { _ in }
     /// Runs waiting for the user, newest first. Cached: updated by `apply`.
     public private(set) var needsYou: [Run] = []
     /// Runs being executed, newest first. Cached.
@@ -116,6 +136,8 @@ public final class AppModel {
     /// Incremented for every write to a bucket array; tests use it to prove `apply` is O(1) per update.
     var rebuildCount = 0
     private var started = false
+    let notifyStream: AsyncStream<NotifyCommand>
+    let notifyContinuation: AsyncStream<NotifyCommand>.Continuation
 
     let client: EngineClient
     let notifier: Notifier
@@ -130,6 +152,7 @@ public final class AppModel {
         self.client = client
         self.notifier = notifier
         self.clock = clock
+        (notifyStream, notifyContinuation) = AsyncStream.makeStream(of: NotifyCommand.self, bufferingPolicy: .unbounded)
     }
 
     // MARK: - Updates
@@ -138,12 +161,16 @@ public final class AppModel {
     public func start() async {
         guard !started else { return }
         started = true
+        let queue = Task { await runNotifyQueue() }
+        let clicks = Task { await runClicks() }
+        defer { queue.cancel(); clicks.cancel() }
         await refreshRepos()
         do {
             for run in try await client.restore() { apply(run, restoring: true) }
         } catch {
             notice = Notice(error.localizedDescription)
         }
+        if !needsYou.isEmpty { enqueue(.badge(needsYou.count)) }
         isReady = true
         for waiter in readyWaiters { waiter.resume() }
         readyWaiters = []
@@ -175,6 +202,9 @@ public final class AppModel {
         } else {
             if let before { remove(run.id, from: before) }
             insert(run, into: after)
+        }
+        if !restoring, before != after {
+            notifyTransition(run, enteredNeedsYou: after == .needsYou, leftNeedsYou: before == .needsYou)
         }
 
         if !restoring {
@@ -253,7 +283,7 @@ public final class AppModel {
     /// draft keeps its draft. A load error becomes a notice and the screen stays.
     public func open(flow url: URL) {
         if let draft, draft.isDirty, draft.url != url {
-            pendingOpen = url
+            pendingAction = .open(url)
             return
         }
         openWithoutAsking(url)

@@ -4,6 +4,7 @@ import MetalUI
 /// Flow, issue and repo pickers with the Launch button, plus an "Add repo..." path field.
 struct LaunchBar: Component {
     let model: AppModel
+    @FocusState var issueFocused: Bool
 
     var content: some ElementGroup {
         let form = model.launchForm
@@ -29,6 +30,7 @@ struct LaunchBar: Component {
                     TextField("#68 or issue URL", text: Binding(
                         get: { model.launchForm.issue }, set: { model.launchForm.issue = $0 }))
                         .onSubmit { launch() }
+                        .focused($issueFocused)
                         .accessibilityIdentifier("launch.issue")
                 }
                 .frame(maxWidth: .infinity)
@@ -64,6 +66,12 @@ struct LaunchBar: Component {
                     .accessibilityIdentifier("launch.addrepo.go")
                     .disabled(!model.canAddRepo)
             }
+        }
+        .task(id: model.launchFocusRequested) {
+            // ⌘L: take the request, then focus the issue field.
+            guard model.launchFocusRequested else { return }
+            model.launchFocusRequested = false
+            issueFocused = true
         }
         .padding(Edges(all: Spacing.md))
         .background(Color(Hsla.rgb(0x171a1f)))

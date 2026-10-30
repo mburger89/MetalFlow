@@ -17,14 +17,22 @@ public struct RootView: Component {
         .background(Palette.ground)
         .task { await model.start() }
         .alert("Save changes to this flow?", isPresented: Binding(
-            get: { model.pendingOpen != nil },
-            set: { if !$0 { model.pendingOpen = nil } })) {
-            let target = model.pendingOpen
-            Button("Save") { if let target { Task { await model.resolvePendingOpen(target, .save) } } }
-            Button("Discard", role: .destructive) { if let target { Task { await model.resolvePendingOpen(target, .discard) } } }
-            Button("Cancel", role: .cancel) { model.pendingOpen = nil }
+            get: { model.pendingAction != nil },
+            set: { if !$0 { model.pendingAction = nil } })) {
+            let target = model.pendingAction
+            Button("Save") { if let target { Task { await model.resolvePending(target, .save) } } }
+            Button("Discard", role: .destructive) { if let target { Task { await model.resolvePending(target, .discard) } } }
+            Button("Cancel", role: .cancel) { model.pendingAction = nil }
         } message: {
             Text("The open flow has unsaved edits.")
+        }
+        .alert("Quit MetalFlow?", isPresented: Binding(
+            get: { model.quitPending },
+            set: { _ in })) {
+            Button("Quit", role: .destructive) { Task { await model.confirmQuit() } }
+            Button("Cancel", role: .cancel) { model.cancelQuit() }
+        } message: {
+            Text(verbatim: model.quitMessage)
         }
     }
 }
@@ -75,8 +83,11 @@ struct ScreenBody: Component {
 /// The window's one root element (`openWindow` wants an `Element`, not a component).
 @MainActor
 public func rootView(model: AppModel) -> some Element {
-    VStack(spacing: 0) {
+    ZStack {
         RootView(model: model)
+        if model.isOpenFlowVisible {
+            OpenFlowPanel(model: model)
+        }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
 }

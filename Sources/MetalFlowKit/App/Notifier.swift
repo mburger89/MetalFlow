@@ -29,3 +29,74 @@ public struct NoopNotifier: Notifier {
     /// A stream that has already finished.
     public var clicks: AsyncStream<String> { AsyncStream { $0.finish() } }
 }
+
+#if canImport(UserNotifications) && canImport(AppKit)
+import AppKit
+import UserNotifications
+
+/// Posts system notifications through `UNUserNotificationCenter` and the Dock badge through `NSApp.dockTile`.
+/// A process with no bundle identifier (`swift run`) cannot use the notification centre, so there it does nothing.
+///
+/// Notifications never activate the app: the delegate shows a banner only while the app is in the background,
+/// and a click is reported through `clicks` for the model to act on.
+public final class UserNotificationsNotifier: NSObject, Notifier, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    /// Ids of notifications the user clicked.
+    public let clicks: AsyncStream<String>
+    private let continuation: AsyncStream<String>.Continuation
+    private let isBundled: Bool
+
+    /// Creates a notifier. It is inert unless the process runs from an app bundle.
+    public override init() {
+        (clicks, continuation) = AsyncStream.makeStream(of: String.self, bufferingPolicy: .unbounded)
+        isBundled = Bundle.main.bundleIdentifier != nil
+        super.init()
+    }
+
+    private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
+
+    /// Installs the delegate, then asks for permission to show alerts and badges.
+    public func requestAuthorization() async {
+        guard isBundled else { return }
+        center.delegate = self
+        _ = try? await center.requestAuthorization(options: [.alert, .badge])
+    }
+
+    /// Posts (or replaces) the notification with this id.
+    public func post(id: String, title: String, body: String) async {
+        guard isBundled else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.threadIdentifier = id
+        try? await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
+
+    /// Removes the delivered and pending notification with this id.
+    public func remove(id: String) async {
+        guard isBundled else { return }
+        center.removeDeliveredNotifications(withIdentifiers: [id])
+        center.removePendingNotificationRequests(withIdentifiers: [id])
+    }
+
+    /// Sets the Dock badge; 0 clears it.
+    public func setBadge(_ count: Int) async {
+        guard isBundled else { return }
+        await MainActor.run { NSApp?.dockTile.badgeLabel = count > 0 ? String(count) : nil }
+    }
+
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        // In the foreground the Dashboard already shows the run: only list it, never pop a banner over the work.
+        let active = await MainActor.run { NSApp?.isActive ?? false }
+        return active ? [.list] : [.banner, .list]
+    }
+
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
+    ) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        continuation.yield(response.notification.request.identifier)
+    }
+}
+#endif
