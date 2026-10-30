@@ -44,6 +44,8 @@ public struct CommandResult: Sendable {
 public enum CommandError: Error, Equatable {
     /// The executable could not be found or launched.
     case executableNotFound(String)
+    /// The process could not be started for another reason, such as a missing working directory (executable and error description).
+    case launchFailed(String)
     /// The command exited with a non-zero status.
     case failed(Command, exitCode: Int32, stderr: String)
 }
@@ -80,7 +82,7 @@ public actor ExecutableResolver {
     /// Resolves a program name to an executable file URL.
     public func resolve(_ name: String) async throws -> URL {
         if name.hasPrefix("/") { return URL(fileURLWithPath: name) }
-        let dirs = loadSearchPath()
+        let dirs = await loadSearchPath()
         for dir in dirs {
             let path = (dir as NSString).appendingPathComponent(name)
             var isDir: ObjCBool = false
@@ -92,29 +94,45 @@ public actor ExecutableResolver {
         throw CommandError.executableNotFound(name)
     }
 
-    private func loadSearchPath() -> [String] {
+    private func loadSearchPath() async -> [String] {
         if let searchPath { return searchPath }
-        let loaded = Self.loginShellPath() ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+        let shellPath = await Self.loginShellPath()
+        if let searchPath { return searchPath }
+        let loaded = shellPath ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
         let dirs = loaded.split(separator: ":").map(String.init)
         searchPath = dirs
         return dirs
     }
 
-    private static func loginShellPath() -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lic", "print -r -- $PATH"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        process.standardInput = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0, let text = String(data: data, encoding: .utf8) else { return nil }
-        return text.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .last { !$0.isEmpty }
+    /// Asks the login shell for PATH off the actor's thread; gives up after five seconds.
+    private static func loginShellPath() async -> String? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            DispatchQueue.global().async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                process.arguments = ["-lic", "print -r -- $PATH"]
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = FileHandle.nullDevice
+                process.standardInput = FileHandle.nullDevice
+                do { try process.run() } catch {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                    if process.isRunning { process.terminate() }
+                }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0, let text = String(data: data, encoding: .utf8) else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: text.split(whereSeparator: \.isNewline)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .last { !$0.isEmpty })
+            }
+        }
     }
 }
 
@@ -125,16 +143,34 @@ private final class ProcessBox: @unchecked Sendable {
 
     func markStarted() { started.withLock { $0 = true } }
 
-    /// SIGTERM now, SIGKILL after five seconds if the process is still alive.
+    /// SIGTERM the whole descendant tree (leaves first, then the child); SIGKILL survivors after five seconds.
     func terminate() {
         guard started.withLock({ $0 }), process.isRunning else { return }
-        let pid = process.processIdentifier
-        kill(pid, SIGTERM)
-        let process = process
+        let root = process.processIdentifier
+        // Collect before signalling: once the parent dies, children are reparented and lost.
+        let victims = Self.descendants(of: root) + [root]
+        for pid in victims { kill(pid, SIGTERM) }
         Task.detached {
             try? await Task.sleep(for: .seconds(5))
-            if process.isRunning { kill(pid, SIGKILL) }
+            for pid in victims where kill(pid, 0) == 0 { kill(pid, SIGKILL) }
         }
+    }
+
+    /// Descendants in post-order, so children precede their parents.
+    private static func descendants(of pid: pid_t) -> [pid_t] {
+        let pgrep = Process()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        pgrep.arguments = ["-P", String(pid)]
+        let pipe = Pipe()
+        pgrep.standardOutput = pipe
+        pgrep.standardError = FileHandle.nullDevice
+        pgrep.standardInput = FileHandle.nullDevice
+        do { try pgrep.run() } catch { return [] }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        pgrep.waitUntilExit()
+        let children = String(decoding: data, as: UTF8.self)
+            .split(whereSeparator: \.isNewline).compactMap { pid_t($0) }
+        return children.flatMap { descendants(of: $0) + [$0] }
     }
 }
 
@@ -147,16 +183,20 @@ public struct ProcessRunner: CommandRunner {
         self.resolver = resolver
     }
 
+    /// Runs the command to completion. Cancelling the calling task terminates the process tree
+    /// (SIGTERM, then SIGKILL after five seconds) and throws `CancellationError`, even if the process had just exited.
     public func run(_ c: Command) async throws -> CommandResult {
-        let out = try await execute(c) { _ in }
+        let out = try await execute(c, keepStdout: true) { _ in }
         return CommandResult(exitCode: out.exitCode, stdout: out.stdout, stderr: out.stderr)
     }
 
+    /// Streams stdout lines as they arrive and throws `CommandError.failed` at the end on a non-zero exit.
+    /// Cancelling the consumer terminates the process tree; a cancellation racing with exit may still surface as `CancellationError`.
     public func lines(_ c: Command) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let out = try await execute(c) { continuation.yield($0) }
+                    let out = try await execute(c, keepStdout: false) { continuation.yield($0) }
                     if out.exitCode != 0 {
                         continuation.finish(throwing: CommandError.failed(c, exitCode: out.exitCode, stderr: out.stderr))
                     } else {
@@ -176,7 +216,7 @@ public struct ProcessRunner: CommandRunner {
         var stderr: String
     }
 
-    private func execute(_ c: Command, onLine: @escaping @Sendable (String) -> Void) async throws -> Output {
+    private func execute(_ c: Command, keepStdout: Bool, onLine: @escaping @Sendable (String) -> Void) async throws -> Output {
         let url = try await resolver.resolve(c.executable)
         let box = ProcessBox()
         let process = box.process
@@ -195,19 +235,32 @@ public struct ProcessRunner: CommandRunner {
             exitCont.yield(p.terminationStatus)
             exitCont.finish()
         }
+        let outHandle = outPipe.fileHandleForReading
+        let errHandle = errPipe.fileHandleForReading
+        let (outChunks, outCont) = Self.chunks(from: outHandle)
+        let (errChunks, errCont) = Self.chunks(from: errHandle)
 
         return try await withTaskCancellationHandler {
-            do { try process.run() } catch { throw CommandError.executableNotFound(c.executable) }
+            do { try process.run() } catch {
+                outHandle.readabilityHandler = nil
+                errHandle.readabilityHandler = nil
+                throw CommandError.launchFailed("\(url.path): \(error.localizedDescription)")
+            }
             box.markStarted()
             if Task.isCancelled { box.terminate() }
 
-            let outHandle = outPipe.fileHandleForReading
-            let errHandle = errPipe.fileHandleForReading
-            async let outData = Self.readLines(outHandle, onLine: onLine)
-            async let errData = Self.readLines(errHandle, onLine: { _ in })
-            let (stdout, stderr) = await (outData, errData)
+            async let outData = Self.consume(outChunks, keep: keepStdout, onLine: onLine)
+            async let errData = Self.consume(errChunks, keep: true, onLine: { _ in })
             var status: Int32 = -1
             for await s in exits { status = s }
+            if Task.isCancelled {
+                // Descendants may still hold the pipes open; stop waiting for EOF.
+                for (h, cont) in [(outHandle, outCont), (errHandle, errCont)] {
+                    h.readabilityHandler = nil
+                    cont.finish()
+                }
+            }
+            let (stdout, stderr) = await (outData, errData)
             if Task.isCancelled { throw CancellationError() }
             return Output(
                 exitCode: status,
@@ -218,9 +271,9 @@ public struct ProcessRunner: CommandRunner {
         }
     }
 
-    /// Reads a pipe to EOF via its readability handler, reporting each completed line and returning all bytes.
-    private static func readLines(_ handle: FileHandle, onLine: @Sendable (String) -> Void) async -> Data {
-        let (chunks, cont) = AsyncStream<Data>.makeStream()
+    /// Streams a pipe's data through its readability handler until EOF.
+    private static func chunks(from handle: FileHandle) -> (AsyncStream<Data>, AsyncStream<Data>.Continuation) {
+        let (stream, cont) = AsyncStream<Data>.makeStream()
         handle.readabilityHandler = { h in
             let data = h.availableData
             if data.isEmpty {
@@ -230,20 +283,25 @@ public struct ProcessRunner: CommandRunner {
                 cont.yield(data)
             }
         }
+        return (stream, cont)
+    }
+
+    /// Splits chunks into lines (reported as they complete); returns all bytes only when `keep` is set.
+    private static func consume(_ chunks: AsyncStream<Data>, keep: Bool, onLine: @Sendable (String) -> Void) async -> Data {
         var all = Data()
-        var current = Data()
+        var pending = Data()
         for await chunk in chunks {
-            all.append(chunk)
-            for byte in chunk {
-                if byte == 0x0A {
-                    onLine(String(decoding: current, as: UTF8.self))
-                    current.removeAll(keepingCapacity: true)
-                } else {
-                    current.append(byte)
-                }
+            if keep { all.append(chunk) }
+            var rest = chunk[...]
+            while let nl = rest.firstIndex(of: 0x0A) {
+                pending.append(rest[rest.startIndex..<nl])
+                onLine(String(decoding: pending, as: UTF8.self))
+                pending.removeAll(keepingCapacity: true)
+                rest = rest[rest.index(after: nl)...]
             }
+            pending.append(rest)
         }
-        if !current.isEmpty { onLine(String(decoding: current, as: UTF8.self)) }
+        if !pending.isEmpty { onLine(String(decoding: pending, as: UTF8.self)) }
         return all
     }
 }

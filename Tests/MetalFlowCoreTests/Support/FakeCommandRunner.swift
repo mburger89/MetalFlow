@@ -24,7 +24,9 @@ final class FakeCommandRunner: CommandRunner {
     var calls: [Command] { state.withLock { $0.calls } }
 
     func stub(_ executable: String, _ argsPrefix: [String], result: CommandResult) {
-        let lines = result.stdout.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        var parts = result.stdout.components(separatedBy: "\n")
+        if parts.last == "" { parts.removeLast() }
+        let lines = parts
         state.withLock { $0.stubs.append(Stub(executable: executable, argsPrefix: argsPrefix, result: result, lines: lines)) }
     }
 

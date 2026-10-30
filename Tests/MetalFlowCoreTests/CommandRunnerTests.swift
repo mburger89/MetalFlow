@@ -56,22 +56,61 @@ struct CommandRunnerTests {
         }
     }
 
-    @Test func cancellationTerminatesProcess() async throws {
-        let r = runner()
-        let task = Task { () -> [String] in
-            var got: [String] = []
-            do {
-                for try await line in r.lines(Command(executable: "/bin/sh", arguments: ["-c", "echo started; exec sleep 30"])) {
-                    got.append(line)
-                    // The process is definitely running now; cancel and keep draining
-                    // until the stream ends, which only happens once the process has exited.
-                    withUnsafeCurrentTask { $0?.cancel() }
-                }
-            } catch {}
-            return got
+    @Test func linesKeepsUnterminatedLastLine() async throws {
+        var got: [String] = []
+        for try await line in runner().lines(Command(executable: "printf", arguments: ["a\\nb"])) {
+            got.append(line)
         }
-        let got = await task.value
-        #expect(got == ["started"])
+        #expect(got == ["a", "b"])
+    }
+
+    @Test func nonexistentWorkingDirectoryIsLaunchFailure() async throws {
+        let cmd = Command(executable: "/bin/sh", arguments: ["-c", "true"],
+                          workingDirectory: URL(fileURLWithPath: "/nonexistent-dir-for-test"))
+        do {
+            _ = try await runner().run(cmd)
+            Issue.record("expected throw")
+        } catch let error as CommandError {
+            guard case .launchFailed = error else { Issue.record("wrong error \(error)"); return }
+        }
+    }
+
+    /// Runs `script` with `$1` = a fifo, cancels once the script has written a pid to it,
+    /// and returns that pid after `run` has finished with CancellationError.
+    private func cancelRun(script: String) async throws -> pid_t {
+        let fifo = FileManager.default.temporaryDirectory.appendingPathComponent("mf-\(UUID().uuidString).fifo").path
+        #expect(mkfifo(fifo, 0o600) == 0)
+        defer { unlink(fifo) }
+        let r = runner()
+        let task = Task { try await r.run(Command(executable: "/bin/sh", arguments: ["-c", script, "sh", fifo])) }
+        let pidText = await Task.detached { () -> String in
+            guard let h = FileHandle(forReadingAtPath: fifo) else { return "" }
+            return String(decoding: h.readDataToEndOfFile(), as: UTF8.self)
+        }.value
+        let pid = try #require(pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines)))
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        return pid
+    }
+
+    /// Waits (bounded, yielding) for a pid to disappear; zombies linger briefly before launchd reaps them.
+    private func gone(_ pid: pid_t) async -> Bool {
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if kill(pid, 0) == -1 && errno == ESRCH { return true }
+            await Task.yield()
+        }
+        return kill(pid, 0) == -1 && errno == ESRCH
+    }
+
+    @Test func cancellationTerminatesProcess() async throws {
+        let pid = try await cancelRun(script: "echo $$ > \"$1\"; exec sleep 30")
+        #expect(await gone(pid))
+    }
+
+    @Test func cancellationKillsDescendants() async throws {
+        let pid = try await cancelRun(script: "sleep 30 & echo $! > \"$1\"; wait")
+        #expect(await gone(pid))
     }
 
     @Test func resolverFindsInSearchPath() async throws {
