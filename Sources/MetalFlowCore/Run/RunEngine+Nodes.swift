@@ -161,8 +161,10 @@ extension RunEngine {
             }
         }
         if !result.deniedTools.isEmpty {
-            finish(id, key, .needsYou(.deniedTools(result.deniedTools)), output: result.text)
-        } else if let question = result.question {
+            let tools = result.deniedTools.joined(separator: ", ")
+            updateNode(id, key) { $0.appendLog("⚠ denied: \(tools)") }
+        }
+        if let question = result.question {
             finish(id, key, .needsYou(.question(question)), output: result.text)
         } else {
             finish(id, key, .succeeded, output: result.text)

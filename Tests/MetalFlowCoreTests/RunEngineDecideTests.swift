@@ -45,15 +45,40 @@ import Testing
 
     @Test func deniedToolsAnswerAddsTools() async throws {
         let h = try Harness()
-        let id = try await pausedOnQuestion(h, denied: ["Bash(make:*)"])
+        let id = try await pausedOnQuestion(h)
         resumeScript(h)
         let key = NodeKey(node: "implement", lane: "b")
-        #expect(await h.engine.run(id)?.nodes[key]?.state == .needsYou(.deniedTools(["Bash(make:*)"])))
+        #expect(await h.engine.run(id)?.nodes[key]?.state == .needsYou(.question("Keep the API?")))
         try await h.engine.answer(id, node: key, reply: "ok", allowTools: ["Bash(make:*)", "Bash(make:*)"])
         _ = await h.settled(id)
         let resumed = h.agent.requests.first { $0.resumeSessionID == "sb" }
         #expect(resumed?.allowedTools.contains("Bash(make:*)") == true)
         #expect(await h.engine.run(id)?.nodes[key]?.extraAllowedTools == ["Bash(make:*)"])
+    }
+
+    @Test func denialOnSuccessfulSessionSucceedsWithWarning() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.contains("short numbered plan") }, events: [.started(sessionID: "s"), .finished(AgentResult(
+            sessionID: "s", text: "PLAN: change the thing", isError: false, deniedTools: ["Bash", "Write"], costUSD: 0, turns: 1))])
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let run = await h.settled(id)
+        let plan = run.nodes[NodeKey(node: "plan")]
+        #expect(plan?.state == .succeeded)
+        #expect(plan?.log.contains("⚠ denied: Bash, Write") == true)
+        #expect(run.status == .needsYou)
+        #expect(run.needsYou.allSatisfy { if case .pickWinner = $0.1 { true } else { false } })
+    }
+
+    @Test func revisionIncreasesOnEveryUpdate() async throws {
+        let h = try Harness()
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        var revisions: [Int] = []
+        for await run in h.engine.updates where run.id == id {
+            revisions.append(run.revision)
+            if run.status != .running { break }
+        }
+        #expect(revisions.count > 3)
+        #expect(zip(revisions, revisions.dropFirst()).allSatisfy { $0 < $1 })
     }
 
     @Test func answerRejectsWrongNode() async throws {
