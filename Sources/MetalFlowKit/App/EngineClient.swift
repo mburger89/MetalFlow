@@ -35,19 +35,35 @@ public protocol EngineClient: Sendable {
     func diff(_ id: RunID, lane: LaneID) async -> String
 }
 
-/// The real client: wraps a `RunEngine` and its `RunStore`.
+/// The real client: wraps a `RunEngine` and its `RunStore`. The engine is built off the main thread
+/// (reading the login-shell PATH can take seconds), so construction never blocks; every engine call awaits it.
 public struct LiveEngineClient: EngineClient {
-    let engine: RunEngine
+    let engine: Task<RunEngine, Never>
     let store: RunStore
+    /// The engine's updates, forwarded once the engine exists.
+    public let updates: AsyncStream<Run>
+
+    /// Creates a client whose engine is built asynchronously by `build`, which starts immediately.
+    public init(store: RunStore, build: @escaping @Sendable () async -> RunEngine) {
+        let engine = Task { await build() }
+        self.engine = engine
+        self.store = store
+        let (stream, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .bufferingNewest(256))
+        updates = stream
+        let forward = Task {
+            for await run in await engine.value.updates { continuation.yield(run) }
+            continuation.finish()
+        }
+        continuation.onTermination = { _ in forward.cancel() }
+    }
 
     /// Creates a client over an existing engine and store.
     public init(engine: RunEngine, store: RunStore) {
-        self.engine = engine
-        self.store = store
+        self.init(store: store, build: { engine })
     }
 
     /// Wires the engine as `mflow` does: resolver, process runner, Claude CLI, GitHub, the run store, and the
-    /// login-shell PATH. `METALFLOW_HOME` overrides the store root. Blocks briefly to read the PATH.
+    /// login-shell PATH. `METALFLOW_HOME` overrides the store root. Returns at once; the PATH is read in the background.
     public static func makeDefault() -> LiveEngineClient {
         let root: URL
         if let home = ProcessInfo.processInfo.environment["METALFLOW_HOME"], !home.isEmpty {
@@ -55,46 +71,35 @@ public struct LiveEngineClient: EngineClient {
         } else {
             root = RunStore.defaultRoot
         }
-        let resolver = ExecutableResolver()
-        let runner = ProcessRunner(resolver: resolver)
-        let box = PathBox()
-        let semaphore = DispatchSemaphore(value: 0)
-        Task.detached {
-            box.value = await resolver.searchPath().joined(separator: ":")
-            semaphore.signal()
-        }
-        semaphore.wait()
         let store = RunStore(root: root)
-        let engine = RunEngine(
-            store: store, runner: runner, agent: ClaudeCLI(runner: runner),
-            issues: GitHubIssues(runner: runner), shellEnvironment: ["PATH": box.value])
-        return LiveEngineClient(engine: engine, store: store)
+        return LiveEngineClient(store: store) {
+            let resolver = ExecutableResolver()
+            let runner = ProcessRunner(resolver: resolver)
+            let path = await resolver.searchPath().joined(separator: ":")
+            return RunEngine(
+                store: store, runner: runner, agent: ClaudeCLI(runner: runner),
+                issues: GitHubIssues(runner: runner), shellEnvironment: ["PATH": path])
+        }
     }
 
-    public var updates: AsyncStream<Run> { engine.updates }
-    public func restore() async throws -> [Run] { try await engine.restore() }
+    public func restore() async throws -> [Run] { try await engine.value.restore() }
     public func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
-        try await engine.launch(flow: flow, repo: repo, input: input)
+        try await engine.value.launch(flow: flow, repo: repo, input: input)
     }
     public func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
-        try await engine.answer(id, node: node, reply: reply, allowTools: allowTools)
+        try await engine.value.answer(id, node: node, reply: reply, allowTools: allowTools)
     }
-    public func resumeInterrupted(_ id: RunID) async throws { try await engine.resumeInterrupted(id) }
-    public func retry(_ id: RunID, node: NodeKey) async throws { try await engine.retry(id, node: node) }
-    public func cancel(_ id: RunID) async { await engine.cancel(id) }
-    public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult { try await engine.pick(id, lane: lane) }
-    public func discard(_ id: RunID) async throws { try await engine.discard(id) }
+    public func resumeInterrupted(_ id: RunID) async throws { try await engine.value.resumeInterrupted(id) }
+    public func retry(_ id: RunID, node: NodeKey) async throws { try await engine.value.retry(id, node: node) }
+    public func cancel(_ id: RunID) async { await engine.value.cancel(id) }
+    public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult { try await engine.value.pick(id, lane: lane) }
+    public func discard(_ id: RunID) async throws { try await engine.value.discard(id) }
     public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws {
-        try await engine.branchFromHere(id, lane: lane, name: name)
+        try await engine.value.branchFromHere(id, lane: lane, name: name)
     }
     public func knownRepos() -> [URL] { store.knownRepos() }
-    public func flows(in repo: URL) -> [URL] { engine.flows(in: repo) }
+    public func flows(in repo: URL) -> [URL] { RunEngine.flows(in: repo) }
     public func loadFlow(_ url: URL) throws -> Flow { try FlowFile.load(from: url) }
     public func saveFlow(_ flow: Flow, to url: URL) throws { try FlowFile.save(flow, to: url) }
-    public func diff(_ id: RunID, lane: LaneID) async -> String { await engine.laneDiff(id, lane: lane) }
-}
-
-/// Carries the PATH string out of a detached task; written once before the semaphore is signalled.
-private final class PathBox: @unchecked Sendable {
-    var value = ""
+    public func diff(_ id: RunID, lane: LaneID) async -> String { await engine.value.laneDiff(id, lane: lane) }
 }

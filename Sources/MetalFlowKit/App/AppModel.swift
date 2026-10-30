@@ -67,6 +67,7 @@ public final class AppModel {
 
     /// Incremented for every write to a bucket array; tests use it to prove `apply` is O(1) per update.
     var rebuildCount = 0
+    private var started = false
 
     let client: EngineClient
     let notifier: Notifier
@@ -85,6 +86,8 @@ public final class AppModel {
 
     /// Restores saved runs, then applies engine updates until the stream ends.
     public func start() async {
+        guard !started else { return }
+        started = true
         do {
             for run in try await client.restore() { apply(run, restoring: true) }
         } catch {
@@ -154,7 +157,12 @@ public final class AppModel {
 
     private func replace(_ run: Run, in bucket: Bucket) {
         mutate(bucket) { list in
-            if let i = list.firstIndex(where: { $0.id == run.id }) { list[i] = run } else { list.append(run) }
+            if let i = list.firstIndex(where: { $0.id == run.id }) {
+                list[i] = run
+            } else {
+                assertionFailure("run \(run.id) missing from its bucket")
+                list.insert(run, at: list.firstIndex { self.isNewer(run, than: $0) } ?? list.count)
+            }
         }
     }
 

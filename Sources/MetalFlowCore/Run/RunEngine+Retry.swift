@@ -80,7 +80,10 @@ extension RunEngine {
     }
 
     /// The `.flow` files in `<repo>/.flows`, sorted by file name; empty when the folder is missing.
-    public nonisolated func flows(in repo: URL) -> [URL] {
+    public nonisolated func flows(in repo: URL) -> [URL] { Self.flows(in: repo) }
+
+    /// Same as the instance method, for callers that have no engine yet.
+    public static func flows(in repo: URL) -> [URL] {
         let directory = repo.appendingPathComponent(".flows", isDirectory: true)
         let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         return urls.filter { $0.pathExtension == "flow" }.sorted { $0.lastPathComponent < $1.lastPathComponent }

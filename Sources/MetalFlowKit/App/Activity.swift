@@ -56,7 +56,7 @@ func deriveActivity(old: Run?, new: Run, now: Date) -> [ActivityItem] {
         let (i, j) = (order.firstIndex(of: $0.node) ?? Int.max, order.firstIndex(of: $1.node) ?? Int.max)
         return i != j ? i < j : ($0.lane ?? "") < ($1.lane ?? "")
     }
-    var gateFailures = 0
+    var gateFailed = false
     for key in keys {
         guard let node = new.nodes[key] else { continue }
         let before = old?.nodes[key]
@@ -79,18 +79,25 @@ func deriveActivity(old: Run?, new: Run, now: Date) -> [ActivityItem] {
             case .needsYou(.deniedTools(let tools)):
                 add("needs approval for \(tools.joined(separator: ", "))", .needsYou)
             case .failed(let message):
-                if isGate { gateFailures += 1 } else { add("\(key) failed: \(clipped(message))", .bad) }
+                if isGate { gateFailed = true } else { add("\(key) failed: \(clipped(message))", .bad) }
             case .interrupted:
                 add("\(key) interrupted", .info)
-            case .waiting, .running, .succeeded, .cancelled:
+            case .running:
+                if let line = node.log.last, line != before?.log.last { add(describeLogLine(line), .info) }
+            case .waiting, .succeeded, .cancelled:
                 break
             }
         } else if node.state == .running, let line = node.log.last, line != before?.log.last {
             add(describeLogLine(line), .info)
         }
     }
-    if gateFailures > 0 {
-        add("gate failed on \(gateFailures) candidate\(gateFailures == 1 ? "" : "s")", .bad)
+    if gateFailed {
+        let gates = new.nodes.filter { key, _ in
+            if case .gate? = new.flow.node(key.node)?.kind { return true }
+            return false
+        }
+        let failed = gates.values.filter { if case .failed = $0.state { return true } else { return false } }.count
+        add("gate failed on \(failed) of \(gates.count) candidate\(gates.count == 1 ? "" : "s")", .bad)
     }
 
     if let before = old, before.status != new.status {

@@ -45,7 +45,7 @@ import MetalFlowCore
         #expect(m.needsYou.count == 1)
     }
 
-    @Test func restoredInterruptedRunsNeedYou() async {
+    @Test func restoredNeedsYouRunsLandInNeedsYouBucket() async {
         var node = NodeRun(state: .interrupted)
         node.log = ["▸ Edit Foo.swift"]
         let run = makeRun("cut short", status: .needsYou, revision: 3, nodes: [NodeKey(node: "plan"): node])
@@ -66,7 +66,7 @@ import MetalFlowCore
         let first = makeRun("fix", status: .running, revision: 1,
                             nodes: [NodeKey(node: "implement", lane: "a"): NodeRun(state: .running, log: ["▸ Edit Foo.swift"])])
         m.apply(first)
-        #expect(m.activity.map(\.text) == ["started"])
+        #expect(m.activity.map(\.text) == ["edited Foo.swift", "started"])
 
         var second = first
         second.revision = 2
@@ -78,7 +78,7 @@ import MetalFlowCore
         third.revision = 3
         for lane in ["a", "b", "c"] { third.nodes[NodeKey(node: "gate", lane: lane)] = NodeRun(state: .failed("tests")) }
         m.apply(third)
-        #expect(m.activity.first?.text == "gate failed on 3 candidates")
+        #expect(m.activity.first?.text == "gate failed on 3 of 3 candidates")
         #expect(m.activity.first?.kind == .bad)
 
         var fourth = third
@@ -89,6 +89,24 @@ import MetalFlowCore
         #expect(m.activity.first?.text == "judge recommends b — waiting on you")
         #expect(m.activity.first?.kind == .needsYou)
         #expect(m.activity.first?.runTitle == "fix")
+    }
+
+    @Test func firstLogLineWithRunningTransitionIsReported() {
+        let m = model()
+        let key = NodeKey(node: "implement", lane: "a")
+        m.apply(makeRun("fix", revision: 1, nodes: [key: NodeRun(state: .waiting)]))
+        m.apply(makeRun("fix", revision: 2, id: m.order[0], nodes: [key: NodeRun(state: .running, log: ["▸ Edit Foo.swift"])]))
+        #expect(m.activity.first?.text == "edited Foo.swift")
+    }
+
+    @Test func startRunsOnlyOnce() async {
+        let client = FakeEngineClient()
+        let m = model(client)
+        let task = Task { await m.start() }
+        await client.finish()
+        await task.value
+        await m.start()
+        #expect(await client.calls == ["restore"])
     }
 
     @Test func activityIsARingBuffer() {

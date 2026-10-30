@@ -24,6 +24,18 @@ public enum Palette {
     public static let bad = Color(Hsla.rgb(0xff7b72))
 }
 
+/// Fonts: the system font for text, Menlo for code.
+public enum Theme {
+    /// Window and card titles.
+    public static let title = Font.system(size: 15, weight: .semibold)
+    /// Ordinary text.
+    public static let body = Font.system(size: 13)
+    /// Small secondary text.
+    public static let caption = Font.system(size: 11)
+    /// Code and logs, in Menlo, at `size` points.
+    public static func mono(_ size: Double) -> Font { .custom("Menlo", size: size) }
+}
+
 /// Spacing scale in points.
 public enum Spacing {
     /// 4
