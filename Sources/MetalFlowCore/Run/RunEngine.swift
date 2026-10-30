@@ -137,8 +137,8 @@ public actor RunEngine {
             issue: issue?.number, title: issue?.title ?? title, existing: try await git.branches(repo: repo))
         let id = RunID()
         let worktree = store.worktreesDirectory.appendingPathComponent(id.rawValue).appendingPathComponent("run")
-        try await git.addWorktree(repo: repo, path: worktree, newBranch: branch, from: base)
         try store.addKnownRepo(repo)
+        try await git.addWorktree(repo: repo, path: worktree, newBranch: branch, from: base)
 
         var run = Run(id: id, flow: flow, title: title, repo: repo, baseBranch: base, branch: branch,
                       worktree: worktree, inputs: inputs)
@@ -149,13 +149,10 @@ public actor RunEngine {
         return id
     }
 
-    /// Cancels the run: stops its task, marks running nodes and the run cancelled. Worktrees are kept.
+    /// Cancels a running run: stops its task, marks running nodes and the run cancelled. Worktrees are kept.
+    /// A run that is not `.running` (waiting for you, completed, failed, merged...) is left alone.
     public func cancel(_ id: RunID) {
-        guard var run = runs[id] else { return }
-        switch run.status {
-        case .merged, .discarded, .cancelled: return
-        default: break
-        }
+        guard var run = runs[id], run.status == .running else { return }
         tasks[id]?.cancel()
         rerunRequested.remove(id)
         let now = Date()

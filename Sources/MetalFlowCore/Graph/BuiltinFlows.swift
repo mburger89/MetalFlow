@@ -16,7 +16,7 @@ public enum BuiltinFlows {
                 maxTurns: nil)), position: Point(x: 264, y: 140)),
             Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
                 model: "sonnet",
-                prompt: "Fix this GitHub issue by following the plan. Keep the public API unchanged, add a test that fails before your change, and commit when swift test passes.\n\nIssue:\n{issue}\n\nPlan:\n{plan}",
+                prompt: "Fix this GitHub issue by following the plan. Keep the public API unchanged, add a test that fails before your change, and stop when swift test passes.\n\nIssue:\n{issue}\n\nPlan:\n{plan}",
                 candidates: ["sonnet", "opus", "haiku"],
                 allowedTools: ["Read", "Edit", "Write", "Grep", "Glob", "Bash(swift build:*)", "Bash(swift test:*)"],
                 maxTurns: nil)), position: Point(x: 504, y: 185)),

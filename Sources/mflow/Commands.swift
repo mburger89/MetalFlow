@@ -10,7 +10,8 @@ commands:
   launch <issue> [--repo DIR] [--flow FILE]       start a run for a GitHub issue and follow it
   list                                            id  status  title, newest first
   show <id>                                       nodes, needs-you items, lanes, recommendation
-  answer <id> <nodeKey> <reply...> [--allow Tool] answer a paused node and follow the run
+  answer <id> <nodeKey> [--] <reply...> [--allow Tool]
+                                                  answer a paused node (-- ends options) and follow the run
   resume <id>                                     resume interrupted nodes and follow the run
   pick <id> <lane>                                merge a candidate into the base branch
   discard <id>                                    throw the run away
@@ -41,6 +42,10 @@ func parseArguments(_ args: [String]) throws -> Arguments {
     var i = 0
     while i < args.count {
         let a = args[i]
+        if a == "--" {
+            out.positionals.append(contentsOf: args[(i + 1)...])
+            break
+        }
         switch a {
         case "--repo", "--flow", "--allow":
             guard i + 1 < args.count else { throw UsageError(message: "\(a) needs a value") }
@@ -158,7 +163,7 @@ func storeRoot() -> URL {
 
 func parseRunID(_ s: String) throws -> RunID {
     guard UUID(uuidString: s) != nil else { throw CommandFailure(message: "'\(s)' is not a run id") }
-    return RunID(rawValue: s)
+    return RunID(rawValue: s.uppercased())
 }
 
 // MARK: - Following a run

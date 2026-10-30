@@ -127,6 +127,7 @@ public actor ExecutableResolver {
 
     /// Asks the login shell for PATH without blocking a thread; after five seconds the shell tree is SIGKILLed.
     private static func loginShellPath() async -> String? {
+        let pathSentinel = "__MF_PATH__"
         struct State {
             var data = Data()
             var eof = false
@@ -136,7 +137,7 @@ public actor ExecutableResolver {
         let box = ProcessBox()
         let process = box.process
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lic", "print -r -- $PATH"]
+        process.arguments = ["-lic", "print -r -- \"\(pathSentinel)$PATH\""]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -157,8 +158,8 @@ public actor ExecutableResolver {
                 guard status == 0 else { return cont.resume(returning: nil) }
                 let text = String(decoding: data, as: UTF8.self)
                 cont.resume(returning: text.split(whereSeparator: \.isNewline)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .last { !$0.isEmpty })
+                    .last { $0.hasPrefix(pathSentinel) }
+                    .map { String($0.dropFirst(pathSentinel.count)).trimmingCharacters(in: .whitespaces) })
             }
             handle.readabilityHandler = { h in
                 let chunk = h.availableData

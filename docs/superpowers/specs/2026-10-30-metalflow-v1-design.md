@@ -86,7 +86,7 @@ pick (merge).
 ### The Fix GitHub issue flow
 
 Issue (flow input; fetched with `gh issue view`) + Repo → Plan (Opus) → Implement ×3
-(Sonnet / Opus / Haiku, own worktrees, commit when tests pass) → `swift test` gate →
+(Sonnet / Opus / Haiku, own worktrees, stop when tests pass; MetalFlow commits) → `swift test` gate →
 Judge (passing tests first, then smallest diff) → You pick & merge.
 
 ### Persistence

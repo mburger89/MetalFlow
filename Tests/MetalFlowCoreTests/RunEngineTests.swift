@@ -124,6 +124,24 @@ import Testing
         #expect(await h.engine.run(id)?.nodes.values.contains { $0.state == .running } == false)
     }
 
+    @Test func cancelOnSettledRunIsNoOp() async throws {
+        let h = try Harness()
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let run = await h.settled(id)
+        #expect(run.status == .needsYou)
+        await h.engine.cancel(id)
+        let after = await h.engine.run(id)
+        #expect(after?.status == .needsYou)
+        #expect(after?.nodes[NodeKey(node: "pick")]?.state == run.nodes[NodeKey(node: "pick")]?.state)
+    }
+
+    @Test func builtinImplementPromptDoesNotAskForCommit() {
+        let implement = BuiltinFlows.fixGitHubIssue.nodes.first { $0.id == "implement" }
+        guard case .prompt(let c)? = implement?.kind else { Issue.record("no implement node"); return }
+        #expect(c.prompt.contains("stop when swift test passes"))
+        #expect(!c.prompt.contains("commit"))
+    }
+
     @Test func pickLessFlowWithOneFailedLaneCompletes() async throws {
         let h = try Harness()
         h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "c" },
