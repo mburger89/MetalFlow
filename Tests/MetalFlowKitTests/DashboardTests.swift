@@ -83,6 +83,7 @@ import Testing
         try await press("needs.\(pick.id.rawValue).pick.primary", in: window)
         #expect(model.selectedRun == pick.id)
         model.selectedRun = nil
+        try await window.runUntilIdle()
         try await press("needs.\(ask.id.rawValue).plan.open", in: window)
         #expect(model.selectedRun == ask.id)
     }
@@ -228,8 +229,11 @@ import Testing
         model.open(run: run.id)
         try await window.runUntilIdle()
         model.selectedRun = nil
+        try await window.runUntilIdle()
         try await press("working.run.\(run.id.rawValue).open", in: window)
         #expect(model.selectedRun == run.id)
+        model.selectedRun = nil
+        try await window.runUntilIdle()
         try await press("working.run.\(run.id.rawValue).dismiss", in: window)
         #expect(model.workingOn.isEmpty)
     }

@@ -51,7 +51,11 @@ struct ScreenBody: Component {
     var content: some ElementGroup {
         switch model.screen {
         case .dashboard:
-            DashboardView(model: model)
+            if let id = model.selectedRun, model.runs[id] != nil {
+                RunDetailView(model: model, run: id)
+            } else {
+                DashboardView(model: model)
+            }
         case .studio:
             Text("Flow Studio").foregroundColor(Palette.muted).accessibilityIdentifier("studio")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

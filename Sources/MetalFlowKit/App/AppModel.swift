@@ -74,6 +74,21 @@ public final class AppModel {
     public internal(set) var isLaunching = false
     var addedRepos: [URL] = []
 
+    /// What the last pick of each lane showed, per run. Cleared for a lane when it is picked again.
+    public internal(set) var pickOutcomes: [RunID: [LaneID: PickOutcome]] = [:]
+    /// The run whose pick is in flight; every pick button is disabled meanwhile.
+    public internal(set) var pickingRun: RunID?
+    /// Branch-name drafts, keyed by `AppModel.laneKey(_:_:)`.
+    public var branchDrafts: [String: String] = [:]
+    /// The lanes whose "Branch from here" field is open, keyed by `AppModel.laneKey(_:_:)`.
+    public var branchOpen: Set<String> = []
+    /// The lane whose diff is open, if any.
+    public internal(set) var openDiff: DiffKey?
+    /// Parsed diffs by lane. Absent while loading.
+    public internal(set) var diffChunks: [DiffKey: [AttributedString]] = [:]
+    /// True while the confirmation for discarding the shown run is up.
+    public var confirmingDiscard = false
+
     /// The feed's capacity.
     public static let activityLimit = 200
 
@@ -242,37 +257,48 @@ public final class AppModel {
         await client.cancel(id)
     }
 
-    /// Merges a lane. A blocked or conflicting merge becomes a notice. Only an explicit click calls this.
+    /// Merges a lane and records the outcome for its card. Only an explicit click calls this. A second call
+    /// while a pick is in flight does nothing. A merge returns to the dashboard.
     @discardableResult
     public func pick(_ id: RunID, lane: LaneID) async -> MergeResult? {
+        guard pickingRun == nil else { return nil }
+        pickingRun = id
+        defer { pickingRun = nil }
+        pickOutcomes[id, default: [:]][lane] = nil
         do {
             let result = try await client.pick(id, lane: lane)
+            let outcome: PickOutcome
             switch result {
-            case .merged: break
-            case .blockedDirty(let checkout):
-                notice = Notice("Not merged: \(checkout.path) has uncommitted changes.")
-            case .conflict(let files):
-                notice = Notice("Not merged: conflicts in \(files.joined(separator: ", ")).")
+            case .merged: outcome = .merged
+            case .blockedDirty(let checkout): outcome = .blockedDirty(checkout)
+            case .conflict(let files): outcome = .conflict(files)
             }
+            pickOutcomes[id, default: [:]][lane] = outcome
+            if outcome == .merged, selectedRun == id { selectedRun = nil }
             return result
         } catch {
-            fail(error)
+            pickOutcomes[id, default: [:]][lane] = .failed(error.localizedDescription)
             return nil
         }
     }
 
-    /// Discards a run.
-    public func discard(_ id: RunID) async {
-        await perform { try await self.client.discard(id) }
+    /// Discards a run. On success the detail closes.
+    @discardableResult
+    public func discard(_ id: RunID) async -> Bool {
+        let ok = await perform { try await self.client.discard(id) }
+        if ok, selectedRun == id { selectedRun = nil }
+        return ok
     }
 
     /// Keeps a lane's branch under `name`.
-    public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async {
+    @discardableResult
+    public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async -> Bool {
         await perform { try await self.client.branchFromHere(id, lane: lane, name: name) }
     }
 
-    private func perform(_ body: () async throws -> Void) async {
-        do { try await body() } catch { fail(error) }
+    @discardableResult
+    private func perform(_ body: () async throws -> Void) async -> Bool {
+        do { try await body(); return true } catch { fail(error); return false }
     }
 
     private func fail(_ error: Error) {

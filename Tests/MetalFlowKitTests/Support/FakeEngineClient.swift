@@ -63,7 +63,23 @@ actor FakeEngineClient: EngineClient {
     func resumeInterrupted(_ id: RunID) async throws { try record("resume") }
     func retry(_ id: RunID, node: NodeKey) async throws { try record("retry(\(node))") }
     func cancel(_ id: RunID) async { calls.append("cancel") }
+    private var holdingPicks = false
+    private var heldPicks: [CheckedContinuation<Void, Never>] = []
+    /// Makes `pick` suspend until `releasePicks()`.
+    func holdPicks() { holdingPicks = true }
+    /// Resumes every suspended `pick`.
+    func releasePicks() {
+        holdingPicks = false
+        for c in heldPicks { c.resume() }
+        heldPicks = []
+    }
+    /// What `diff` returns.
+    var diffText = ""
+    func setDiff(_ text: String) { diffText = text }
+
     func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult {
+        calls.append("pick-start(\(lane))")
+        if holdingPicks { await withCheckedContinuation { heldPicks.append($0) } }
         try record("pick(\(lane))")
         return pickResult
     }
@@ -76,7 +92,7 @@ actor FakeEngineClient: EngineClient {
     func isGitRepo(_ url: URL) async -> Bool { gitRepoPaths.contains(url.path) }
     nonisolated func loadFlow(_ url: URL) throws -> Flow { BuiltinFlows.fixGitHubIssue }
     nonisolated func saveFlow(_ flow: Flow, to url: URL) throws {}
-    func diff(_ id: RunID, lane: LaneID) async -> String { "" }
+    func diff(_ id: RunID, lane: LaneID) async -> String { calls.append("diff(\(lane))"); return diffText }
 }
 
 struct FakeFailure: LocalizedError {

@@ -154,15 +154,18 @@ import MetalFlowCore
         #expect(m.notice?.kind == .error)
         m.notice = nil
         await m.pick(id, lane: "a")
-        #expect(m.notice != nil)
+        #expect(m.notice == nil, "a pick error shows on the card, not as a notice")
+        #expect(m.pickOutcomes[id]?["a"] == .failed("engine said no"))
     }
 
-    @Test func conflictingPickBecomesNotice() async {
+    @Test func conflictingPickBecomesOutcome() async {
         let client = FakeEngineClient()
         await client.setPick(.conflict(files: ["a.swift"]))
         let m = model(client)
-        await m.pick(RunID(), lane: "a")
-        #expect(m.notice?.text.contains("a.swift") == true)
+        let id = RunID()
+        await m.pick(id, lane: "a")
+        #expect(m.notice == nil)
+        #expect(m.pickOutcomes[id]?["a"] == .conflict(["a.swift"]))
     }
 
     @Test func workingOnTracksOpenAndDismiss() {
