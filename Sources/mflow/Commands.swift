@@ -209,7 +209,11 @@ func follow(engine: RunEngine, id: RunID, seed: Run?) async -> Int32 {
     }
     defer { sources.forEach { $0.cancel() } }
 
-    func report(_ run: Run) {
+    var lastRevision = -1
+    /// Prints changes; returns false for a stale snapshot (revision not newer than one already shown).
+    func report(_ run: Run) -> Bool {
+        guard run.revision > lastRevision else { return false }
+        lastRevision = run.revision
         for (key, node) in run.nodes.sorted(by: { $0.key.description < $1.key.description })
         where last[key] != node.state {
             last[key] = node.state
@@ -219,14 +223,15 @@ func follow(engine: RunEngine, id: RunID, seed: Run?) async -> Int32 {
             lastStatus = run.status
             print("run \(statusText(run.status))")
         }
+        return true
     }
 
     if let run = await engine.run(id) {
-        report(run)
+        _ = report(run)
         if run.status != .running { return await finish(engine, id, run, interrupted) }
     }
     for await run in engine.updates where run.id == id {
-        report(run)
+        guard report(run) else { continue }
         if run.status != .running { return await finish(engine, id, run, interrupted) }
     }
     return 1

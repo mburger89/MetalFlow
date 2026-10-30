@@ -226,6 +226,9 @@ public actor RunEngine {
     // MARK: - State
 
     func persist(_ run: Run) {
+        var run = run
+        run.revision += 1
+        runs[run.id] = run
         do {
             try store.save(run)
             lastSaveError = nil

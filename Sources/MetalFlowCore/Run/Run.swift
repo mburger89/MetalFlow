@@ -53,7 +53,8 @@ public struct NodeKey: Hashable, Codable, Sendable, CustomStringConvertible {
 public enum NeedsYou: Codable, Hashable, Sendable {
     /// The agent asked a question.
     case question(String)
-    /// Tools the agent was denied.
+    /// Tools the agent was denied. No longer produced (a denial no longer blocks a session that finished);
+    /// kept so runs saved earlier still decode and `answer(allowTools:)` still works on them.
     case deniedTools([String])
     /// A winner must be picked among lanes.
     case pickWinner(recommended: LaneID?, allGatesFailed: Bool)
@@ -199,13 +200,15 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
     public var recommendation: LaneID?
     /// Branches created with "branch from here"; cleanup never deletes them.
     public var keptBranches: [String]
+    /// Monotonic counter the engine increments on every save, so consumers can order snapshots.
+    public var revision: Int
 
     /// Creates a run.
     public init(
         id: RunID = RunID(), flow: Flow, title: String, repo: URL, baseBranch: String,
         branch: String, worktree: URL, inputs: [String: String] = [:], createdAt: Date = Date(),
         status: RunStatus = .running, nodes: [NodeKey: NodeRun] = [:], lanes: [Lane] = [],
-        recommendation: LaneID? = nil, keptBranches: [String] = []
+        recommendation: LaneID? = nil, keptBranches: [String] = [], revision: Int = 0
     ) {
         self.id = id
         self.flow = flow
@@ -221,6 +224,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         self.lanes = lanes
         self.recommendation = recommendation
         self.keptBranches = keptBranches
+        self.revision = revision
     }
 
     /// Nodes waiting on the user, ordered by index in `flow.nodes`, then lane.
@@ -241,7 +245,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, flow, title, repo, baseBranch, branch, worktree, inputs, createdAt
-        case status, nodes, lanes, recommendation, keptBranches
+        case status, nodes, lanes, recommendation, keptBranches, revision
     }
 
     /// Decodes a run; `nodes` is a JSON object keyed by `NodeKey.description`.
@@ -260,6 +264,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         lanes = try c.decode([Lane].self, forKey: .lanes)
         recommendation = try c.decodeIfPresent(LaneID.self, forKey: .recommendation)
         keptBranches = try c.decodeIfPresent([String].self, forKey: .keptBranches) ?? []
+        revision = try c.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         let raw = try c.decode([String: NodeRun].self, forKey: .nodes)
         var parsed: [NodeKey: NodeRun] = [:]
         for (k, v) in raw {
@@ -288,6 +293,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         try c.encode(lanes, forKey: .lanes)
         try c.encodeIfPresent(recommendation, forKey: .recommendation)
         try c.encode(keptBranches, forKey: .keptBranches)
+        try c.encode(revision, forKey: .revision)
         var raw: [String: NodeRun] = [:]
         for (k, v) in nodes { raw[k.description] = v }
         try c.encode(raw, forKey: .nodes)
