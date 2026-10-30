@@ -2,13 +2,21 @@ import Foundation
 
 /// Reasons a flow is not runnable.
 public enum FlowError: Error, Equatable, Sendable {
+    /// The flow contains a cycle through these nodes.
     case cycle([NodeID])
+    /// A wire references a node that does not exist.
     case danglingWire(Wire)
+    /// Two nodes share this ID.
     case duplicateNode(NodeID)
+    /// Two wires feed the same placeholder of one node.
     case duplicateInput(NodeID, String)
+    /// A fan-out node sits downstream of another fan-out.
     case nestedFanOut(NodeID)
+    /// The flow has more than one fan-out node; this is the second.
     case multipleFanOuts(NodeID)
+    /// A judge node has no fan-out upstream of it.
     case judgeWithoutFanOut(NodeID)
+    /// A placeholder has no wire feeding it.
     case unwiredPlaceholder(NodeID, String)
 }
 
@@ -90,11 +98,12 @@ extension Flow {
 
         var scoped = Set<NodeID>()
         if let f = fanOut {
-            var stack = [f]
-            while let id = stack.popLast() {
-                guard let n = node(id), !n.isJudgeOrPick, scoped.insert(id).inserted else { continue }
-                stack += children[id] ?? []
+            var excluded = Set<NodeID>()
+            for n in nodes where n.isJudgeOrPick {
+                excluded.insert(n.id)
+                excluded.formUnion(descendants(of: n.id))
             }
+            scoped = Set([f]).union(descendants(of: f)).subtracting(excluded)
         }
         return FlowPlan(order: order, fanOut: fanOut, laneScoped: scoped)
     }

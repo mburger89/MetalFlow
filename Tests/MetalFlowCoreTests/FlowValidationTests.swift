@@ -74,6 +74,16 @@ private func wire(_ from: NodeID, _ to: NodeID, _ input: String = "in") -> Wire 
         #expect(plan.fanOut == "impl")
     }
 
+    @Test func laneScopeExcludesJudgeDescendantsInDiamond() throws {
+        let judge = Node(id: "judge", title: "judge", kind: .judge(PromptConfig(model: "opus", prompt: "{candidates}", candidates: [], allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0))
+        let gate = Node(id: "gate", title: "gate", kind: .gate(ShellConfig(command: "make {x}")), position: Point(x: 0, y: 0))
+        let flow = Flow(name: "f",
+                        nodes: [prompt("impl", candidates: ["a", "b"]), gate, judge, prompt("report", "{j}{g}")],
+                        wires: [wire("impl", "gate", "x"), wire("gate", "judge"), wire("judge", "report", "j"), wire("gate", "report", "g")])
+        let plan = try flow.validate()
+        #expect(plan.laneScoped == ["impl", "gate"])
+    }
+
     @Test func noFanOutMeansEmptyScope() throws {
         let plan = try Flow(name: "f", nodes: [prompt("a")], wires: []).validate()
         #expect(plan.fanOut == nil)
