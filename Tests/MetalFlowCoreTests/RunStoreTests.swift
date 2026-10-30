@@ -99,4 +99,33 @@ import Testing
         #expect(NodeKey(description: "plan") == NodeKey(node: "plan"))
         #expect(NodeKey(node: "x", lane: "a").description == "x@a")
     }
+
+    @Test func nodeKeyRejectsInvalidAndRoundTrips() {
+        #expect(NodeKey(description: "a@b@c") == nil)
+        #expect(NodeKey(description: "") == nil)
+        #expect(NodeKey(description: "has space") == nil)
+        for k in [NodeKey(node: "plan"), NodeKey(node: "impl-1_x", lane: "b")] {
+            #expect(NodeKey(description: k.description) == k)
+        }
+    }
+
+    @Test func sameSecondRunsKeepOrder() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RunStore(root: root)
+        let old = makeRun(created: 100.25), new = makeRun(created: 100.75)
+        try store.save(old); try store.save(new)
+        #expect(try store.loadAll().map(\.id) == [new.id, old.id])
+    }
+
+    @Test func needsYouIsOrderedByFlowIndexThenLane() {
+        let ask = NodeRun(state: .needsYou(.question("q")))
+        let run = makeRun(nodes: [
+            NodeKey(node: "implement", lane: "b"): ask,
+            NodeKey(node: "implement", lane: "a"): ask,
+            NodeKey(node: "plan"): ask,
+            NodeKey(node: "implement"): NodeRun(state: .running),
+        ])
+        #expect(run.needsYou.map(\.0.description) == ["plan", "implement@a", "implement@b"])
+    }
 }

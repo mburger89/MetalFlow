@@ -2,6 +2,8 @@ import Foundation
 
 /// Reasons a flow is not runnable.
 public enum FlowError: Error, Equatable, Sendable {
+    /// A node ID is empty or has characters outside `[A-Za-z0-9_-]`.
+    case invalidNodeID(NodeID)
     /// The flow contains a cycle through these nodes.
     case cycle([NodeID])
     /// A wire references a node that does not exist.
@@ -46,6 +48,7 @@ extension Node {
 extension Flow {
     /// Checks the flow and returns its execution plan.
     public func validate() throws(FlowError) -> FlowPlan {
+        for n in nodes where !n.id.isValidIdentifier { throw .invalidNodeID(n.id) }
         var seen = Set<NodeID>()
         for n in nodes where !seen.insert(n.id).inserted { throw .duplicateNode(n.id) }
         for w in wires where !seen.contains(w.from) || !seen.contains(w.to) { throw .danglingWire(w) }
@@ -132,5 +135,14 @@ extension Flow {
             throw .cycle(remaining.filter { cyc.contains($0) })
         }
         return order
+    }
+}
+
+extension NodeID {
+    /// True when the ID is non-empty and uses only `[A-Za-z0-9_-]`.
+    public var isValidIdentifier: Bool {
+        !rawValue.isEmpty && rawValue.utf8.allSatisfy {
+            ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 95 || $0 == 45
+        }
     }
 }

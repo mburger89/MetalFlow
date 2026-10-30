@@ -37,6 +37,13 @@ private func wire(_ from: NodeID, _ to: NodeID, _ input: String = "in") -> Wire 
         #expect(throws: FlowError.danglingWire(w)) { try flow.validate() }
     }
 
+    @Test func invalidNodeIDIsRejected() {
+        for bad in ["a@b", "", "has space"] {
+            let flow = Flow(name: "f", nodes: [prompt(NodeID(rawValue: bad))], wires: [])
+            #expect(throws: FlowError.invalidNodeID(NodeID(rawValue: bad))) { try flow.validate() }
+        }
+    }
+
     @Test func duplicateNodeIsRejected() {
         let flow = Flow(name: "f", nodes: [prompt("a"), prompt("a")], wires: [])
         #expect(throws: FlowError.duplicateNode("a")) { try flow.validate() }

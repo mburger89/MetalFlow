@@ -2,6 +2,7 @@ import Foundation
 
 /// Unique identifier of a run (a UUID string).
 public struct RunID: RawRepresentable, Codable, Hashable, Sendable {
+    /// The underlying string.
     public var rawValue: String
     /// Creates an ID from its string form.
     public init(rawValue: String) { self.rawValue = rawValue }
@@ -23,7 +24,9 @@ public typealias LaneID = String
 
 /// Identifies one node execution: a node, optionally within a lane.
 public struct NodeKey: Hashable, Codable, Sendable, CustomStringConvertible {
+    /// The node this key refers to.
     public var node: NodeID
+    /// The lane within a fan-out, if the node is lane-scoped.
     public var lane: LaneID?
     /// Creates a key.
     public init(node: NodeID, lane: LaneID? = nil) { self.node = node; self.lane = lane }
@@ -34,13 +37,13 @@ public struct NodeKey: Hashable, Codable, Sendable, CustomStringConvertible {
     }
     /// Parses the `description` form, splitting on the last `@`.
     public init?(description: String) {
-        guard !description.isEmpty else { return nil }
         if let at = description.lastIndex(of: "@") {
             let node = String(description[..<at])
             let lane = String(description[description.index(after: at)...])
-            guard !node.isEmpty, !lane.isEmpty else { return nil }
+            guard !lane.isEmpty, NodeID(rawValue: node).isValidIdentifier else { return nil }
             self.init(node: NodeID(rawValue: node), lane: lane)
         } else {
+            guard NodeID(rawValue: description).isValidIdentifier else { return nil }
             self.init(node: NodeID(rawValue: description), lane: nil)
         }
     }
@@ -78,15 +81,23 @@ public enum NodeState: Codable, Hashable, Sendable {
 public struct NodeRun: Codable, Hashable, Sendable {
     /// Maximum number of retained log lines.
     public static let maxLogLines = 50
+    /// Current execution state.
     public var state: NodeState
+    /// Text output once finished.
     public var output: String?
+    /// Agent session ID for resuming.
     public var sessionID: String?
     /// The last 50 log lines.
     public var log: [String]
+    /// A user reply waiting to be sent to the agent.
     public var pendingReply: String?
+    /// Tools the user approved beyond the node config.
     public var extraAllowedTools: [String]
+    /// Accumulated cost in US dollars.
     public var costUSD: Double
+    /// When execution started.
     public var startedAt: Date?
+    /// When execution ended.
     public var endedAt: Date?
     /// Creates a node run with defaults (waiting, empty log).
     public init(
@@ -113,12 +124,19 @@ public struct NodeRun: Codable, Hashable, Sendable {
 
 /// One candidate lane of a fan-out.
 public struct Lane: Codable, Hashable, Sendable {
+    /// Unique identifier.
     public var id: LaneID
+    /// Model used by this lane.
     public var model: String
+    /// Git branch.
     public var branch: String
+    /// Worktree directory.
     public var worktree: URL
+    /// Whether the gate passed; nil if not yet run.
     public var gatePassed: Bool?
+    /// Lines added.
     public var added: Int
+    /// Lines removed.
     public var removed: Int
     /// Creates a lane.
     public init(id: LaneID, model: String, branch: String, worktree: URL,
@@ -151,18 +169,31 @@ public enum RunStatus: Codable, Hashable, Sendable {
 
 /// One launch of a flow.
 public struct Run: Identifiable, Codable, Equatable, Sendable {
+    /// Unique identifier.
     public var id: RunID
+    /// The flow being run.
     public var flow: Flow
+    /// Display title.
     public var title: String
+    /// The user repository.
     public var repo: URL
+    /// Branch the run started from.
     public var baseBranch: String
+    /// Git branch.
     public var branch: String
+    /// Worktree directory.
     public var worktree: URL
+    /// Flow input values by name.
     public var inputs: [String: String]
+    /// Creation time.
     public var createdAt: Date
+    /// Overall status.
     public var status: RunStatus
+    /// Per-node runtime records.
     public var nodes: [NodeKey: NodeRun]
+    /// Fan-out lanes.
     public var lanes: [Lane]
+    /// Lane recommended by the judge.
     public var recommendation: LaneID?
 
     /// Creates a run.
@@ -253,13 +284,5 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         var raw: [String: NodeRun] = [:]
         for (k, v) in nodes { raw[k.description] = v }
         try c.encode(raw, forKey: .nodes)
-    }
-
-    /// Equality over all stored fields (needsYou is derived).
-    public static func == (a: Run, b: Run) -> Bool {
-        a.id == b.id && a.flow == b.flow && a.title == b.title && a.repo == b.repo
-            && a.baseBranch == b.baseBranch && a.branch == b.branch && a.worktree == b.worktree
-            && a.inputs == b.inputs && a.createdAt == b.createdAt && a.status == b.status
-            && a.nodes == b.nodes && a.lanes == b.lanes && a.recommendation == b.recommendation
     }
 }

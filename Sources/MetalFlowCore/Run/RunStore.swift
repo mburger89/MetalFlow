@@ -22,15 +22,38 @@ public struct RunStore: Sendable {
 
     private static func encoder() -> JSONEncoder {
         let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
+        e.dateEncodingStrategy = .custom { date, enc in
+            var c = enc.singleValueContainer()
+            try c.encode(Self.dateString(date))
+        }
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
         return e
     }
 
     private static func decoder() -> JSONDecoder {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
+        d.dateDecodingStrategy = .custom { dec in
+            let str = try dec.singleValueContainer().decode(String.self)
+            guard let date = Self.parseDate(str) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "Bad date \(str)"))
+            }
+            return date
+        }
         return d
+    }
+
+    private static func dateString(_ date: Date) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.string(from: date)
+    }
+
+    private static func parseDate(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
     }
 
     private func file(for id: RunID) -> URL {
@@ -61,7 +84,9 @@ public struct RunStore: Sendable {
             if run.status == .running { run.status = .needsYou }
             runs.append(run)
         }
-        return runs.sorted { $0.createdAt > $1.createdAt }
+        return runs.sorted {
+            $0.createdAt != $1.createdAt ? $0.createdAt > $1.createdAt : $0.id.rawValue < $1.id.rawValue
+        }
     }
 
     /// Deletes the run's file; a missing file is not an error.
