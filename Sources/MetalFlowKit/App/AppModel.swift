@@ -136,8 +136,13 @@ public final class AppModel {
     /// Incremented for every write to a bucket array; tests use it to prove `apply` is O(1) per update.
     var rebuildCount = 0
     private var started = false
-    let notifyStream: AsyncStream<NotifyCommand>
     let notifyContinuation: AsyncStream<NotifyCommand>.Continuation
+    /// The body last posted for each run in needs-you, so a changed reason re-posts and an unchanged one does not.
+    var postedBodies: [RunID: String] = [:]
+    /// True from the user's "Quit" until the app ends: no notifications fire for runs being suspended.
+    var isQuitting = false
+    /// The quit alert's text, fixed when it was raised.
+    public internal(set) var quitMessage = ""
 
     let client: EngineClient
     let notifier: Notifier
@@ -152,8 +157,13 @@ public final class AppModel {
         self.client = client
         self.notifier = notifier
         self.clock = clock
-        (notifyStream, notifyContinuation) = AsyncStream.makeStream(of: NotifyCommand.self, bufferingPolicy: .unbounded)
+        let (stream, continuation) = AsyncStream.makeStream(of: NotifyCommand.self, bufferingPolicy: .unbounded)
+        notifyContinuation = continuation
+        // The queue runs from creation, not from `start()`, so `flushNotifications()` always returns.
+        Task { await Self.runNotifyQueue(stream, notifier: notifier) }
     }
+
+    deinit { notifyContinuation.finish() }
 
     // MARK: - Updates
 
@@ -161,9 +171,7 @@ public final class AppModel {
     public func start() async {
         guard !started else { return }
         started = true
-        let queue = Task { await runNotifyQueue() }
-        let clicks = Task { await runClicks() }
-        defer { queue.cancel(); clicks.cancel() }
+        enqueue(.removeAll)
         await refreshRepos()
         do {
             for run in try await client.restore() { apply(run, restoring: true) }
@@ -171,7 +179,11 @@ public final class AppModel {
             notice = Notice(error.localizedDescription)
         }
         if !needsYou.isEmpty { enqueue(.badge(needsYou.count)) }
+        for run in needsYou { postedBodies[run.id] = Self.notificationBody(for: run) }
         isReady = true
+        // Clicks that arrived before launch finished are buffered; only now can they find their run.
+        let clicks = Task { await runClicks() }
+        defer { clicks.cancel() }
         for waiter in readyWaiters { waiter.resume() }
         readyWaiters = []
         for await run in client.updates { apply(run) }
@@ -203,8 +215,12 @@ public final class AppModel {
             if let before { remove(run.id, from: before) }
             insert(run, into: after)
         }
-        if !restoring, before != after {
-            notifyTransition(run, enteredNeedsYou: after == .needsYou, leftNeedsYou: before == .needsYou)
+        if !restoring {
+            if before != after {
+                notifyTransition(run, enteredNeedsYou: after == .needsYou, leftNeedsYou: before == .needsYou)
+            } else if after == .needsYou {
+                notifyReasonChange(run)
+            }
         }
 
         if !restoring {

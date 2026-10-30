@@ -63,6 +63,7 @@ actor FakeEngineClient: EngineClient {
     func resumeInterrupted(_ id: RunID) async throws { try record("resume") }
     func retry(_ id: RunID, node: NodeKey) async throws { try record("retry(\(node))") }
     func cancel(_ id: RunID) async { calls.append("cancel") }
+    func suspend(_ id: RunID) async { calls.append("suspend") }
     private var holdingPicks = false
     private var heldPicks: [CheckedContinuation<Void, Never>] = []
     /// Makes `pick` suspend until `releasePicks()`.

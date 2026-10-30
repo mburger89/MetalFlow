@@ -22,21 +22,16 @@ extension AppModel {
     public func requestTerminate() -> CloseRequestReply {
         switch quitDecision(runningCount: running.count) {
         case .now: return .now
-        case .ask: quitPending = true; return .later
+        case .ask(let message): quitMessage = message; quitPending = true; return .later
         }
     }
 
-    /// The quit alert's message, while it is up.
-    public var quitMessage: String {
-        if case .ask(let message) = quitDecision(runningCount: running.count) { return message }
-        return ""
-    }
-
-    /// Quit: cancels every running run, then lets the app end.
+    /// Quit: suspends every running run (stopped, resumable on the next launch), then lets the app end.
     public func confirmQuit() async {
         let ids = running.map(\.id)
+        isQuitting = true
         quitPending = false
-        for id in ids { await cancel(id) }
+        for id in ids { await client.suspend(id) }
         replyToTerminate(true)
     }
 

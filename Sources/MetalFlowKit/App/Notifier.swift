@@ -8,6 +8,8 @@ public protocol Notifier: Sendable {
     func post(id: String, title: String, body: String) async
     /// Removes the notification with this id.
     func remove(id: String) async
+    /// Removes every delivered notification (stale ones from an earlier launch).
+    func removeAll() async
     /// Sets the Dock badge to `count`; 0 clears it.
     func setBadge(_ count: Int) async
     /// Ids of notifications the user clicked.
@@ -24,6 +26,8 @@ public struct NoopNotifier: Notifier {
     public func post(id: String, title: String, body: String) async {}
     /// Does nothing.
     public func remove(id: String) async {}
+    /// Does nothing.
+    public func removeAll() async {}
     /// Does nothing.
     public func setBadge(_ count: Int) async {}
     /// A stream that has already finished.
@@ -50,14 +54,15 @@ public final class UserNotificationsNotifier: NSObject, Notifier, UNUserNotifica
         (clicks, continuation) = AsyncStream.makeStream(of: String.self, bufferingPolicy: .unbounded)
         isBundled = Bundle.main.bundleIdentifier != nil
         super.init()
+        // Installed at creation, before the app finishes launching, so the click that launched the app is delivered.
+        if isBundled { UNUserNotificationCenter.current().delegate = self }
     }
 
     private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
 
-    /// Installs the delegate, then asks for permission to show alerts and badges.
+    /// Asks for permission to show alerts and badges.
     public func requestAuthorization() async {
         guard isBundled else { return }
-        center.delegate = self
         _ = try? await center.requestAuthorization(options: [.alert, .badge])
     }
 
@@ -76,6 +81,12 @@ public final class UserNotificationsNotifier: NSObject, Notifier, UNUserNotifica
         guard isBundled else { return }
         center.removeDeliveredNotifications(withIdentifiers: [id])
         center.removePendingNotificationRequests(withIdentifiers: [id])
+    }
+
+    /// Removes every delivered notification.
+    public func removeAll() async {
+        guard isBundled else { return }
+        center.removeAllDeliveredNotifications()
     }
 
     /// Sets the Dock badge; 0 clears it.

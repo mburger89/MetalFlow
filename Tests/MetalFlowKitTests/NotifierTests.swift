@@ -98,7 +98,7 @@ import Testing
         notifier.click(id.rawValue)
         await model.flushNotifications()
         // The click is consumed by a task; wait for its effect through the model.
-        while model.selectedRun != id { await Task.yield() }
+        await waitUntil("the click to open the run") { model.selectedRun == id }
         try await window.runUntilIdle()
         #expect(model.screen == .dashboard)
         #expect(model.selectedRun == id)
@@ -139,8 +139,86 @@ import Testing
         #expect(body([NodeKey(node: "plan"): NodeRun(state: .interrupted)]) == "Interrupted — resume when ready")
         #expect(body([NodeKey(node: "gate", lane: "a"): NodeRun(state: .failed("nope"))], status: .failed("x"))
             == "swift test failed — retry when ready")
-        // First in plan order wins.
+        // What the run waits on (run.needsYou) wins over interrupted or failed nodes.
         #expect(body([NodeKey(node: "pick"): NodeRun(state: .needsYou(.pickWinner(recommended: "a", allGatesFailed: false))),
-                      NodeKey(node: "plan"): NodeRun(state: .interrupted)]) == "Interrupted — resume when ready")
+                      NodeKey(node: "plan"): NodeRun(state: .interrupted)]) == "Judge recommends a — pick a candidate")
+        // A fan-out run with a failed lane and the pick waiting.
+        #expect(body([NodeKey(node: "implement", lane: "a"): NodeRun(state: .failed("boom")),
+                      NodeKey(node: "pick"): NodeRun(state: .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))])
+            == "Judge recommends b — pick a candidate")
+    }
+
+    @Test func clickBeforeStartOpensRunOnceRestoreFinishes() async throws {
+        let id = RunID()
+        let client = FakeEngineClient(restored: [makeRun("late", status: .running, id: id)], repos: [URL(fileURLWithPath: "/repo")])
+        let notifier = RecordingNotifier()
+        let model = AppModel(client: client, notifier: notifier)
+        var activations = 0
+        model.activateApp = { activations += 1 }
+        notifier.click(id.rawValue)
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        await waitUntil("the early click to open the run") { model.selectedRun == id }
+        #expect(model.selectedRun == id)
+        #expect(activations == 1)
+        _ = window
+    }
+
+    @Test func startRemovesDeliveredNotifications() async throws {
+        let (_, _, notifier, _) = try await fixture(restored: [pick("a")])
+        #expect(notifier.events.first == .removeAll)
+        #expect(notifier.badges == [1])
+    }
+
+    @Test func changedReasonRepostsWithSameId() async throws {
+        let (model, _, notifier, _) = try await fixture()
+        let id = RunID()
+        model.apply(makeRun("r", status: .running, id: id))
+        model.apply(pick("r", id: id, revision: 1))
+        // Same reason again: no new post.
+        model.apply(pick("r", id: id, revision: 2))
+        // The reason changes while the run stays in needs-you.
+        model.apply(makeRun("r", status: .needsYou, revision: 3, id: id, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .needsYou(.question("Which file?")))]))
+        await model.flushNotifications()
+        #expect(notifier.posts == [
+            .post(id: id.rawValue, title: "r", body: "Judge recommends b — pick a candidate"),
+            .post(id: id.rawValue, title: "r", body: "Plan asks: Which file?")])
+    }
+
+    @Test func noPostsWhileQuitting() async throws {
+        let a = makeRun("a", status: .running)
+        let (model, client, notifier, window) = try await fixture(restored: [a])
+        _ = window.testApp.platform.simulateTerminateRequest()
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Quit")
+        await waitUntil("quit to begin") { model.isQuitting }
+        // Suspending turns the run into needs-you; that must not notify on the way out.
+        model.apply(makeRun("a", status: .needsYou, revision: 1, id: a.id, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .interrupted)]))
+        await model.flushNotifications()
+        #expect(notifier.posts.isEmpty)
+        _ = client
+    }
+
+    @Test func leavingDetailForStudioDoesNotNotifyAgain() async throws {
+        let (model, _, notifier, _) = try await fixture()
+        let id = RunID()
+        model.apply(makeRun("r", status: .running, id: id))
+        model.apply(pick("r", id: id, revision: 1))
+        model.open(run: id)
+        model.screen = .studio
+        await model.flushNotifications()
+        #expect(notifier.posts.count == 1)
+        #expect(notifier.removes == [id.rawValue], "removed once when the detail opened, not again for the Studio")
+        model.screen = .dashboard
+        await model.flushNotifications()
+        #expect(notifier.removes == [id.rawValue, id.rawValue], "the detail is visible again")
+    }
+
+    @Test func flushNeverHangsBeforeStart() async {
+        let model = AppModel(client: FakeEngineClient(), notifier: RecordingNotifier())
+        await model.flushNotifications()
     }
 }

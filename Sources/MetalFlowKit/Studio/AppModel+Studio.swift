@@ -188,8 +188,8 @@ extension AppModel {
         open(flow: url)
     }
 
-    /// Whether File > Save is enabled.
-    public var canSave: Bool { draft != nil && draftIsValid }
+    /// Whether File > Save is enabled: the Studio shows a valid draft.
+    public var canSave: Bool { screen == .studio && draft != nil && draftIsValid }
 
     /// Whether Edit > Undo is enabled: the Studio shows a draft with something to undo.
     public var canUndo: Bool { screen == .studio && draft.map { !$0.undoStack.isEmpty } == true }

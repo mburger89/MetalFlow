@@ -74,6 +74,8 @@ public actor RunEngine {
     var runs: [RunID: Run] = [:]
     var tasks: [RunID: Task<Void, Never>] = [:]
     var rerunRequested: Set<RunID> = []
+    /// Runs suspended for quit: `mutate` ignores them until `resumeInterrupted` or `answer` clears the mark.
+    var suspended: Set<RunID> = []
     var picking: Set<RunID> = []
     /// Run locks this engine holds: while a pass, pick, discard or branch is in progress for the run.
     var locks: [RunID: RunLock] = [:]
@@ -206,6 +208,24 @@ public actor RunEngine {
         persist(run)
     }
 
+    /// Suspends a running run, for quitting: stops its task (and so its agent and shell processes) like `cancel`,
+    /// but saves the run as `markingCutShort()` (running nodes interrupted, the run waiting for you) so it can be
+    /// resumed with `resumeInterrupted`. Writes from the stopped pass are ignored until the run is resumed or
+    /// answered. A run that is not `.running`, or not driven by this engine, is left alone.
+    public func suspend(_ id: RunID) {
+        guard let run = runs[id], run.status == .running, locks[id] != nil else { return }
+        tasks[id]?.cancel()
+        rerunRequested.remove(id)
+        suspended.insert(id)
+        persistForced(run.markingCutShort())
+        // Nothing is driving the run any more: another process may take it. Lock-free even while the stopped
+        // pass winds down, since its writes are ignored.
+        locks.removeValue(forKey: id)?.release()
+    }
+
+    /// Saves a run bypassing `mutate`'s guards.
+    private func persistForced(_ run: Run) { persist(run) }
+
     // MARK: - Run locks
 
     /// Takes the run's lock unless this engine already holds it; throws `runBusy` when another engine has it.
@@ -251,7 +271,7 @@ public actor RunEngine {
 
     /// Applies a change and saves it. Ignored once the run is cancelled, merged or discarded, so work finishing late cannot undo it.
     func mutate(_ id: RunID, _ body: (inout Run) -> Void) {
-        guard var run = runs[id] else { return }
+        guard var run = runs[id], !suspended.contains(id) else { return }
         switch run.status {
         case .cancelled, .merged, .discarded: return
         default: break

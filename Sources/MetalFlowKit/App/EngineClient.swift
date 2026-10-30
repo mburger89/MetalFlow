@@ -17,6 +17,8 @@ public protocol EngineClient: Sendable {
     func retry(_ id: RunID, node: NodeKey) async throws
     /// Cancels a run.
     func cancel(_ id: RunID) async
+    /// Stops a running run so that it can be resumed later (used when quitting).
+    func suspend(_ id: RunID) async
     /// Merges a candidate lane into the base branch.
     func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult
     /// Throws a run away.
@@ -94,6 +96,7 @@ public struct LiveEngineClient: EngineClient {
     public func resumeInterrupted(_ id: RunID) async throws { try await engine.value.resumeInterrupted(id) }
     public func retry(_ id: RunID, node: NodeKey) async throws { try await engine.value.retry(id, node: node) }
     public func cancel(_ id: RunID) async { await engine.value.cancel(id) }
+    public func suspend(_ id: RunID) async { await engine.value.suspend(id) }
     public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult { try await engine.value.pick(id, lane: lane) }
     public func discard(_ id: RunID) async throws { try await engine.value.discard(id) }
     public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws {

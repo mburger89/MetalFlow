@@ -194,7 +194,10 @@ import Testing
     }
 
     @Test func quitWithNothingRunningQuitsNow() async throws {
-        let (_, _, window) = try await fixture()
+        let (model, _, window) = try await fixture()
+        #expect(window.testApp.app.onTerminateRequest != nil, "our handler is installed")
+        #expect(model.requestTerminate() == .now)
+        #expect(!model.quitPending)
         #expect(window.testApp.platform.simulateTerminateRequest() == .now)
     }
 
@@ -219,10 +222,12 @@ import Testing
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Quit")
         try await window.runUntilIdle()
-        while platform.terminateReplies.count < 2 { await Task.yield() }
+        await waitUntil("the quit reply") { platform.terminateReplies.count >= 2 }
         #expect(platform.terminateReplies == [false, true])
+        let suspends = await client.calls.filter { $0 == "suspend" }
+        #expect(suspends.count == 2)
         let cancels = await client.calls.filter { $0 == "cancel" }
-        #expect(cancels.count == 2)
+        #expect(cancels.isEmpty, "quit suspends runs so they can be resumed; it never cancels them")
     }
 
     @Test func quitWithOneRunUsesSingular() async throws {
@@ -231,5 +236,61 @@ import Testing
         try await window.runUntilIdle()
         let alert = try #require(window.presentedAlert)
         #expect(alert.message == "1 run is still running. Quitting stops it — you can resume later.")
+    }
+
+    @Test func saveIsOffTheDashboard() async throws {
+        let (model, client, window) = try await fixture()
+        model.screen = .studio
+        try await window.runUntilIdle()
+        model.screen = .dashboard
+        try await window.runUntilIdle()
+        #expect(model.draft != nil)
+        let save = try menuItem(window, "File", "Save")
+        #expect(!save.isEnabled)
+        window.typeKey("s", modifierFlags: [.command])
+        try await window.runUntilIdle()
+        #expect(client.files.saved.isEmpty)
+    }
+
+    @Test func saveDisabledForInvalidDraft() async throws {
+        let (model, client, window) = try await fixture()
+        model.screen = .studio
+        let draft = try #require(model.draft)
+        draft.edit("break") { $0.wires.append(Wire(from: "nope", to: "plan", input: "x")) }
+        try await window.runUntilIdle()
+        #expect(!model.draftIsValid)
+        let save = try menuItem(window, "File", "Save")
+        #expect(!save.isEnabled)
+        window.typeKey("s", modifierFlags: [.command])
+        try await window.runUntilIdle()
+        #expect(client.files.saved.isEmpty)
+    }
+
+    @Test func escapeClosesOpenFlowPanel() async throws {
+        let (model, _, window) = try await fixture()
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        window.typeKey(.escape)
+        try await window.runUntilIdle()
+        #expect(!model.isOpenFlowVisible)
+    }
+
+    @Test func openFlowWhileDirtyAsksFirst() async throws {
+        let flow = URL(fileURLWithPath: "/repo/.flows/fix.flow")
+        let client = FakeEngineClient(repos: [repo], flowFiles: [flow])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        model.screen = .studio
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        try window.click(window.element(identifier: "openFlow.fix.flow"))
+        try await window.runUntilIdle()
+        #expect(model.pendingAction == .open(flow))
+        #expect(model.draft === draft)
+        #expect(window.presentedAlert != nil)
     }
 }

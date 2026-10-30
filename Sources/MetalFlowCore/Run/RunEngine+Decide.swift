@@ -21,6 +21,7 @@ extension RunEngine {
         case .needsYou(.question), .needsYou(.deniedTools), .interrupted: break
         default: throw RunEngineError.notAnswerable(node)
         }
+        suspended.remove(id)
         mutate(id) { run in
             var n = run.nodes[node] ?? NodeRun()
             n.pendingReply = reply
@@ -46,6 +47,7 @@ extension RunEngine {
             guard run.status == .needsYou, run.needsYou.isEmpty, !picking.contains(id) else {
                 throw RunEngineError.nothingToResume
             }
+            suspended.remove(id)
             mutate(id) { $0.status = .running }
             requestPass(id)
             return

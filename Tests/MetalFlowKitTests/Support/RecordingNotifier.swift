@@ -7,6 +7,7 @@ final class RecordingNotifier: Notifier, @unchecked Sendable {
         case authorize
         case post(id: String, title: String, body: String)
         case remove(id: String)
+        case removeAll
         case badge(Int)
     }
 
@@ -49,5 +50,6 @@ final class RecordingNotifier: Notifier, @unchecked Sendable {
     func requestAuthorization() async { record(.authorize) }
     func post(id: String, title: String, body: String) async { record(.post(id: id, title: title, body: body)) }
     func remove(id: String) async { record(.remove(id: id)) }
+    func removeAll() async { record(.removeAll) }
     func setBadge(_ count: Int) async { record(.badge(count)) }
 }

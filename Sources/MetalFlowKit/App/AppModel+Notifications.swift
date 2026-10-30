@@ -5,6 +5,7 @@ import MetalFlowCore
 enum NotifyCommand: Sendable {
     case post(id: String, title: String, body: String)
     case remove(String)
+    case removeAll
     case badge(Int)
     case barrier(CheckedContinuation<Void, Never>)
 }
@@ -15,10 +16,11 @@ extension AppModel {
         await withCheckedContinuation { notifyContinuation.yield(.barrier($0)) }
     }
 
-    /// Consumes the notifier queue in order. Started by `start()`.
-    func runNotifyQueue() async {
-        for await command in notifyStream {
+    /// Consumes the notifier queue in order.
+    nonisolated static func runNotifyQueue(_ stream: AsyncStream<NotifyCommand>, notifier: Notifier) async {
+        for await command in stream {
             switch command {
+            case .removeAll: await notifier.removeAll()
             case .post(let id, let title, let body): await notifier.post(id: id, title: title, body: body)
             case .remove(let id): await notifier.remove(id: id)
             case .badge(let n): await notifier.setBadge(n)
@@ -43,11 +45,29 @@ extension AppModel {
 
     /// Posts, removes and badges for a run that moved between buckets in a live update.
     func notifyTransition(_ run: Run, enteredNeedsYou: Bool, leftNeedsYou: Bool) {
-        if enteredNeedsYou, !(selectedRun == run.id && screen == .dashboard) {
-            enqueue(.post(id: run.id.rawValue, title: run.title, body: Self.notificationBody(for: run)))
+        if enteredNeedsYou {
+            let body = Self.notificationBody(for: run)
+            postedBodies[run.id] = body
+            post(run, body: body)
         }
-        if leftNeedsYou { enqueue(.remove(run.id.rawValue)) }
+        if leftNeedsYou {
+            postedBodies[run.id] = nil
+            enqueue(.remove(run.id.rawValue))
+        }
         if enteredNeedsYou || leftNeedsYou { enqueue(.badge(needsYou.count)) }
+    }
+
+    /// A run that stays in needs-you with a different reason posts again under the same id.
+    func notifyReasonChange(_ run: Run) {
+        let body = Self.notificationBody(for: run)
+        guard postedBodies[run.id] != body else { return }
+        postedBodies[run.id] = body
+        post(run, body: body)
+    }
+
+    private func post(_ run: Run, body: String) {
+        guard !isQuitting, !(selectedRun == run.id && screen == .dashboard) else { return }
+        enqueue(.post(id: run.id.rawValue, title: run.title, body: body))
     }
 
     /// Called when the run detail becomes visible: the notification has done its job.
@@ -55,29 +75,30 @@ extension AppModel {
         if screen == .dashboard, let id = selectedRun, runs[id] != nil { enqueue(.remove(id.rawValue)) }
     }
 
-    /// The notification text for a run: the first thing that waits on the user, in plan order.
+    /// The notification text for a run: what the run waits on (its first `needsYou` entry, in plan order), else an
+    /// interrupted node; a failed node only names the reason when the run itself failed (or nothing else applies).
     public static func notificationBody(for run: Run) -> String {
+        func title(_ key: NodeKey) -> String { run.flow.node(key.node)?.title ?? key.node.rawValue }
         let order = run.flow.nodes.map(\.id)
         let keys = run.nodes.keys.sorted {
             let (i, j) = (order.firstIndex(of: $0.node) ?? Int.max, order.firstIndex(of: $1.node) ?? Int.max)
             return i != j ? i < j : ($0.lane ?? "") < ($1.lane ?? "")
         }
-        for key in keys {
-            guard let state = run.nodes[key]?.state else { continue }
-            let title = run.flow.node(key.node)?.title ?? key.node.rawValue
-            switch state {
-            case .needsYou(.pickWinner(_, true)): return "Gate failed on every candidate"
-            case .needsYou(.pickWinner(let r, false)):
-                return r.map { "Judge recommends \($0) — pick a candidate" } ?? "Pick a candidate"
-            case .needsYou(.question(let q)):
+        func state(where match: (NodeState) -> Bool) -> NodeKey? { keys.first { run.nodes[$0].map { match($0.state) } ?? false } }
+        let failedKey = state { if case .failed = $0 { true } else { false } }
+        if case .failed = run.status, let key = failedKey { return "\(title(key)) failed — retry when ready" }
+        if let (key, reason) = run.needsYou.first {
+            switch reason {
+            case .pickWinner(_, true): return "Gate failed on every candidate"
+            case .pickWinner(let r, false): return r.map { "Judge recommends \($0) — pick a candidate" } ?? "Pick a candidate"
+            case .question(let q):
                 let line = q.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-                return "\(title) asks: \(String(line.prefix(120)))"
-            case .needsYou(.deniedTools(let tools)): return "\(title) needs permission: \(tools.joined(separator: ", "))"
-            case .interrupted: return "Interrupted — resume when ready"
-            case .failed: return "\(title) failed — retry when ready"
-            case .waiting, .running, .succeeded, .cancelled: continue
+                return "\(title(key)) asks: \(String(line.prefix(120)))"
+            case .deniedTools(let tools): return "\(title(key)) needs permission: \(tools.joined(separator: ", "))"
             }
         }
+        if state(where: { $0 == .interrupted }) != nil { return "Interrupted — resume when ready" }
+        if let key = failedKey { return "\(title(key)) failed — retry when ready" }
         return "Needs your attention"
     }
 }
