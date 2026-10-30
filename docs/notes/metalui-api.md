@@ -1,0 +1,54 @@
+# MetalUI API facts for MetalFlow (2026-10-30, MetalUI master 65e300a0)
+
+Source: a read of /Users/maxburger/Developer/MetalUI. `S/` = `Sources/MetalUI`. Verify signatures before relying on them.
+
+- **App/window:**
+  - `try App()`, then `openWindow(title:size:minSize:maxSize:windowResizability:windowStyle:startsDisplayLink:content:) throws -> Window` (S/App.swift:126). `content` returns ONE Element, is not a builder, and is re-run every frame. Then `app.run()` from sync top-level code.
+  - Model created at top level and passed in (Jotter main.swift:21-26).
+- **Commands:**
+  - `app.commands { CommandMenu("X") { Button("Y"){}.keyboardShortcut("n") } ; CommandGroup(after: .newItem) {…} }`. `KeyboardShortcut(_:modifiers: .primary)`.
+  - Quit: `app.onTerminateRequest: (() -> CloseRequestReply)?` (`.now/.cancel/.later`) and `app.replyToTerminateRequest(Bool)`.
+  - `Window.onCloseRequest`, `Window.title`.
+- **State:**
+  - `@Observable @MainActor final class` models are read during build and tracked. Pass as `let model` or use `.environment(model)` + `@Environment(M.self)`. `@State`, `Binding(get:set:)`. No `@Bindable`.
+  - `.task {}` and `.task(id:) {}` start on appear and are main-actor. Consume `for await` streams there.
+  - Tests: after async writes, `try await window.runUntilIdle()`.
+- **Layout:**
+  - `HStack/VStack(alignment:spacing:)`, `ZStack(alignment:)`, `Spacer`, `Divider`. Flex `Row/Column(gap:)`, `Box`, `Stack(alignment:)`.
+  - `.frame(width:height:)` and `.frame(minWidth:…maxHeight:)`, `.padding(Pixels | Edges)`, `.background(Color)`, `.border(_:width:)`, `.cornerRadius`, `.clipped()`, `.overlay(alignment:){}`.
+  - `.offset(x:y:)` moves hit testing too. There is no `.position(x:y:)`.
+  - `ScrollView(.vertical|.horizontal)` only, no 2D.
+  - `LazyVGrid(columns: [GridItem(.adaptive(minimum: 300))], spacing:)`. `ForEach(data, id:)`. `List(data, selection:)`.
+- **Controls:**
+  - `Button(_:role:action:)` with `.buttonStyle(.bordered|.borderless|.plain)`.
+  - `TextField(_:text:)`, with `.onSubmit`, `.focused($f)`.
+  - `TextEditor(_:text:)`. Monospace via `.font(family: "Menlo", size: 12)`.
+  - `Picker(_:selection:){ Text().tag() }` with `.pickerStyle(.menu|.segmented)`.
+  - `Slider(value:in:step:)`, `Toggle(_:isOn:)`, `Stepper(_:value:in:step:)`.
+  - `Menu(_:) {}`, `.contextMenu {}` (located form `{ loc in }`), `.popover(isPresented:)`, `.help("tip")`.
+  - `ProgressView(value:total:)`, `.alert`.
+- **Text:**
+  - `Text(String)` parses Markdown; use `Text(verbatim:)` for raw text. `Text(AttributedString)` supports per-run `foregroundColor/backgroundColor/font`.
+  - `Font.system(size:weight:design:)`, `Font.monospaced()`.
+  - Colours: `Color(Hsla.rgb(0xRRGGBB))`. `Color(hex:)` is becoming public (MetalUI request #5).
+- **Drawing:**
+  - `Path { p in p.move(to:); p.addCurve(to:control1:control2:); p.addEllipse(in:) }` with `.stroke(color, lineWidth:)` and `.fill`. Coordinates are local to the shape's frame.
+  - There is no Canvas; put all wires in one Path.
+  - `MetalView` and `GPUSurface` exist as escape hatches.
+- **Input:**
+  - `DragGesture(minimumDistance:coordinateSpace:button: .primary|.secondary|.middle)` with `.onChanged/.onEnded` (`startLocation, location, translation`). `MagnifyGesture`. `SpatialTapGesture` / `.onTapGesture(count:coordinateSpace:){loc in}`.
+  - `.onScrollWheel { ev in … return true }` (`delta`, `location`, `modifiers`). `.onHover`. `.onKeyPress(key){ .handled }` (needs `.focusable()`).
+  - `.coordinateSpace(.named("canvas"))`.
+- **CanvasDemo** (Sources/MetalUIDemoContent/CanvasDemo.swift): the reference for pan/zoom/selection.
+  - Nodes use `.offset(x: panX + x*zoom, …)`. Zoom is about the pointer: `panX = px - (px - panX0) * f`. ⌘-wheel zooms by `2^(dy/100)`. Middle/secondary drag pans.
+  - The grid is built from Box lines.
+- **Theme:** `struct K: ThemeColorKey { static let defaultValue = Color(light:dark:) }` with `Color(K.self)`. `app.preferredColorScheme = .dark`.
+- **Testing:**
+  - `TestWindow(size:colorScheme:) { root }` / `TestApp().openWindow(...)`.
+  - Input: `tick()`, `advance(by:)`, `runUntilIdle()`, `click(at:)`, `click(element)`, `drag(from:to:steps:)`, `scroll(at:byDeltaX:deltaY:)`, `typeText`, `typeKey(_:modifierFlags:)`.
+  - Lookup: `element(identifier:)` via `.accessibilityIdentifier("x")`. See Jotter Tests/Support.swift.
+- **Absent:**
+  - TabView: use a segmented Picker.
+  - Split panes, window activation, `.app` bundling: requested from MetalUI, in progress (HSplitView/VSplitView + `.splitViewAutosaveName`, `Window.makeKeyAndOrderFront()` / `App.activate()`, `metalui bundle --product --bundle-id`).
+  - Notifications: agreed MetalFlow calls `UNUserNotificationCenter` directly (bundle-guarded) and `NSApp.dockTile.badgeLabel`.
+- **Packaging (manual until `metalui bundle` lands):** MetalUI/docs/packaging.md. Copy `MetalUI_MetalUIRender.bundle` into `Contents/Resources`, then `codesign --force --sign -`.
