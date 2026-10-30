@@ -53,13 +53,17 @@ func run() async -> Int32 {
             try requirePositionals(args, min: 0, max: 0, name: command)
             let sorted = runs.sorted { $0.createdAt > $1.createdAt }
             if sorted.isEmpty { print("no runs") }
-            for r in sorted { print("\(r.id.rawValue)  \(statusText(r.status))  \(r.title)") }
+            for r in sorted {
+                let status = await engine.isRunningElsewhere(r.id) ? "running in another mflow" : statusText(r.status)
+                print("\(r.id.rawValue)  \(status)  \(r.title)")
+            }
             return 0
 
         case "show":
             try requirePositionals(args, min: 1, max: 1, name: command)
             let id = try parseRunID(args.positionals[0])
             guard let r = await engine.run(id) else { throw CommandFailure(message: "no run \(id.rawValue)") }
+            if await engine.isRunningElsewhere(id) { print("running in another mflow") }
             for line in runSummary(r) { print(line) }
             return 0
 
@@ -84,7 +88,7 @@ func run() async -> Int32 {
         case "pick":
             try requirePositionals(args, min: 2, max: 2, name: command)
             let id = try parseRunID(args.positionals[0])
-            let result = try await engine.pick(id, lane: args.positionals[1])
+            let result = try await uninterruptible { try await engine.pick(id, lane: args.positionals[1]) }
             print(mergeResultText(result))
             if case .merged = result { return 0 }
             return 1
@@ -92,14 +96,16 @@ func run() async -> Int32 {
         case "discard":
             try requirePositionals(args, min: 1, max: 1, name: command)
             let id = try parseRunID(args.positionals[0])
-            try await engine.discard(id)
+            try await uninterruptible { try await engine.discard(id) }
             print("discarded \(id.rawValue)")
             return 0
 
         default: // branch
             try requirePositionals(args, min: 3, max: 3, name: command)
             let id = try parseRunID(args.positionals[0])
-            try await engine.branchFromHere(id, lane: args.positionals[1], name: args.positionals[2])
+            try await uninterruptible {
+                try await engine.branchFromHere(id, lane: args.positionals[1], name: args.positionals[2])
+            }
             print("kept branch \(args.positionals[2])")
             return 0
         }

@@ -8,7 +8,7 @@ usage: mflow <command> [options]
 commands:
   init-flow [--repo DIR]                          write .flows/fix-issue.flow (refuses to overwrite)
   launch <issue> [--repo DIR] [--flow FILE]       start a run for a GitHub issue and follow it
-  list                                            id  status  title, newest first
+  list                                            id  status  title, newest first ("running in another mflow" if locked)
   show <id>                                       nodes, needs-you items, lanes, recommendation
   answer <id> <nodeKey> [--] <reply...> [--allow Tool]
                                                   answer a paused node (-- ends options) and follow the run
@@ -19,7 +19,8 @@ commands:
 
 Runs execute only while an mflow command is running: launch, answer and resume
 stay alive until the run settles (needs you, completed, failed or cancelled).
-Press Ctrl-C to cancel the run (exit 130).
+Press Ctrl-C (or send SIGTERM/SIGHUP) to cancel a running run (exit 130). pick, discard and branch
+ignore these signals until they finish.
 
 --repo defaults to the git top-level of the current directory; --flow defaults to
 <repo>/.flows/fix-issue.flow. Set METALFLOW_HOME to use another run store.
@@ -168,21 +169,45 @@ func parseRunID(_ s: String) throws -> RunID {
 
 // MARK: - Following a run
 
+/// Routes the given signals to `handler` through dispatch sources (the default action is suppressed meanwhile).
+func handleSignals(_ signals: [Int32], _ handler: @escaping @Sendable () -> Void) -> [DispatchSourceSignal] {
+    signals.map { sig in
+        signal(sig, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+        source.setEventHandler(handler: handler)
+        source.resume()
+        return source
+    }
+}
+
+/// Runs a short, must-finish operation (pick, discard, branch) with SIGINT, SIGTERM and SIGHUP ignored, so the
+/// repository cannot be left mid-merge. A signal that arrives meanwhile only prints a notice.
+func uninterruptible<T>(_ body: () async throws -> T) async rethrows -> T {
+    let sources = handleSignals([SIGINT, SIGTERM, SIGHUP]) {
+        stderrPrint("finishing… (Ctrl-C ignored)")
+    }
+    defer {
+        sources.forEach { $0.cancel() }
+        for sig in [SIGINT, SIGTERM, SIGHUP] { signal(sig, SIG_DFL) }
+    }
+    return try await body()
+}
+
 /// Prints node state changes until the run leaves `.running`; returns the exit code.
-/// SIGINT cancels the run, waits for it to settle, prints "cancelled" and returns 130.
+/// SIGINT, SIGTERM or SIGHUP cancels a running run, waits for it to settle, prints "cancelled" and returns 130.
 func follow(engine: RunEngine, id: RunID, seed: Run?) async -> Int32 {
     var last: [NodeKey: NodeState] = seed?.nodes.mapValues(\.state) ?? [:]
     var lastStatus: RunStatus? = seed?.status
     let interrupted = OSAllocatedUnfairLock(initialState: false)
 
-    signal(SIGINT, SIG_IGN)
-    let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
-    source.setEventHandler {
+    // Ctrl-C, kill and a closing terminal all cancel the run and let it settle. Once the first signal has been
+    // handled the default disposition returns, so a second one ends mflow at once.
+    let sources = handleSignals([SIGINT, SIGTERM, SIGHUP]) {
         interrupted.withLock { $0 = true }
         Task { await engine.cancel(id) }
+        for sig in [SIGINT, SIGTERM, SIGHUP] { signal(sig, SIG_DFL) }
     }
-    source.resume()
-    defer { source.cancel() }
+    defer { sources.forEach { $0.cancel() } }
 
     func report(_ run: Run) {
         for (key, node) in run.nodes.sorted(by: { $0.key.description < $1.key.description })
@@ -208,7 +233,7 @@ func follow(engine: RunEngine, id: RunID, seed: Run?) async -> Int32 {
 }
 
 private func finish(_ engine: RunEngine, _ id: RunID, _ run: Run, _ interrupted: OSAllocatedUnfairLock<Bool>) async -> Int32 {
-    if interrupted.withLock({ $0 }) {
+    if interrupted.withLock({ $0 }), run.status == .cancelled {
         await engine.waitUntilSettled(id)
         print("cancelled")
         return 130
