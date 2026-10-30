@@ -52,3 +52,4 @@ Source: a read of /Users/maxburger/Developer/MetalUI. `S/` = `Sources/MetalUI`. 
   - Split panes, window activation, `.app` bundling: requested from MetalUI, in progress (HSplitView/VSplitView + `.splitViewAutosaveName`, `Window.makeKeyAndOrderFront()` / `App.activate()`, `metalui bundle --product --bundle-id`).
   - Notifications: agreed MetalFlow calls `UNUserNotificationCenter` directly (bundle-guarded) and `NSApp.dockTile.badgeLabel`.
 - **Packaging (manual until `metalui bundle` lands):** MetalUI/docs/packaging.md. Copy `MetalUI_MetalUIRender.bundle` into `Contents/Resources`, then `codesign --force --sign -`.
+- **Menu Pickers in tests:** `window.click(picker)` → `window.presentedMenu` (`PlatformMenu`, `.items` with title/checked/enabled) → `window.chooseMenuItem("Title")` (throws `noMenuItem`/`disabledMenuItem`) or `window.dismissMenu()`. History: `window.platformWindow.presentedMenus`. Example: MetalUI `Tests/MetalUITestingTests/MenuAnchorTests.swift`.
