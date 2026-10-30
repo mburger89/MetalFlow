@@ -160,4 +160,9 @@ struct CommandRunnerTests {
         let url = try await ExecutableResolver(searchPath: ["/nonexistent", "/bin"]).resolve("sh")
         #expect(url.path == "/bin/sh")
     }
+
+    @Test func resolverExposesSearchPath() async {
+        let dirs = await ExecutableResolver(searchPath: ["/a", "/b"]).searchPath()
+        #expect(dirs == ["/a", "/b"])
+    }
 }

@@ -73,17 +73,20 @@ extension CommandRunner {
 
 /// Finds executables on a search path, defaulting to the login shell's PATH.
 public actor ExecutableResolver {
-    private var searchPath: [String]?
+    private var cachedPath: [String]?
 
     /// Creates a resolver; a nil `searchPath` is read lazily from the login shell.
     public init(searchPath: [String]? = nil) {
-        self.searchPath = searchPath
+        self.cachedPath = searchPath
     }
+
+    /// The directories executables are resolved against (loading the login shell's PATH on first use).
+    public func searchPath() async -> [String] { await loadSearchPath() }
 
     /// Resolves a program name to an executable file URL.
     public func resolve(_ name: String) async throws -> URL {
         if name.hasPrefix("/") { return URL(fileURLWithPath: name) }
-        let dirs = await loadSearchPath()
+        let dirs = await searchPath()
         for dir in dirs {
             let path = (dir as NSString).appendingPathComponent(name)
             var isDir: ObjCBool = false
@@ -96,12 +99,12 @@ public actor ExecutableResolver {
     }
 
     private func loadSearchPath() async -> [String] {
-        if let searchPath { return searchPath }
+        if let cachedPath { return cachedPath }
         let shellPath = await Self.loginShellPath()
-        if let searchPath { return searchPath }
+        if let cachedPath { return cachedPath }
         let loaded = shellPath ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
         let dirs = loaded.split(separator: ":").map(String.init)
-        searchPath = dirs
+        cachedPath = dirs
         return dirs
     }
 

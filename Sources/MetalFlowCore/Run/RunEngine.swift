@@ -221,6 +221,9 @@ public actor RunEngine {
         mutate(id) { $0.status = .completed }
     }
 
+    /// Suspends until the run's background execution (including a pass interrupted by `cancel`) has fully ended.
+    public func waitUntilSettled(_ id: RunID) async { await waitForPass(id) }
+
     /// Waits for the run's current execution pass (including any requested rerun) to end.
     func waitForPass(_ id: RunID) async {
         if let task = tasks[id] { await task.value }
