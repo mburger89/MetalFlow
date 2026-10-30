@@ -16,11 +16,15 @@ final class FakeAgent: AgentSession {
     private struct State {
         var scripts: [Script] = []
         var requests: [AgentRequest] = []
+        var cancelledCount = 0
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     init() {}
+
+    /// How many sessions were cut short by cancellation.
+    var cancelledCount: Int { state.withLock { $0.cancelledCount } }
 
     /// Every request passed to `run`, in order.
     var requests: [AgentRequest] { state.withLock { $0.requests } }
@@ -59,6 +63,7 @@ final class FakeAgent: AgentSession {
                     }
                     continuation.finish()
                 } catch {
+                    if error is CancellationError { state.withLock { $0.cancelledCount += 1 } }
                     continuation.finish(throwing: error)
                 }
             }

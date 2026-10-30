@@ -60,7 +60,11 @@ public actor RunEngine {
 
     /// Starts a run of `flow` in `repo` and returns immediately; execution continues in the background.
     public func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
-        do { _ = try flow.validate() } catch { throw RunEngineError.invalid(error) }
+        let plan: FlowPlan
+        do { plan = try flow.validate() } catch { throw RunEngineError.invalid(error) }
+        if let fan = plan.fanOut, case .prompt(let c)? = flow.node(fan)?.kind, c.candidates.count > 26 {
+            throw RunEngineError.tooManyCandidates(c.candidates.count)
+        }
         let inputNodes = flow.nodes.compactMap { node -> (Node, FlowInputConfig)? in
             if case .flowInput(let c) = node.kind { return (node, c) }
             return nil
@@ -196,20 +200,13 @@ public actor RunEngine {
                 return
             }
         }
-        if let plan = try? run.flow.validate(), isComplete(run, plan: plan) {
-            mutate(id) { $0.status = .completed }
-        }
+        // The pass ended with nothing runnable left and nothing waiting on the user; failed lanes count as finished.
+        mutate(id) { $0.status = .completed }
     }
 
-    private func isComplete(_ run: Run, plan: FlowPlan) -> Bool {
-        run.flow.nodes.allSatisfy { node in
-            if plan.laneScoped.contains(node.id) {
-                return !run.lanes.isEmpty && run.lanes.allSatisfy {
-                    run.nodes[NodeKey(node: node.id, lane: $0.id)]?.state == .succeeded
-                }
-            }
-            return run.nodes[NodeKey(node: node.id)]?.state == .succeeded
-        }
+    /// Waits for the run's current execution pass (including any requested rerun) to end.
+    func waitForPass(_ id: RunID) async {
+        if let task = tasks[id] { await task.value }
     }
 
     private func execute(_ id: RunID) async throws {
@@ -303,6 +300,7 @@ public actor RunEngine {
         guard config.candidates.count <= 26 else { throw RunEngineError.tooManyCandidates(config.candidates.count) }
         _ = try await git.commitAll(worktree: run.worktree, message: "MetalFlow: before fan-out")
         for (index, model) in config.candidates.enumerated() {
+            try Task.checkCancellation()
             let laneID = String(UnicodeScalar(UInt8(97 + index)))
             let branch = BranchNaming.laneBranch(run: run.branch, lane: laneID)
             let path = store.worktreesDirectory.appendingPathComponent(id.rawValue).appendingPathComponent(laneID)

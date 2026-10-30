@@ -117,11 +117,40 @@ import Testing
         let run = await h.settled(id)
         #expect(run.status == .cancelled)
         #expect(run.nodes[NodeKey(node: "plan")]?.state == .cancelled)
-        // The pass has stopped writing: nothing is left running and a second cancel changes nothing.
-        let after = await h.engine.run(id)
-        #expect(after?.nodes.values.contains { $0.state == .running } == false)
-        await h.engine.cancel(id)
-        #expect(await h.engine.run(id) == after)
+        await h.engine.waitForPass(id)
+        #expect(await h.engine.tasks[id] == nil)
+        while h.agent.cancelledCount == 0 { await Task.yield() }
+        #expect(h.agent.cancelledCount == 1)
+        #expect(await h.engine.run(id)?.nodes.values.contains { $0.state == .running } == false)
+    }
+
+    @Test func pickLessFlowWithOneFailedLaneCompletes() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "c" },
+                       events: [.finished(AgentResult(sessionID: "c", text: "boom", isError: true, deniedTools: [], costUSD: 0, turns: 1))])
+        let flow = Flow(name: "nopick", nodes: [
+            Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
+                model: "sonnet", prompt: "Fix this GitHub issue", candidates: ["a", "b", "c"],
+                allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0)),
+            Node(id: "gate", title: "Gate", kind: .gate(ShellConfig(command: "test -f ok.txt")), position: Point(x: 1, y: 0)),
+        ], wires: [Wire(from: "implement", to: "gate", input: "code")])
+        let id = try await h.engine.launch(flow: flow, repo: h.repo.url, input: "")
+        let run = await h.settled(id)
+        #expect(run.status == .completed)
+        #expect(run.nodes[NodeKey(node: "implement", lane: "c")]?.state == .failed("boom"))
+    }
+
+    @Test func tooManyCandidatesRejectedAtLaunch() async throws {
+        let h = try Harness()
+        let flow = Flow(name: "many", nodes: [
+            Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
+                model: "sonnet", prompt: "x", candidates: (0..<27).map { "m\($0)" },
+                allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0)),
+        ], wires: [])
+        await #expect(throws: RunEngineError.tooManyCandidates(27)) {
+            _ = try await h.engine.launch(flow: flow, repo: h.repo.url, input: "")
+        }
+        #expect(try h.repo.git(["worktree", "list"]).split(separator: "\n").count == 1)
     }
 
     @Test func flowWithoutPickCompletes() async throws {
