@@ -79,10 +79,14 @@ import Testing
         _ = try window.element(identifier: "inspector.empty")
         try await press("node.plan", in: window)
         #expect(model.draft?.selection == "plan")
-        #expect(try window.element(identifier: "inspector.title").value == "Plan")
+        // The title is an editable field (its identifier is on the field's container, which has no value).
+        _ = try window.element(identifier: "inspector.title")
+        #expect(try window.element(identifier: "inspector.id").value == "plan")
+        #expect(model.draft?.flow.node("plan")?.title == "Plan")
         try await press("node.judge", in: window)
         #expect(model.draft?.selection == "judge")
-        #expect(try window.element(identifier: "inspector.title").value == "Recommend")
+        #expect(try window.element(identifier: "inspector.id").value == "judge")
+        #expect(model.draft?.flow.node("judge")?.title == "Recommend")
     }
 
     @Test func canvasFitsOnFirstShowAndFitButtonRestores() async throws {
@@ -142,9 +146,11 @@ import Testing
         try await showStudio(model, window)
         _ = try window.element(identifier: "studio.runPicker")
         #expect(model.studioRuns.map(\.title) == ["#7 lanes", "older"])
-        // Headless, a click on the menu picker takes its first run option (its items are not separate elements).
-        // That is the newest run of this flow and repo, not the newer ones from another repo or flow.
+        // The rendered menu lists the definition and only the runs of this flow and repo, newest first.
         try window.click(window.element(identifier: "studio.runPicker"))
+        let menu = try #require(window.presentedMenu)
+        #expect(menu.items.map(\.title) == ["Definition only", "Showing #7 lanes", "Showing older"])
+        try window.chooseMenuItem("Showing #7 lanes")
         try await window.runUntilIdle()
         #expect(model.studioRun == newest.id)
     }
@@ -268,14 +274,14 @@ import Testing
         let (model, client, window) = try await fixture()
         try await showStudio(model, window)
         #expect(try window.element(identifier: "studio.save").isEnabled)
-        #expect((try? window.element(identifier: "studio.error")) == nil)
+        #expect((try? window.element(identifier: "studio.validation")) == nil)
         let draft = try #require(model.draft)
         draft.edit("unwire") { $0.wires.removeAll() }
         model.studioIssue = "42"
         try await window.runUntilIdle()
         #expect(try window.element(identifier: "studio.save").isEnabled == false)
         #expect(try window.element(identifier: "studio.launch").isEnabled == false)
-        _ = try window.element(identifier: "studio.error")
+        _ = try window.element(identifier: "studio.validation")
         #expect(await model.saveDraft() == false)
         #expect(await model.launchFromStudio() == nil)
         #expect(client.files.saved.isEmpty)

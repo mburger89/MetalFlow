@@ -16,7 +16,8 @@ struct CanvasView: Component {
         let draft = draft
         ZStack(alignment: .topLeading) {
             DotGrid(geometry: g, size: size)
-            WireLayer(flow: draft.flow, geometry: g, selection: draft.selection, size: size)
+            WireLayer(flow: draft.flow, geometry: g, selection: draft.selection, selectedWire: draft.selectedWire,
+                      pending: draft.pendingWire, size: size)
             ForEach(draft.flow.nodes, id: \.id) { node in
                 NodeCardView(
                     node: node, geometry: g, selected: draft.selection == node.id,
@@ -27,6 +28,10 @@ struct CanvasView: Component {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(Hsla.rgb(0x101215)))
         .clipped()
+        .overlay(alignment: .topLeading) {
+            // Marks the canvas's origin (a container's identifier would replace those inside it).
+            Spacer().frame(width: 0, height: 0).accessibilityIdentifier("canvas")
+        }
         .overlay(alignment: .bottomTrailing) {
             HStack(spacing: Spacing.xs) {
                 Text(verbatim: "\(Int((g.zoom * 100).rounded()))%").font(size: 12).foregroundColor(Palette.body)
@@ -47,12 +52,33 @@ struct CanvasView: Component {
         .gesture(MagnifyGesture()
             .onChanged { draft.pinchChanged($0) }
             .onEnded { draft.pinchEnded($0) })
+        .focusable(true, interactions: .edit)
+        .onKeyPress { Self.key($0, draft) }
+        .gesture(DragGesture(minimumDistance: Pixels(3))
+            .onChanged { draft.primaryDragChanged($0) }
+            .onEnded { draft.primaryDragEnded($0) })
         .gesture(DragGesture(button: .middle)
             .onChanged { draft.panChanged($0) }
             .onEnded { _ in draft.panStart = nil })
         .gesture(DragGesture(button: .secondary)
             .onChanged { draft.panChanged($0) }
             .onEnded { _ in draft.panStart = nil })
+    }
+
+    /// Delete and Backspace remove the selection; ⌘Z undoes, ⇧⌘Z redoes. Only reached while the canvas has focus,
+    /// so typing in an inspector field never lands here.
+    @MainActor
+    static func key(_ press: KeyPress, _ draft: FlowDraft) -> KeyPress.Result {
+        if press.key == .delete || press.key == .deleteForward {
+            guard draft.selection != nil || draft.selectedWire != nil else { return .ignored }
+            draft.deleteSelection()
+            return .handled
+        }
+        if press.key.character.lowercased() == "z", press.modifiers.contains(.command) {
+            if press.modifiers.contains(.shift) { draft.redo() } else { draft.undo() }
+            return .handled
+        }
+        return .ignored
     }
 
     /// ⌘ or ⌃ zooms by `2^(Δy/100)` about the pointer; anything else pans.
@@ -69,9 +95,57 @@ struct CanvasView: Component {
 }
 
 extension FlowDraft {
-    /// Selects the node under a canvas-local screen point, or clears the selection.
+    /// Selects the node under a canvas-local screen point, else the wire near it, else clears the selection.
     func select(at location: ScreenPoint) {
-        selection = geometry.hitNode(at: geometry.toCanvas(location), in: flow)
+        if let id = geometry.hitNode(at: geometry.toCanvas(location), in: flow) {
+            selection = id
+        } else if let wire = geometry.hitWire(at: location, in: flow) {
+            selectedWire = wire
+        } else {
+            selection = nil
+            selectedWire = nil
+        }
+    }
+
+    /// A primary drag: on an out-port it draws a wire, on a node it moves it, on empty canvas it pans.
+    func primaryDragChanged(_ value: DragGesture.Value) {
+        if dragMode == nil {
+            let start = geometry.toCanvas(value.startLocation)
+            if let (id, side) = geometry.hitPort(at: start, in: flow), side == .output {
+                dragMode = .wire(id)
+            } else if let id = geometry.hitNode(at: start, in: flow), let node = flow.node(id) {
+                dragMode = .move(id, origin: node.position)
+                dragStartFlow = flow
+                selection = id
+            } else {
+                dragMode = .pan
+            }
+        }
+        switch dragMode {
+        case .move(let id, let origin):
+            let z = geometry.zoom
+            moveLive(id, to: CanvasPoint(x: origin.x + Double(value.translation.width.value) / z,
+                                         y: origin.y + Double(value.translation.height.value) / z))
+        case .wire(let id):
+            pendingWire = (id, value.location)
+        case .pan, nil:
+            panChanged(value)
+        }
+    }
+
+    func primaryDragEnded(_ value: DragGesture.Value) {
+        switch dragMode {
+        case .move:
+            finishMove()
+        case .wire(let from):
+            pendingWire = nil
+            if let (to, side) = geometry.hitPort(at: geometry.toCanvas(value.location), in: flow), side == .input {
+                connect(from: from, to: to)
+            }
+        case .pan, nil:
+            panStart = nil
+        }
+        dragMode = nil
     }
 
     func panChanged(_ value: DragGesture.Value) {

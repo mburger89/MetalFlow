@@ -53,3 +53,7 @@ Source: a read of /Users/maxburger/Developer/MetalUI. `S/` = `Sources/MetalUI`. 
   - Notifications: agreed MetalFlow calls `UNUserNotificationCenter` directly (bundle-guarded) and `NSApp.dockTile.badgeLabel`.
 - **Packaging (manual until `metalui bundle` lands):** MetalUI/docs/packaging.md. Copy `MetalUI_MetalUIRender.bundle` into `Contents/Resources`, then `codesign --force --sign -`.
 - **Menu Pickers in tests:** `window.click(picker)` → `window.presentedMenu` (`PlatformMenu`, `.items` with title/checked/enabled) → `window.chooseMenuItem("Title")` (throws `noMenuItem`/`disabledMenuItem`) or `window.dismissMenu()`. History: `window.platformWindow.presentedMenus`. Example: MetalUI `Tests/MetalUITestingTests/MenuAnchorTests.swift`.
+- **Editing quirks (Task 6):**
+  - A menu `Picker` needs `.pickerStyle(.menu)` for `window.click` to present a menu, and a non-empty title adds a second element with the same identifier, so use `Picker("", ...)` with your own label.
+  - A `TextField`'s identifier lands on a valueless group: assert the model, not `.value`. Click its right edge to put the caret at the end.
+  - Keys: `.focusable(true, interactions: .edit)` plus `.onKeyPress` gets keys only while the canvas is focused. ⇧⌘Z arrives with `key` uppercased ("Z"); compare lowercased.

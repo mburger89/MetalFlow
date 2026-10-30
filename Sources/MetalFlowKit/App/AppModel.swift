@@ -69,6 +69,8 @@ public final class AppModel {
     public internal(set) var workingOn: [WorkingItem] = []
     /// The banner, if any.
     public var notice: Notice?
+    /// A flow the user asked to open while the draft has unsaved edits; the Save / Discard / Cancel alert is up.
+    public internal(set) var pendingOpen: URL?
     /// Runs waiting for the user, newest first. Cached: updated by `apply`.
     public private(set) var needsYou: [Run] = []
     /// Runs being executed, newest first. Cached.
@@ -250,6 +252,14 @@ public final class AppModel {
     /// Remembers an open flow, loads it into the Studio and shows the Studio. A flow that is already the
     /// draft keeps its draft. A load error becomes a notice and the screen stays.
     public func open(flow url: URL) {
+        if let draft, draft.isDirty, draft.url != url {
+            pendingOpen = url
+            return
+        }
+        openWithoutAsking(url)
+    }
+
+    func openWithoutAsking(_ url: URL) {
         if !workingOn.contains(.flow(url)) { workingOn.append(.flow(url)) }
         loadDraft(from: url)
     }

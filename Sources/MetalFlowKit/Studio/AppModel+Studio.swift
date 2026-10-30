@@ -77,6 +77,30 @@ extension AppModel {
         ensureDraft()
     }
 
+    /// The user's answer to the unsaved-edits alert.
+    public enum PendingOpenChoice: Sendable {
+        /// Save the draft, then open the flow.
+        case save
+        /// Throw the edits away and open the flow.
+        case discard
+        /// Stay on the draft.
+        case cancel
+    }
+
+    /// Resolves a pending open of `url`: Save saves first (and stays put, with a notice, if that fails).
+    public func resolvePendingOpen(_ url: URL, _ choice: PendingOpenChoice) async {
+        pendingOpen = nil
+        switch choice {
+        case .cancel:
+            return
+        case .discard:
+            openWithoutAsking(url)
+        case .save:
+            if !draftIsValid { notice = Notice("Fix the flow's errors before saving it."); return }
+            if await saveDraft() { openWithoutAsking(url) }
+        }
+    }
+
     /// Whether the draft can be saved or launched.
     public var draftIsValid: Bool {
         if let draft, case .success = draft.validation { return true }

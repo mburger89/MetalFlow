@@ -120,6 +120,35 @@ struct CanvasGeometry: Equatable {
         return nil
     }
 
+    /// The wire passing within `tolerance` screen points of a canvas-local screen point, sampling each cubic.
+    /// Later wires win.
+    func hitWire(at screen: ScreenPoint, in flow: Flow, tolerance: Double = 6) -> Wire? {
+        let px = Double(screen.x.value), py = Double(screen.y.value)
+        func distance(_ a: ScreenPoint, _ b: ScreenPoint) -> Double {
+            let ax = Double(a.x.value), ay = Double(a.y.value), bx = Double(b.x.value), by = Double(b.y.value)
+            let dx = bx - ax, dy = by - ay
+            let len2 = dx * dx + dy * dy
+            let t = len2 == 0 ? 0 : min(max(((px - ax) * dx + (py - ay) * dy) / len2, 0), 1)
+            let cx = ax + t * dx - px, cy = ay + t * dy - py
+            return (cx * cx + cy * cy).squareRoot()
+        }
+        for wire in flow.wires.reversed() {
+            guard let from = flow.node(wire.from), let to = flow.node(wire.to) else { continue }
+            let (a, c1, c2, b) = wirePath(from: outPort(from), to: inPort(to))
+            let steps = 24
+            var previous = toScreen(a)
+            for i in 1...steps {
+                let t = Double(i) / Double(steps), u = 1 - t
+                let x = u * u * u * a.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * b.x
+                let y = u * u * u * a.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * b.y
+                let next = toScreen(CanvasPoint(x: x, y: y))
+                if distance(previous, next) <= tolerance { return wire }
+                previous = next
+            }
+        }
+        return nil
+    }
+
     /// A geometry whose projection of every node lies inside `size` with a 40 point margin, centred.
     /// A flow with no nodes gives the identity view.
     func fit(_ flow: Flow, in size: Size<Pixels>) -> CanvasGeometry {

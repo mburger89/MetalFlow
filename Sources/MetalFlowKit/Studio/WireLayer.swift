@@ -7,14 +7,20 @@ struct WireLayer: Component {
     let flow: Flow
     let geometry: CanvasGeometry
     let selection: NodeID?
+    var selectedWire: Wire?
+    var pending: (from: NodeID, to: ScreenPoint)?
     let size: Size<Pixels>
 
     var content: some ElementGroup {
-        let paths = Self.paths(flow: flow, geometry: geometry, selection: selection)
+        let paths = Self.paths(flow: flow, geometry: geometry, selection: selection, selectedWire: selectedWire)
         ZStack(alignment: .topLeading) {
             paths.all.stroke(Palette.muted.opacity(0.55), lineWidth: Pixels(2))
             if !paths.selected.isEmpty {
                 paths.selected.stroke(Palette.accent, lineWidth: Pixels(2))
+            }
+            if let pending, let from = flow.node(pending.from) {
+                Self.pendingPath(from: geometry.toScreen(geometry.outPort(from)), to: pending.to)
+                    .stroke(Palette.accent.opacity(0.7), lineWidth: Pixels(2))
             }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
@@ -22,13 +28,14 @@ struct WireLayer: Component {
     }
 
     /// The wire paths, split by whether they touch the selection, and the port circles.
-    static func paths(flow: Flow, geometry g: CanvasGeometry, selection: NodeID?) -> (all: Path, selected: Path) {
+    static func paths(flow: Flow, geometry g: CanvasGeometry, selection: NodeID?,
+                      selectedWire: Wire? = nil) -> (all: Path, selected: Path) {
         var all = Path(), selected = Path()
         for wire in flow.wires {
             guard let from = flow.node(wire.from), let to = flow.node(wire.to) else { continue }
             let (a, c1, c2, b) = g.wirePath(from: g.outPort(from), to: g.inPort(to))
             let (sa, s1, s2, sb) = (g.toScreen(a), g.toScreen(c1), g.toScreen(c2), g.toScreen(b))
-            let touches = selection != nil && (wire.from == selection || wire.to == selection)
+            let touches = (selection != nil && (wire.from == selection || wire.to == selection)) || wire == selectedWire
             if touches {
                 selected.move(to: sa); selected.addCurve(to: sb, control1: s1, control2: s2)
             } else {
@@ -36,6 +43,17 @@ struct WireLayer: Component {
             }
         }
         return (all, selected)
+    }
+}
+
+extension WireLayer {
+    /// The wire being dragged: the usual S-curve from the out-port to the pointer.
+    static func pendingPath(from a: ScreenPoint, to b: ScreenPoint) -> Path {
+        var path = Path()
+        let mid = Pixels((a.x.value + b.x.value) / 2)
+        path.move(to: a)
+        path.addCurve(to: b, control1: ScreenPoint(x: mid, y: a.y), control2: ScreenPoint(x: mid, y: b.y))
+        return path
     }
 }
 

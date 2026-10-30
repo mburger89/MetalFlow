@@ -16,6 +16,16 @@ public struct RootView: Component {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
         .task { await model.start() }
+        .alert("Save changes to this flow?", isPresented: Binding(
+            get: { model.pendingOpen != nil },
+            set: { if !$0 { model.pendingOpen = nil } })) {
+            let target = model.pendingOpen
+            Button("Save") { if let target { Task { await model.resolvePendingOpen(target, .save) } } }
+            Button("Discard", role: .destructive) { if let target { Task { await model.resolvePendingOpen(target, .discard) } } }
+            Button("Cancel", role: .cancel) { model.pendingOpen = nil }
+        } message: {
+            Text("The open flow has unsaved edits.")
+        }
     }
 }
 
