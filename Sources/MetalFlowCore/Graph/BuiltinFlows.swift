@@ -12,13 +12,13 @@ public enum BuiltinFlows {
                 model: "opus",
                 prompt: "Read this GitHub issue and the code in this repository ({repo}), then write a short numbered plan to fix it. Do not edit files.\n\nIssue:\n{issue}",
                 candidates: [],
-                allowedTools: ["Read", "Grep", "Glob"],
+                allowedTools: ["Read", "Grep", "Glob", "Bash(git ls-files:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)"],
                 maxTurns: nil)), position: Point(x: 264, y: 140)),
             Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
                 model: "sonnet",
                 prompt: "Fix this GitHub issue by following the plan. Keep the public API unchanged, add a test that fails before your change, and stop when swift test passes.\n\nIssue:\n{issue}\n\nPlan:\n{plan}",
                 candidates: ["sonnet", "opus", "haiku"],
-                allowedTools: ["Read", "Edit", "Write", "Grep", "Glob", "Bash(swift build:*)", "Bash(swift test:*)"],
+                allowedTools: ["Read", "Edit", "Write", "Grep", "Glob", "Bash(swift build:*)", "Bash(swift test:*)", "Bash(git ls-files:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)"],
                 maxTurns: nil)), position: Point(x: 504, y: 185)),
             Node(id: "gate", title: "swift test", kind: .gate(ShellConfig(command: "swift test")), position: Point(x: 744, y: 185)),
             Node(id: "judge", title: "Recommend", kind: .judge(PromptConfig(
