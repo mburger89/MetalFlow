@@ -72,6 +72,12 @@ public actor RunEngine {
     var tasks: [RunID: Task<Void, Never>] = [:]
     var rerunRequested: Set<RunID> = []
     var picking: Set<RunID> = []
+    /// Run locks this engine holds: while a pass, pick, discard or branch is in progress for the run.
+    var locks: [RunID: RunLock] = [:]
+    /// Operations (discard, branch) that need the run lock but have no task of their own.
+    var deciding: Set<RunID> = []
+    /// Background cleanups started by `restore()`.
+    var restoreCleanups: [Task<Void, Never>] = []
 
     /// Creates an engine. `shellEnvironment` is merged into the environment of shell and gate nodes.
     public init(store: RunStore, runner: any CommandRunner, agent: any AgentSession, issues: GitHubIssues,
@@ -86,11 +92,40 @@ public actor RunEngine {
         (updates, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .bufferingNewest(256))
     }
 
-    /// Loads persisted runs into memory and returns them; does not start any execution.
+    /// Loads persisted runs into memory and returns them; does not start any run.
+    ///
+    /// A merged or discarded run whose worktree folder still exists (the process died during cleanup) has its
+    /// cleanup finished in the background; that work is not cancellable.
     public func restore() throws -> [Run] {
         let loaded = try store.loadAll()
-        for run in loaded { runs[run.id] = run }
+        for run in loaded {
+            runs[run.id] = run
+            switch run.status {
+            case .merged, .discarded:
+                let directory = store.worktreesDirectory.appendingPathComponent(run.id.rawValue)
+                if FileManager.default.fileExists(atPath: directory.path) {
+                    let id = run.id
+                    restoreCleanups.append(Task { await self.finishInterruptedCleanup(id) })
+                }
+            default: break
+            }
+        }
         return loaded
+    }
+
+    /// Waits for the cleanups that `restore()` started.
+    func waitForRestoreCleanups() async {
+        for task in restoreCleanups { await task.value }
+    }
+
+    private func finishInterruptedCleanup(_ id: RunID) async {
+        guard (try? ensureLock(id)) != nil else { return }
+        deciding.insert(id)
+        defer {
+            deciding.remove(id)
+            releaseLockIfIdle(id)
+        }
+        await cleanup(id)
     }
 
     /// The current state of a run.
@@ -136,6 +171,8 @@ public actor RunEngine {
         let branch = BranchNaming.runBranch(
             issue: issue?.number, title: issue?.title ?? title, existing: try await git.branches(repo: repo))
         let id = RunID()
+        try ensureLock(id)
+        defer { releaseLockIfIdle(id) }
         let worktree = store.worktreesDirectory.appendingPathComponent(id.rawValue).appendingPathComponent("run")
         try store.addKnownRepo(repo)
         try await git.addWorktree(repo: repo, path: worktree, newBranch: branch, from: base)
@@ -152,7 +189,8 @@ public actor RunEngine {
     /// Cancels a running run: stops its task, marks running nodes and the run cancelled. Worktrees are kept.
     /// A run that is not `.running` (waiting for you, completed, failed, merged...) is left alone.
     public func cancel(_ id: RunID) {
-        guard var run = runs[id], run.status == .running else { return }
+        // Only a run this engine drives: a running run whose lock another process holds is not ours to touch.
+        guard var run = runs[id], run.status == .running, locks[id] != nil else { return }
         tasks[id]?.cancel()
         rerunRequested.remove(id)
         let now = Date()
@@ -163,6 +201,26 @@ public actor RunEngine {
         run.status = .cancelled
         runs[id] = run
         persist(run)
+    }
+
+    // MARK: - Run locks
+
+    /// Takes the run's lock unless this engine already holds it; throws `runBusy` when another engine has it.
+    func ensureLock(_ id: RunID) throws {
+        if locks[id] != nil { return }
+        guard let lock = store.tryLock(id) else { throw RunEngineError.runBusy(id) }
+        locks[id] = lock
+    }
+
+    /// Releases the lock once nothing is working on the run.
+    func releaseLockIfIdle(_ id: RunID) {
+        guard tasks[id] == nil, !picking.contains(id), !deciding.contains(id) else { return }
+        locks.removeValue(forKey: id)?.release()
+    }
+
+    /// True when another engine or process holds the run's lock, so its saved state may be changing under us.
+    public func isRunningElsewhere(_ id: RunID) -> Bool {
+        locks[id] == nil && store.isLocked(id)
     }
 
     // MARK: - State
@@ -224,6 +282,7 @@ public actor RunEngine {
             finalize(id)
         } while rerunRequested.contains(id) && !Task.isCancelled
         tasks[id] = nil
+        releaseLockIfIdle(id)
     }
 
     /// Settles the run's status after a pass.

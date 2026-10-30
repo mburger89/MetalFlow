@@ -74,6 +74,14 @@ public struct Git: Sendable {
         try await run(repo, ["worktree", "remove", "--force", path.path])
     }
 
+    /// True when `name` is a valid branch name (`git check-ref-format --branch` accepts it unchanged).
+    public func isValidBranchName(_ name: String) async throws -> Bool {
+        guard !name.isEmpty, !name.hasPrefix("-") else { return false }
+        let result = try await runner.run(Command(
+            executable: "git", arguments: ["check-ref-format", "--branch", name], environment: ["GIT_TERMINAL_PROMPT": "0"]))
+        return result.succeeded && result.stdout.trimmingCharacters(in: .newlines) == name
+    }
+
     /// Creates a local branch `name` at `startPoint` without checking it out.
     public func createBranch(repo: URL, name: String, at startPoint: String) async throws {
         try await run(repo, ["branch", name, startPoint])

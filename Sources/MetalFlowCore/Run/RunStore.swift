@@ -56,6 +56,22 @@ public struct RunStore: Sendable {
         return f.date(from: s)
     }
 
+    private func lockFile(for id: RunID) -> URL {
+        runsDirectory.appendingPathComponent("\(id.rawValue).lock")
+    }
+
+    /// Takes the run's exclusive advisory lock without blocking; nil when another engine or process holds it.
+    public func tryLock(_ id: RunID) -> RunLock? {
+        RunLock.tryAcquire(lockFile(for: id))
+    }
+
+    /// True when some engine or process currently holds the run's lock. A lock held by the caller's own engine counts too.
+    public func isLocked(_ id: RunID) -> Bool {
+        guard let lock = tryLock(id) else { return true }
+        lock.release()
+        return false
+    }
+
     private func file(for id: RunID) -> URL {
         runsDirectory.appendingPathComponent("\(id.rawValue).json")
     }
@@ -68,7 +84,8 @@ public struct RunStore: Sendable {
     }
 
     /// Loads all runs, newest first. Undecodable files are skipped. Running nodes become
-    /// interrupted and a running run becomes needs-you; files are not rewritten.
+    /// interrupted and a running run becomes needs-you; files are not rewritten. A run whose lock is held
+    /// (it is being driven by another process) is returned as saved, without that mapping.
     public func loadAll() throws -> [Run] {
         let fm = FileManager.default
         guard fm.fileExists(atPath: runsDirectory.path) else { return [] }
@@ -78,10 +95,12 @@ public struct RunStore: Sendable {
         for url in urls where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url),
                   var run = try? decoder.decode(Run.self, from: data) else { continue }
-            for (key, node) in run.nodes where node.state == .running {
-                run.nodes[key]?.state = .interrupted
+            if !isLocked(run.id) {
+                for (key, node) in run.nodes where node.state == .running {
+                    run.nodes[key]?.state = .interrupted
+                }
+                if run.status == .running { run.status = .needsYou }
             }
-            if run.status == .running { run.status = .needsYou }
             runs.append(run)
         }
         return runs.sorted {

@@ -13,6 +13,11 @@ public enum Template {
         }
     }
 
+    /// Quotes a value as a single POSIX shell word: wrapped in single quotes, each `'` written as `'\''`.
+    public static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     /// Replaces `{name}` with `values[name]`. Unknown placeholders are left as-is and `{{` becomes a literal `{`.
     public static func fill(_ template: String, with values: [String: String]) -> String {
         let chars = Array(template)

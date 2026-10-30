@@ -190,7 +190,8 @@ extension RunEngine {
         guard let run = runs[id] else { return }
         let lane = key.lane.flatMap { laneID in run.lanes.first { $0.id == laneID } }
         let worktree = lane?.worktree ?? run.worktree
-        let command = Template.fill(config.command, with: templateValues(id, key, plan: plan))
+        // Values come from issues and model output, so each is quoted as one shell word.
+        let command = Template.fill(config.command, with: templateValues(id, key, plan: plan).mapValues(Template.shellQuote))
         let result: CommandResult
         do {
             result = try await runner.run(Command(

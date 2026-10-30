@@ -7,6 +7,9 @@ extension RunEngine {
     ///
     /// `allowTools` are added to the node's extra allowed tools for the resumed session.
     public func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String] = []) throws {
+        guard runs[id] != nil else { throw RunEngineError.unknownRun(id) }
+        try ensureLock(id)
+        defer { releaseLockIfIdle(id) }
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         switch run.status {
         case .cancelled, .merged, .discarded, .failed: throw RunEngineError.notAnswerable(node)
@@ -32,6 +35,9 @@ extension RunEngine {
     /// Resumes every interrupted node with "Continue where you left off.". A run that stopped between nodes (nothing
     /// interrupted, nothing waiting on you) simply continues. Throws `nothingToResume` when there is nothing to do.
     public func resumeInterrupted(_ id: RunID) throws {
+        guard runs[id] != nil else { throw RunEngineError.unknownRun(id) }
+        try ensureLock(id)
+        defer { releaseLockIfIdle(id) }
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         let keys = run.nodes.filter { $0.value.state == .interrupted }.map(\.key)
             .sorted { $0.description < $1.description }
@@ -52,6 +58,9 @@ extension RunEngine {
     /// Merges a candidate into the base branch. Only a successful merge changes the run; otherwise the
     /// result (blocked by local changes, or conflicting files) is returned for the UI to show.
     public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult {
+        guard runs[id] != nil else { throw RunEngineError.notPickable }
+        try ensureLock(id)
+        defer { releaseLockIfIdle(id) }
         await waitForPass(id)
         guard let run = runs[id], run.status == .needsYou, !picking.contains(id),
               let pickNode = pickNodeKey(run),
@@ -86,6 +95,12 @@ extension RunEngine {
     /// Throws away the run: its worktrees and branches are removed (except kept branches).
     public func discard(_ id: RunID) async throws {
         guard runs[id] != nil else { throw RunEngineError.unknownRun(id) }
+        try ensureLock(id)
+        deciding.insert(id)
+        defer {
+            deciding.remove(id)
+            releaseLockIfIdle(id)
+        }
         // Let a cancelled pass finish first, so it cannot write after the discard.
         if runs[id]?.status == .cancelled { await waitForPass(id) }
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
@@ -105,6 +120,16 @@ extension RunEngine {
 
     /// Creates a local branch `name` at the head of the lane's branch. It survives discard and merge.
     public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws {
+        guard runs[id] != nil else { throw RunEngineError.unknownRun(id) }
+        guard !name.hasPrefix("-"), try await git.isValidBranchName(name) else {
+            throw RunEngineError.invalidBranchName(name)
+        }
+        try ensureLock(id)
+        deciding.insert(id)
+        defer {
+            deciding.remove(id)
+            releaseLockIfIdle(id)
+        }
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         switch run.status {
         case .merged, .discarded: throw RunEngineError.notBranchable
@@ -128,7 +153,7 @@ extension RunEngine {
     }
 
     /// Removes all worktrees and run/lane branches except kept ones, then prunes. Errors are logged on the run.
-    private func cleanup(_ id: RunID) async {
+    func cleanup(_ id: RunID) async {
         guard let run = runs[id] else { return }
         var errors: [String] = []
         let fm = FileManager.default
