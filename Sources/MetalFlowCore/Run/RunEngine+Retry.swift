@@ -86,3 +86,16 @@ extension RunEngine {
         return urls.filter { $0.pathExtension == "flow" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 }
+
+extension RunEngine {
+    /// The unified diff of a lane's committed changes against the run's branch; empty when the run or lane is unknown,
+    /// or a short "(diff unavailable: ...)" note when git fails.
+    public func laneDiff(_ id: RunID, lane: LaneID) async -> String {
+        guard let run = runs[id], let chosen = run.lanes.first(where: { $0.id == lane }) else { return "" }
+        do {
+            return try await git.diff(worktree: chosen.worktree, base: run.branch)
+        } catch {
+            return "(diff unavailable: \(error.localizedDescription))"
+        }
+    }
+}

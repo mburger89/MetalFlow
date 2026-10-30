@@ -1,0 +1,73 @@
+import Foundation
+import MetalFlowCore
+@testable import MetalFlowKit
+
+/// A scripted engine: serves canned runs, records every call, and pushes updates on demand.
+actor FakeEngineClient: EngineClient {
+    nonisolated let updates: AsyncStream<Run>
+    private let continuation: AsyncStream<Run>.Continuation
+
+    /// What `restore()` returns.
+    var restored: [Run]
+    /// Every call, as "name(args)".
+    private(set) var calls: [String] = []
+    /// When set, every throwing call throws it.
+    var failure: Error?
+    /// What `pick` returns.
+    var pickResult: MergeResult = .merged(commit: "abc")
+
+    init(restored: [Run] = []) {
+        self.restored = restored
+        (updates, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .unbounded)
+    }
+
+    /// Pushes a snapshot onto `updates`.
+    func send(_ run: Run) { continuation.yield(run) }
+    /// Ends `updates`.
+    func finish() { continuation.finish() }
+    func setFailure(_ error: Error?) { failure = error }
+    func setPick(_ result: MergeResult) { pickResult = result }
+
+    private func record(_ call: String) throws {
+        calls.append(call)
+        if let failure { throw failure }
+    }
+
+    func restore() async throws -> [Run] { try record("restore"); return restored }
+    func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
+        try record("launch(\(flow.name), \(input))")
+        return RunID()
+    }
+    func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
+        try record("answer(\(node), \(reply), \(allowTools))")
+    }
+    func resumeInterrupted(_ id: RunID) async throws { try record("resume") }
+    func retry(_ id: RunID, node: NodeKey) async throws { try record("retry(\(node))") }
+    func cancel(_ id: RunID) async { calls.append("cancel") }
+    func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult {
+        try record("pick(\(lane))")
+        return pickResult
+    }
+    func discard(_ id: RunID) async throws { try record("discard") }
+    func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws {
+        try record("branch(\(lane), \(name))")
+    }
+    nonisolated func knownRepos() -> [URL] { [] }
+    nonisolated func flows(in repo: URL) -> [URL] { [] }
+    nonisolated func loadFlow(_ url: URL) throws -> Flow { BuiltinFlows.fixGitHubIssue }
+    nonisolated func saveFlow(_ flow: Flow, to url: URL) throws {}
+    func diff(_ id: RunID, lane: LaneID) async -> String { "" }
+}
+
+struct FakeFailure: LocalizedError {
+    var errorDescription: String? { "engine said no" }
+}
+
+/// A run of the built-in fix-issue flow with the given status, for model tests.
+func makeRun(_ title: String = "run", status: RunStatus = .running, revision: Int = 0,
+             createdAt: Date = Date(timeIntervalSince1970: 1_000), id: RunID = RunID(),
+             nodes: [NodeKey: NodeRun] = [:]) -> Run {
+    Run(id: id, flow: BuiltinFlows.fixGitHubIssue, title: title, repo: URL(fileURLWithPath: "/repo"),
+        baseBranch: "main", branch: "mf/\(title)", worktree: URL(fileURLWithPath: "/wt"),
+        createdAt: createdAt, status: status, nodes: nodes, revision: revision)
+}
