@@ -42,7 +42,8 @@ public struct CommandResult: Sendable {
 
 /// Failures from running a command.
 public enum CommandError: Error, Equatable {
-    /// The executable could not be found or launched.
+    /// The executable name could not be resolved on the search path. A nonexistent absolute path is not resolved
+    /// at all, so it surfaces as `launchFailed` instead.
     case executableNotFound(String)
     /// The process could not be started for another reason, such as a missing working directory (executable and error description).
     case launchFailed(String)
@@ -104,34 +105,63 @@ public actor ExecutableResolver {
         return dirs
     }
 
-    /// Asks the login shell for PATH off the actor's thread; gives up after five seconds.
+    /// Asks the login shell for PATH without blocking a thread; after five seconds the shell tree is SIGKILLed.
     private static func loginShellPath() async -> String? {
-        await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
-            DispatchQueue.global().async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                process.arguments = ["-lic", "print -r -- $PATH"]
-                let pipe = Pipe()
-                process.standardOutput = pipe
-                process.standardError = FileHandle.nullDevice
-                process.standardInput = FileHandle.nullDevice
-                do { try process.run() } catch {
-                    continuation.resume(returning: nil)
-                    return
+        struct State {
+            var data = Data()
+            var eof = false
+            var status: Int32?
+            var done = false
+        }
+        let box = ProcessBox()
+        let process = box.process
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lic", "print -r -- $PATH"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        let handle = pipe.fileHandleForReading
+        let state = OSAllocatedUnfairLock(initialState: State())
+
+        return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            let complete: @Sendable (Bool) -> Void = { force in
+                let result: (Data, Int32?)? = state.withLock { s in
+                    guard !s.done, force || (s.eof && s.status != nil) else { return nil }
+                    s.done = true
+                    return (s.data, s.status)
                 }
-                DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-                    if process.isRunning { process.terminate() }
-                }
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0, let text = String(data: data, encoding: .utf8) else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                continuation.resume(returning: text.split(whereSeparator: \.isNewline)
+                guard let (data, status) = result else { return }
+                handle.readabilityHandler = nil
+                try? handle.close()
+                if force { box.killTree() }
+                guard status == 0 else { return cont.resume(returning: nil) }
+                let text = String(decoding: data, as: UTF8.self)
+                cont.resume(returning: text.split(whereSeparator: \.isNewline)
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .last { !$0.isEmpty })
             }
+            handle.readabilityHandler = { h in
+                let chunk = h.availableData
+                if chunk.isEmpty {
+                    h.readabilityHandler = nil
+                    state.withLock { $0.eof = true }
+                    complete(false)
+                } else {
+                    state.withLock { $0.data.append(chunk) }
+                }
+            }
+            process.terminationHandler = { p in
+                state.withLock { $0.status = p.terminationStatus }
+                complete(false)
+            }
+            do { try process.run() } catch {
+                handle.readabilityHandler = nil
+                state.withLock { $0.done = true }
+                return cont.resume(returning: nil)
+            }
+            box.markStarted()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) { complete(true) }
         }
     }
 }
@@ -155,6 +185,16 @@ private final class ProcessBox: @unchecked Sendable {
             for pid in victims where kill(pid, 0) == 0 { kill(pid, SIGKILL) }
         }
     }
+
+    /// SIGKILL the child and all its descendants immediately.
+    func killTree() {
+        guard started.withLock({ $0 }), process.isRunning else { return }
+        let root = process.processIdentifier
+        for pid in Self.descendants(of: root) + [root] { kill(pid, SIGKILL) }
+    }
+
+    /// True once the process has been launched and has since exited.
+    var hasExited: Bool { started.withLock { $0 } && !process.isRunning }
 
     /// Descendants in post-order, so children precede their parents.
     private static func descendants(of pid: pid_t) -> [pid_t] {
@@ -240,6 +280,15 @@ public struct ProcessRunner: CommandRunner {
         let (outChunks, outCont) = Self.chunks(from: outHandle)
         let (errChunks, errCont) = Self.chunks(from: errHandle)
 
+        // Idempotent: stop waiting for EOF (descendants may still hold the pipes open).
+        let stopReading: @Sendable () -> Void = {
+            for (h, cont) in [(outHandle, outCont), (errHandle, errCont)] {
+                h.readabilityHandler = nil
+                cont.finish()
+                try? h.close()
+            }
+        }
+
         return try await withTaskCancellationHandler {
             do { try process.run() } catch {
                 outHandle.readabilityHandler = nil
@@ -252,14 +301,13 @@ public struct ProcessRunner: CommandRunner {
             async let outData = Self.consume(outChunks, keep: keepStdout, onLine: onLine)
             async let errData = Self.consume(errChunks, keep: true, onLine: { _ in })
             var status: Int32 = -1
-            for await s in exits { status = s }
-            if Task.isCancelled {
-                // Descendants may still hold the pipes open; stop waiting for EOF.
-                for (h, cont) in [(outHandle, outCont), (errHandle, errCont)] {
-                    h.readabilityHandler = nil
-                    cont.finish()
-                }
-            }
+            // Detached so that cancellation does not cut the wait short: the child must really be gone.
+            status = await Task.detached { () -> Int32 in
+                var code: Int32 = -1
+                for await s in exits { code = s }
+                return code
+            }.value
+            if Task.isCancelled { stopReading() }
             let (stdout, stderr) = await (outData, errData)
             if Task.isCancelled { throw CancellationError() }
             return Output(
@@ -268,6 +316,8 @@ public struct ProcessRunner: CommandRunner {
                 stderr: String(decoding: stderr, as: UTF8.self))
         } onCancel: {
             box.terminate()
+            // If the process already exited, the post-exit check may have run before this cancellation.
+            if box.hasExited { stopReading() }
         }
     }
 

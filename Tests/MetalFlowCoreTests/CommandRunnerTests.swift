@@ -75,22 +75,51 @@ struct CommandRunnerTests {
         }
     }
 
-    /// Runs `script` with `$1` = a fifo, cancels once the script has written a pid to it,
-    /// and returns that pid after `run` has finished with CancellationError.
-    private func cancelRun(script: String) async throws -> pid_t {
+    /// Reads a pid from a fifo without ever blocking on open: bounded yield loop (about 5 s).
+    private func readPid(fifo: String) async -> pid_t? {
+        let fd = open(fifo, O_RDONLY | O_NONBLOCK)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var text = ""
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            var buf = [UInt8](repeating: 0, count: 64)
+            let n = read(fd, &buf, buf.count)
+            if n > 0 { text += String(decoding: buf[0..<n], as: UTF8.self) }
+            if text.hasSuffix("\n") { return pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            await Task.yield()
+        }
+        return nil
+    }
+
+    /// Starts a child via `launch` with `$1` = a fifo, waits for its script to report a pid,
+    /// then cancels. Returns the pid and the time from cancel() until `finished` returned.
+    private func cancelled(
+        script: String,
+        launch: (ProcessRunner, Command) -> Task<Void, Error>,
+        finished: (Task<Void, Error>, pid_t) async -> Void
+    ) async throws -> (pid: pid_t, elapsed: Duration) {
         let fifo = FileManager.default.temporaryDirectory.appendingPathComponent("mf-\(UUID().uuidString).fifo").path
-        #expect(mkfifo(fifo, 0o600) == 0)
+        try #require(mkfifo(fifo, 0o600) == 0)
         defer { unlink(fifo) }
-        let r = runner()
-        let task = Task { try await r.run(Command(executable: "/bin/sh", arguments: ["-c", script, "sh", fifo])) }
-        let pidText = await Task.detached { () -> String in
-            guard let h = FileHandle(forReadingAtPath: fifo) else { return "" }
-            return String(decoding: h.readDataToEndOfFile(), as: UTF8.self)
-        }.value
-        let pid = try #require(pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines)))
+        let task = launch(runner(), Command(executable: "/bin/sh", arguments: ["-c", script, "sh", fifo]))
+        defer { task.cancel() }
+        let pid = try #require(await readPid(fifo: fifo))
+        let clock = ContinuousClock()
+        let start = clock.now
         task.cancel()
-        await #expect(throws: CancellationError.self) { try await task.value }
-        return pid
+        await finished(task, pid)
+        return (pid, start.duration(to: clock.now))
+    }
+
+    private func runTask(_ r: ProcessRunner, _ c: Command) -> Task<Void, Error> {
+        Task { _ = try await r.run(c) }
+    }
+
+    private func runCancelled(script: String) async throws -> (pid: pid_t, elapsed: Duration) {
+        try await cancelled(script: script, launch: runTask) { task, _ in
+            await #expect(throws: CancellationError.self) { try await task.value }
+        }
     }
 
     /// Waits (bounded, yielding) for a pid to disappear; zombies linger briefly before launchd reaps them.
@@ -104,12 +133,26 @@ struct CommandRunnerTests {
     }
 
     @Test func cancellationTerminatesProcess() async throws {
-        let pid = try await cancelRun(script: "echo $$ > \"$1\"; exec sleep 30")
+        let (pid, elapsed) = try await runCancelled(script: "echo $$ > \"$1\"; exec sleep 60")
+        #expect(elapsed < .seconds(10))
         #expect(await gone(pid))
     }
 
     @Test func cancellationKillsDescendants() async throws {
-        let pid = try await cancelRun(script: "sleep 30 & echo $! > \"$1\"; wait")
+        let (pid, elapsed) = try await runCancelled(script: "sleep 60 & echo $! > \"$1\"; wait")
+        #expect(elapsed < .seconds(10))
+        #expect(await gone(pid))
+    }
+
+    @Test func cancellingLinesConsumerTerminatesProcess() async throws {
+        let (pid, elapsed) = try await cancelled(
+            script: "echo $$ > \"$1\"; exec sleep 60",
+            launch: { r, c in Task { for try await _ in r.lines(c) {} } },
+            finished: { task, pid in
+                _ = await task.result
+                _ = await gone(pid)
+            })
+        #expect(elapsed < .seconds(10))
         #expect(await gone(pid))
     }
 
