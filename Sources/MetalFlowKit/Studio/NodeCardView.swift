@@ -49,6 +49,13 @@ extension Node {
 }
 
 extension NodeOverlay {
+    /// The nodes whose state is per lane: those of the run's own flow, or, if that flow does not validate,
+    /// those with lane-keyed states in the run.
+    static func laneScoped(_ run: Run) -> Set<NodeID> {
+        if let plan = try? run.flow.validate() { return plan.laneScoped }
+        return Set(run.nodes.keys.filter { $0.lane != nil }.map(\.node))
+    }
+
     /// The overlay of `node` in `run`. A lane-scoped node reads "A ✓ B ✓ C ✕", one lane per candidate;
     /// any other node shows its state as the run detail words it.
     @MainActor

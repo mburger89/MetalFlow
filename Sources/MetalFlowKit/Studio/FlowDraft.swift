@@ -17,7 +17,11 @@ public final class FlowDraft {
     /// The file it was loaded from or saved to; nil for a flow not yet saved.
     public var url: URL?
     /// The repository runs of this flow launch in and unsaved flows are saved into.
-    public var repo: URL
+    public var repo: URL {
+        didSet { if repo != oldValue { onRetarget?() } }
+    }
+    /// Called when the repo changes.
+    @ObservationIgnored var onRetarget: (() -> Void)?
     /// Whether the flow changed since it was loaded or saved.
     public var isDirty = false
     /// The plan, or why the flow cannot run. Recomputed on every change.
@@ -33,9 +37,9 @@ public final class FlowDraft {
     var geometry = CanvasGeometry()
     /// The canvas view's size, once measured.
     var canvasSize: Size<Pixels>?
-    private var hasFitted = false
-    var panStart: ScreenPoint?
-    var pinchStart: (pan: ScreenPoint, zoom: Double)?
+    @ObservationIgnored private var hasFitted = false
+    @ObservationIgnored var panStart: ScreenPoint?
+    @ObservationIgnored var pinchStart: (pan: ScreenPoint, zoom: Double)?
 
     /// Creates a draft.
     public init(flow: Flow, url: URL?, repo: URL) {

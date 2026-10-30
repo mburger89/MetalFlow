@@ -65,7 +65,6 @@ extension AppModel {
         do {
             let flow = try client.loadFlow(url)
             draft = FlowDraft(flow: flow, url: url, repo: repo(containing: url))
-            studioRun = nil
             screen = .studio
         } catch {
             notice = Notice(error.localizedDescription)

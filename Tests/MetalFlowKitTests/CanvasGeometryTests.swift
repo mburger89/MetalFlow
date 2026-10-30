@@ -85,11 +85,26 @@ import Testing
                 minX = min(minX, tl.x.value); minY = min(minY, tl.y.value)
                 maxX = max(maxX, br.x.value); maxY = max(maxY, br.y.value)
             }
-            #expect(minX >= 39.9 && minY >= 39.9, "\\(size)")
+            #expect(minX >= 39.9 && minY >= 39.9, "\(size)")
             #expect(maxX <= size.width.value - 39.9 && maxY <= size.height.value - 39.9)
-            // Centred: equal slack on both sides in at least one axis.
+            // Centred: equal slack on both sides in both axes.
             let left = minX, right = size.width.value - maxX, top = minY, bottom = size.height.value - maxY
             #expect(abs(left - right) < 0.5 && abs(top - bottom) < 0.5)
         }
+    }
+
+    @Test func clampedFitIsStillCentred() {
+        let size = Size(width: Pixels(900), height: Pixels(800))
+        let one = Flow(name: "t", nodes: [node("a", prompt(), at: 50, 50)], wires: [])
+        let big = CanvasGeometry().fit(one, in: size)
+        #expect(big.zoom == 4)
+        let c = big.toScreen(CanvasPoint(x: 150, y: 120))   // the node's centre
+        #expect(abs(c.x.value - 450) < 0.5 && abs(c.y.value - 400) < 0.5)
+
+        let huge = Flow(name: "t", nodes: [node("a", prompt(), at: 0, 0), node("b", prompt(), at: 20_000, 9_000)], wires: [])
+        let small = CanvasGeometry().fit(huge, in: size)
+        #expect(small.zoom == 0.25)
+        let mid = small.toScreen(CanvasPoint(x: 10_100, y: 4_570))   // the middle of the bounding box
+        #expect(abs(mid.x.value - 450) < 0.5 && abs(mid.y.value - 400) < 0.5)
     }
 }

@@ -12,7 +12,7 @@ struct CanvasView: Component {
         let g = draft.geometry
         let size = draft.canvasSize ?? Size(width: Pixels(0), height: Pixels(0))
         let run = model.studioShownRun
-        let scoped = draft.plan?.laneScoped ?? []
+        let scoped = run.map(NodeOverlay.laneScoped) ?? []
         let draft = draft
         ZStack(alignment: .topLeading) {
             DotGrid(geometry: g, size: size)
@@ -22,6 +22,7 @@ struct CanvasView: Component {
                     node: node, geometry: g, selected: draft.selection == node.id,
                     overlay: run.map { NodeOverlay.make(node: node, run: $0, laneScoped: scoped.contains(node.id)) })
             }
+            PortLayer(flow: draft.flow, geometry: g, size: size)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(Hsla.rgb(0x101215)))

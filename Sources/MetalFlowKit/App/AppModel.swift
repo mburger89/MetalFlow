@@ -50,7 +50,13 @@ public final class AppModel {
         didSet { if screen == .studio { ensureDraft() } }
     }
     /// The flow open in the Studio, if any.
-    public var draft: FlowDraft?
+    public var draft: FlowDraft? {
+        didSet {
+            guard draft !== oldValue else { return }
+            studioRun = nil
+            draft?.onRetarget = { [weak self] in self?.studioRun = nil }
+        }
+    }
     /// The run overlaid on the Studio canvas; nil shows the definition only.
     public var studioRun: RunID?
     /// The issue typed in the Studio's launch field.

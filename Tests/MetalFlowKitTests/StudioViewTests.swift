@@ -142,10 +142,51 @@ import Testing
         try await showStudio(model, window)
         _ = try window.element(identifier: "studio.runPicker")
         #expect(model.studioRuns.map(\.title) == ["#7 lanes", "older"])
+        // Headless, a click on the menu picker takes its first run option (its items are not separate elements).
+        // That is the newest run of this flow and repo, not the newer ones from another repo or flow.
+        try window.click(window.element(identifier: "studio.runPicker"))
+        try await window.runUntilIdle()
+        #expect(model.studioRun == newest.id)
+    }
+
+    @Test func overlayLaneScopingComesFromTheRunNotTheDraft() async throws {
+        let run = laneRun(gateC: .failed("x"))
+        let (model, _, window) = try await fixture(runs: [run])
+        try await showStudio(model, window)
+        model.draft?.edit("unwire") { $0.wires.removeAll() }
+        #expect(model.draftIsValid == false)
+        model.studioRun = run.id
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "node.gate.status").value == "A ✓ B ● C ✕")
+    }
+
+    @Test func studioRunClearsWhenDraftOrRepoChanges() async throws {
+        let other = URL(fileURLWithPath: "/other")
+        let run = laneRun()
+        let (model, _, window) = try await fixture(runs: [run], repos: [repo, other])
+        try await showStudio(model, window)
+        model.studioRun = run.id
+        await model.selectRepo(other)
+        #expect(model.studioRun == nil, "retargeting the draft to another repo")
+        model.studioRun = run.id
+        model.draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, url: nil, repo: other)
+        #expect(model.studioRun == nil, "replacing the draft")
+        model.studioRun = run.id
+        model.draft?.repo = repo
+        #expect(model.studioRun == nil, "changing the draft's repo")
+    }
+
+    @Test func fitButtonKeepsTheSelection() async throws {
+        let (model, _, window) = try await fixture()
+        try await showStudio(model, window)
+        try await press("node.plan", in: window)
+        #expect(model.draft?.selection == "plan")
+        try await press("canvas.fit", in: window)
+        #expect(model.draft?.selection == "plan")
     }
 
     @Test func openFlowLoadsDraftAndSwitchesToStudio() async throws {
-        let (model, client, window) = try await fixture()
+        let (model, _, window) = try await fixture()
         let url = repo.appendingPathComponent(".flows/fix.flow")
         model.open(flow: url)
         try await window.runUntilIdle()
@@ -161,7 +202,7 @@ import Testing
         model.open(flow: url)
         #expect(model.draft === draft)
         #expect(draft.undoStack.count == 1)
-        _ = client
+        #expect(model.screen == .studio)
     }
 
     @Test func openFlowLoadErrorKeepsScreenAndNotifies() async throws {
