@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 6.4, SwiftPM, MetalUI (path dependency `../MetalUI`), MetalUITesting, Swift Testing, `MetalFlowCore`. On macOS, AppKit/UserNotifications are used only behind the `Notifier` protocol, and only until MetalUI ships an API for them.
 
-**Spec:** `docs/superpowers/specs/2026-10-30-metalflow-v1-design.md`. Mockups: `design/V1Dashboard.dc.html`, `design/V1Studio.dc.html`. MetalUI API facts: `docs/notes/metalui-api.md` (written in Task 1).
+**Spec:** `docs/superpowers/specs/2026-10-30-metalflow-v1-design.md`. Mockups: `design/V1Dashboard.dc.html`, `design/V1Studio.dc.html`. MetalUI API facts: `docs/notes/metalui-api.md`.
 
 ## Global Constraints
 
@@ -81,7 +81,7 @@ docs/notes/metalui-api.md
 
 ### Task 1: Engine additions the app needs
 
-**Files:** Create `Sources/MetalFlowCore/Run/RunEngine+Retry.swift`. Modify `Run/RunEngine.swift`. Test `RunEngineRetryTests.swift`, `RunEngineLockReloadTests.swift`. Create `docs/notes/metalui-api.md`: copy the controller-provided MetalUI facts file verbatim (see the dispatch).
+**Files:** Create `Sources/MetalFlowCore/Run/RunEngine+Retry.swift`. Modify `Run/RunEngine.swift`. Test `RunEngineRetryTests.swift`, `RunEngineLockReloadTests.swift`.
 
 **Interfaces (Produces):**
 - `RunEngine.retry(_ id: RunID, node: NodeKey) async throws`.
