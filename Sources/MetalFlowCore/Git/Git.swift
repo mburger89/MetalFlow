@@ -112,7 +112,14 @@ public struct Git: Sendable {
 
     /// Merges `branch` into `target` with a merge commit. Uses the target's checkout when it has one,
     /// otherwise a temporary worktree that is always removed.
+    ///
+    /// The whole sequence runs in an unstructured task, so once started it completes (or is verifiably aborted)
+    /// even if the caller is cancelled.
     public func merge(repo: URL, branch: String, into target: String, message: String) async throws -> MergeResult {
+        try await Task { try await mergeSequence(repo: repo, branch: branch, into: target, message: message) }.value
+    }
+
+    private func mergeSequence(repo: URL, branch: String, into target: String, message: String) async throws -> MergeResult {
         if let co = try await checkout(of: target, repo: repo) {
             if try await isDirty(worktree: co) { return .blockedDirty(checkout: co) }
             return try await mergeIn(co, branch: branch, message: message)
@@ -145,8 +152,7 @@ public struct Git: Sendable {
             let sha = try await run(dir, ["rev-parse", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
             return .merged(commit: sha)
         }
-        // Failure handling must finish even if the caller is cancelled, so it never leaves a half-merged checkout.
-        return try await Task { try await handleFailedMerge(dir, stderr: result.stderr) }.value
+        return try await handleFailedMerge(dir, stderr: result.stderr)
     }
 
     private func handleFailedMerge(_ dir: URL, stderr: String) async throws -> MergeResult {

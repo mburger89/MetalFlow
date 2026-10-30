@@ -105,13 +105,7 @@ import Testing
             #expect(try repo.git(["rev-parse", target]) == sha)
             #expect(try repo.git(["status", "--porcelain"]) == status)
             #expect(try repo.git(["worktree", "list"]).split(separator: "\n").count == 1)
-            let mergeHead = Process()
-            mergeHead.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            mergeHead.arguments = ["-C", repo.url.path, "rev-parse", "-q", "--verify", "MERGE_HEAD"]
-            mergeHead.standardOutput = FileHandle.nullDevice
-            try mergeHead.run()
-            mergeHead.waitUntilExit()
-            #expect(mergeHead.terminationStatus != 0)
+            #expect(try repo.gitStatus(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).exit != 0)
         }
     }
 
@@ -123,5 +117,22 @@ import Testing
         } catch let error as GitError {
             guard case .mergeFailed = error else { Issue.record("wrong error \(error)"); return }
         }
+    }
+
+    @Test func cancelledMergeStillCompletes() async throws {
+        let repo = try TempRepo()
+        try repo.git(["branch", "release"])
+        let wt = repo.worktreePath("wt")
+        try await git.addWorktree(repo: repo.url, path: wt, newBranch: "flow/z", from: "release")
+        try repo.write("z.txt", "z", in: wt)
+        _ = try await git.commitAll(worktree: wt, message: "z")
+        let git = self.git
+        let url = repo.url
+        let task = Task { try await git.merge(repo: url, branch: "flow/z", into: "release", message: "Merge z") }
+        task.cancel()
+        let result = try await task.value
+        guard case .merged = result else { Issue.record("expected merged, got \(result)"); return }
+        #expect(try repo.gitStatus(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).exit != 0)
+        #expect(try repo.git(["worktree", "list"]).split(separator: "\n").count == 2)
     }
 }

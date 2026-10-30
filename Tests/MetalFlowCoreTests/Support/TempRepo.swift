@@ -37,6 +37,20 @@ final class TempRepo: Sendable {
         try git(["commit", "-m", message])
     }
 
+    /// Runs git in the repo without throwing on a non-zero exit; returns the exit status and stdout.
+    func gitStatus(_ args: [String]) throws -> (exit: Int32, out: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-C", url.path] + args
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return (p.terminationStatus, String(decoding: data, as: UTF8.self))
+    }
+
     /// Runs git in the repo and returns stdout.
     @discardableResult
     func git(_ args: [String]) throws -> String {
