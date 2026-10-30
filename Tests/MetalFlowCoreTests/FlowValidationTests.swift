@@ -55,6 +55,13 @@ private func wire(_ from: NodeID, _ to: NodeID, _ input: String = "in") -> Wire 
         #expect(throws: FlowError.nestedFanOut("second")) { try flow.validate() }
     }
 
+    @Test func siblingFanOutsAreRejected() {
+        let flow = Flow(name: "f", nodes: [prompt("one", candidates: ["a", "b"]),
+                                           prompt("two", candidates: ["a", "b"])],
+                        wires: [])
+        #expect(throws: FlowError.multipleFanOuts("two")) { try flow.validate() }
+    }
+
     @Test func laneScopeStopsAtJudge() throws {
         let judge = Node(id: "judge", title: "judge", kind: .judge(PromptConfig(model: "opus", prompt: "{candidates}", candidates: [], allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0))
         let gate = Node(id: "gate", title: "gate", kind: .gate(ShellConfig(command: "make {x}")), position: Point(x: 0, y: 0))

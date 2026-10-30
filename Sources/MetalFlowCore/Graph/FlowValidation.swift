@@ -7,6 +7,7 @@ public enum FlowError: Error, Equatable, Sendable {
     case duplicateNode(NodeID)
     case duplicateInput(NodeID, String)
     case nestedFanOut(NodeID)
+    case multipleFanOuts(NodeID)
     case judgeWithoutFanOut(NodeID)
     case unwiredPlaceholder(NodeID, String)
 }
@@ -60,6 +61,7 @@ extension Flow {
             let desc = descendants(of: f)
             if let nested = fanOuts.first(where: { desc.contains($0) }) { throw .nestedFanOut(nested) }
         }
+        if fanOuts.count > 1 { throw .multipleFanOuts(fanOuts[1]) }
         let fanOut = fanOuts.first
 
         let downstreamOfFan = fanOut.map { descendants(of: $0) } ?? []
