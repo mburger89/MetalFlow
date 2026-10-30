@@ -57,7 +57,7 @@ End to end, for one local git repo:
 - Launching a flow on a repo creates a run branch `flow/<issue>-<slug>` and a
   worktree for it, outside the user's checkout.
 - A fan-out node (e.g. *Implement ×3*) gives each candidate its own branch and
-  worktree off the run branch (`flow/<issue>-<slug>/a`, `/b`, `/c`).
+  worktree off the run branch (`flow/<issue>-<slug>--a`, `--b`, `--c`; git can't hold both `x` and `x/a` as branch names).
 - Picking a winner merges that candidate's branch back into the branch the run
   started from. Losing worktrees are cleaned up afterwards; until then the user can
   *Branch from here* on any of them.
