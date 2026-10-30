@@ -97,6 +97,7 @@ struct CanvasView: Component {
 extension FlowDraft {
     /// Selects the node under a canvas-local screen point, else the wire near it, else clears the selection.
     func select(at location: ScreenPoint) {
+        lastEditName = nil  // a click on the canvas moves focus off any inspector field
         if let id = geometry.hitNode(at: geometry.toCanvas(location), in: flow) {
             selection = id
         } else if let wire = geometry.hitWire(at: location, in: flow) {
@@ -140,7 +141,7 @@ extension FlowDraft {
         case .wire(let from):
             pendingWire = nil
             if let (to, side) = geometry.hitPort(at: geometry.toCanvas(value.location), in: flow), side == .input {
-                connect(from: from, to: to)
+                connect(from: from, to: to, allowParallel: false)
             }
         case .pan, nil:
             panStart = nil

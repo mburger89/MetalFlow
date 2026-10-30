@@ -90,9 +90,12 @@ public final class FlowDraft {
         change(&updated)
         guard updated != flow else { return }
         if coalescing, lastEditName == name, let before = undoStack.last, redoStack.isEmpty {
-            if updated == before { undoStack.removeLast() }
             flow = updated
-            if undoStack.isEmpty { lastEditName = nil }
+            if updated == before {
+                // The burst reverted itself: its step is gone and must not absorb the next keystroke.
+                undoStack.removeLast()
+                lastEditName = nil
+            }
             return
         }
         pushUndo(flow)
@@ -175,9 +178,11 @@ public final class FlowDraft {
     }
 
     /// Wires `from`'s output into `to`. The input name defaults to the source id, with `_2`, `_3`... if `to`
-    /// already has one of that name. A wire from a node to itself, or an exact duplicate, is refused.
-    public func connect(from: NodeID, to: NodeID, input: String? = nil) {
+    /// already has one of that name. A wire from a node to itself, or an exact duplicate, is refused; with
+    /// `allowParallel` false so is any second wire between the same pair.
+    public func connect(from: NodeID, to: NodeID, input: String? = nil, allowParallel: Bool = true) {
         guard from != to, flow.node(from) != nil, flow.node(to) != nil else { return }
+        if !allowParallel, flow.wires.contains(where: { $0.from == from && $0.to == to }) { return }
         let taken = Set(flow.inputs(of: to).map(\.input))
         var name = input ?? from.rawValue
         if input == nil {

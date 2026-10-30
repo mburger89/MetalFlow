@@ -148,7 +148,7 @@ import Testing
         window.drag(from: from, to: empty)
         try await window.runUntilIdle()
         #expect(draft.flow == BuiltinFlows.fixGitHubIssue)
-        #expect(draft.undoStack.isEmpty == false || draft.redoStack.count == 1)
+        #expect(draft.undoStack.isEmpty && draft.redoStack.count == 1, "the empty-space drag added no step")
     }
 
     @Test func selfWireRefused() async throws {
@@ -231,11 +231,13 @@ import Testing
         #expect(try node(draft, "plan").title == "Plan")
         #expect(draft.flow.nodes.count == BuiltinFlows.fixGitHubIssue.nodes.count)
         #expect(draft.selection == "plan")
-        let tools = try window.element(identifier: "inspector.prompt")
-        try window.click(tools)
+        guard case .prompt(let before) = try node(draft, "plan").kind else { return }
+        try window.click(window.element(identifier: "inspector.prompt"))
         window.typeKey(.delete)
         try await window.runUntilIdle()
-        #expect(draft.flow.node("plan") != nil, "also in a TextEditor")
+        guard case .prompt(let after) = try node(draft, "plan").kind else { return }
+        #expect(after.prompt.count == before.prompt.count - 1, "the TextEditor had focus and lost one character")
+        #expect(draft.flow.node("plan") != nil)
     }
 
     // MARK: Inspector
@@ -499,5 +501,98 @@ import Testing
         #expect(model.draft === draft && draft.url == a && draft.isDirty)
         #expect(model.pendingOpen == nil)
         #expect(window.presentedAlert == nil)
+    }
+
+    // MARK: Fix round 1
+
+    func typeAtEnd(_ window: TestWindow, _ id: String, _ text: String) throws {
+        let field = try window.element(identifier: id)
+        window.click(at: ScreenPoint(x: field.frame.origin.x + field.frame.size.width - 4,
+                                     y: field.frame.origin.y + field.frame.size.height / 2))
+        window.typeText(text)
+    }
+
+    @Test func coalescingNeverJoinsAnOlderStep() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        try await press("node.plan", in: window)
+        try typeAtEnd(window, "inspector.title", "s")
+        window.typeKey(.delete)
+        window.typeText("t")
+        try await window.runUntilIdle()
+        #expect(try node(draft, "plan").title == "Plant")
+        #expect(draft.undoStack.count == 2)
+        draft.undo()
+        #expect(draft.flow.name == "Edited")
+        #expect(try node(draft, "plan").title == "Plan")
+    }
+
+    @Test func pickerChoicesAreSeparateSteps() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.plan", in: window)
+        for choice in ["sonnet", "haiku"] {
+            try window.click(window.element(identifier: "inspector.model"))
+            try window.chooseMenuItem(choice)
+            try await window.runUntilIdle()
+        }
+        #expect(draft.undoStack.count == 2)
+    }
+
+    @Test func typingBurstEndsOnSelectionChangeAndCanvasClick() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.plan", in: window)
+        try typeAtEnd(window, "inspector.title", "a")
+        try await press("node.implement", in: window)
+        try await press("node.plan", in: window)
+        try typeAtEnd(window, "inspector.title", "b")
+        try await window.runUntilIdle()
+        #expect(try node(draft, "plan").title == "Planab")
+        #expect(draft.undoStack.count == 2, "selecting another node and back ends the burst")
+        // Clicking the same node on the canvas moves focus off the field too.
+        try await press("node.plan", in: window)
+        try typeAtEnd(window, "inspector.title", "c")
+        try await window.runUntilIdle()
+        #expect(draft.undoStack.count == 3)
+    }
+
+    @Test func dragBetweenAlreadyWiredPairIsNoOp() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        let from = draft.geometry.outPort(try node(draft, "issue")), to = draft.geometry.inPort(try node(draft, "plan"))
+        window.drag(from: try screen(window, draft, from), to: try screen(window, draft, to))
+        try await window.runUntilIdle()
+        #expect(draft.flow == BuiltinFlows.fixGitHubIssue && draft.undoStack.isEmpty)
+    }
+
+    @Test func hitWireToleranceIsInScreenPoints() async throws {
+        let flow = BuiltinFlows.fixGitHubIssue
+        for zoom in [1.0, 2.0] {
+            let g = CanvasGeometry(pan: ScreenPoint(x: Pixels(10), y: Pixels(20)), zoom: zoom)
+            let a = g.outPort(flow.node("plan")!), b = g.inPort(flow.node("implement")!)
+            let mid = g.toScreen(CanvasPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2))
+            func at(_ dx: Float) -> ScreenPoint { ScreenPoint(x: mid.x + Pixels(dx), y: mid.y) }
+            let wire = Wire(from: "plan", to: "implement", input: "plan")
+            #expect(g.hitWire(at: at(0), in: flow) == wire)
+            #expect(g.hitWire(at: at(5), in: flow) == wire, "within 6 pt at zoom \(zoom)")
+            #expect(g.hitWire(at: at(-5), in: flow) == wire)
+            #expect(g.hitWire(at: at(9), in: flow) == nil, "just outside 6 pt at zoom \(zoom)")
+        }
+    }
+
+    @Test func dirtySwitchSaveFailureKeepsDraft() async throws {
+        let (model, client, window) = try await fixture()
+        let (draft, a, b) = try openDirty(model)
+        client.files.failSave = true
+        model.open(flow: b)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        try await window.runUntilIdle()
+        #expect(model.draft === draft && draft.url == a && draft.isDirty)
+        #expect(model.notice?.text == "engine said no")
+        #expect(model.pendingOpen == nil)
+        #expect(!model.workingOn.contains(.flow(b)))
     }
 }

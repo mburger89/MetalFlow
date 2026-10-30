@@ -99,7 +99,10 @@ actor FakeEngineClient: EngineClient {
         if files.failLoad { throw FakeFailure() }
         return BuiltinFlows.fixGitHubIssue
     }
-    nonisolated func saveFlow(_ flow: Flow, to url: URL) throws { files.record(flow, url) }
+    nonisolated func saveFlow(_ flow: Flow, to url: URL) throws {
+        if files.failSave { throw FakeFailure() }
+        files.record(flow, url)
+    }
     private var holdingDiffs = false
     private var heldDiffs: [CheckedContinuation<Void, Never>] = []
     private var diffEntries = 0
@@ -178,6 +181,12 @@ final class FileLog: @unchecked Sendable {
     var failLoad: Bool {
         get { lock.withLock { _failLoad } }
         set { lock.withLock { _failLoad = newValue } }
+    }
+    private var _failSave = false
+    /// When true, `saveFlow` throws.
+    var failSave: Bool {
+        get { lock.withLock { _failSave } }
+        set { lock.withLock { _failSave = newValue } }
     }
     func record(_ flow: Flow, _ url: URL) { lock.withLock { _saved.append((flow, url)) } }
 }

@@ -7,15 +7,16 @@ let inspectorModels = ["opus", "sonnet", "haiku"]
 extension FlowDraft {
     /// Edits one field of a node as an undo step named `<field>.<id>`, which coalesces with the previous edit of
     /// that field.
-    func editNode(_ id: NodeID, _ field: String, _ change: @escaping (inout Node) -> Void) {
-        edit("\(field).\(id.rawValue)") { flow in
+    func editNode(_ id: NodeID, _ field: String, coalescing: Bool = true, _ change: @escaping (inout Node) -> Void) {
+        apply("\(field).\(id.rawValue)", coalescing: coalescing) { flow in
             if let i = flow.nodes.firstIndex(where: { $0.id == id }) { change(&flow.nodes[i]) }
         }
     }
 
     /// Edits a prompt or judge node's configuration.
-    func editPrompt(_ id: NodeID, _ field: String, _ change: @escaping (inout PromptConfig) -> Void) {
-        editNode(id, field) { node in
+    func editPrompt(_ id: NodeID, _ field: String, coalescing: Bool = true,
+                    _ change: @escaping (inout PromptConfig) -> Void) {
+        editNode(id, field, coalescing: coalescing) { node in
             switch node.kind {
             case .prompt(var c): change(&c); node.kind = .prompt(c)
             case .judge(var c): change(&c); node.kind = .judge(c)
@@ -146,7 +147,7 @@ struct FlowInputFields: Component {
         Text(verbatim: "Source").font(size: 11).foregroundColor(Palette.muted)
         Picker("", selection: Binding(
             get: { Self.config(draft, id)?.source ?? .githubIssue },
-            set: { value in draft.editNode(id, "inputSource") { Self.update(&$0) { $0.source = value } } })) {
+            set: { value in draft.editNode(id, "inputSource", coalescing: false) { Self.update(&$0) { $0.source = value } } })) {
             Text(verbatim: "GitHub issue").tag(InputSource.githubIssue)
             Text(verbatim: "Text").tag(InputSource.text)
         }
@@ -175,10 +176,10 @@ struct PromptFields: Component {
         Text(verbatim: "Model").font(size: 11).foregroundColor(Palette.muted)
         modelPicker(selection: Binding(
             get: { draft.promptConfig(id)?.model ?? "sonnet" },
-            set: { value in draft.editPrompt(id, "model") { $0.model = value } }), identifier: "inspector.model")
+            set: { value in draft.editPrompt(id, "model", coalescing: false) { $0.model = value } }), identifier: "inspector.model")
         Stepper("Candidates: \(config.candidateCount)", value: Binding(
             get: { draft.promptConfig(id)?.candidateCount ?? 1 },
-            set: { value in draft.editPrompt(id, "candidates") { $0.setCandidateCount(value) } }), in: 1...PromptConfig.maxCandidates)
+            set: { value in draft.editPrompt(id, "candidates", coalescing: false) { $0.setCandidateCount(value) } }), in: 1...PromptConfig.maxCandidates)
             .accessibilityIdentifier("inspector.candidates")
         if config.candidates.count > 1 {
             ForEach(Array(config.candidates.indices), id: \.self) { index in
@@ -187,7 +188,7 @@ struct PromptFields: Component {
                     modelPicker(selection: Binding(
                         get: { draft.promptConfig(id)?.candidates[safe: index] ?? "sonnet" },
                         set: { value in
-                            draft.editPrompt(id, "candidate\(index)") { if $0.candidates.indices.contains(index) { $0.candidates[index] = value } }
+                            draft.editPrompt(id, "candidate\(index)", coalescing: false) { if $0.candidates.indices.contains(index) { $0.candidates[index] = value } }
                         }), identifier: "inspector.candidate.\(index)")
                 }
             }
