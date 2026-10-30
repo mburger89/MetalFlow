@@ -79,7 +79,8 @@ actor FakeEngineClient: EngineClient {
 
     func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult {
         calls.append("pick-start(\(lane))")
-        if holdingPicks { await withCheckedContinuation { heldPicks.append($0) } }
+        // Only the first call is held, so a second one (a broken in-flight guard) fails a test instead of hanging it.
+        if holdingPicks && heldPicks.isEmpty { await withCheckedContinuation { heldPicks.append($0) } }
         try record("pick(\(lane))")
         return pickResult
     }
@@ -88,11 +89,36 @@ actor FakeEngineClient: EngineClient {
         try record("branch(\(lane), \(name))")
     }
     nonisolated func knownRepos() -> [URL] { repos }
-    nonisolated func flows(in repo: URL) -> [URL] { flowFiles }
+    /// Holds `flows(in:)` (called off the main actor) until released.
+    nonisolated let scanGate = ScanGate()
+    nonisolated func flows(in repo: URL) -> [URL] { scanGate.pass(); return flowFiles }
     func isGitRepo(_ url: URL) async -> Bool { gitRepoPaths.contains(url.path) }
     nonisolated func loadFlow(_ url: URL) throws -> Flow { BuiltinFlows.fixGitHubIssue }
     nonisolated func saveFlow(_ flow: Flow, to url: URL) throws {}
-    func diff(_ id: RunID, lane: LaneID) async -> String { calls.append("diff(\(lane))"); return diffText }
+    private var holdingDiffs = false
+    private var heldDiffs: [CheckedContinuation<Void, Never>] = []
+    private var diffEntries = 0
+    private var diffEntryWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Makes `diff` suspend until `releaseDiffs()`.
+    func holdDiffs() { holdingDiffs = true }
+    /// Resumes every suspended `diff`.
+    func releaseDiffs() {
+        holdingDiffs = false
+        for c in heldDiffs { c.resume() }
+        heldDiffs = []
+    }
+    /// Returns once a `diff` call has started.
+    func waitForDiffStart() async {
+        if diffEntries == 0 { await withCheckedContinuation { diffEntryWaiters.append($0) } }
+    }
+    func diff(_ id: RunID, lane: LaneID) async -> String {
+        calls.append("diff(\(lane))")
+        diffEntries += 1
+        for w in diffEntryWaiters { w.resume() }
+        diffEntryWaiters = []
+        if holdingDiffs { await withCheckedContinuation { heldDiffs.append($0) } }
+        return diffText
+    }
 }
 
 struct FakeFailure: LocalizedError {
@@ -106,4 +132,32 @@ func makeRun(_ title: String = "run", status: RunStatus = .running, revision: In
     Run(id: id, flow: BuiltinFlows.fixGitHubIssue, title: title, repo: URL(fileURLWithPath: "/repo"),
         baseBranch: "main", branch: "mf/\(title)", worktree: URL(fileURLWithPath: "/wt"),
         createdAt: createdAt, status: status, nodes: nodes, revision: revision)
+}
+
+/// Lets a test hold the flow scan and learn that it has been entered, with no sleeping.
+final class ScanGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var held = false
+    private var entered = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    /// Makes the next scans block.
+    func hold() { condition.lock(); held = true; entered = false; condition.unlock() }
+    /// Unblocks scans.
+    func release() { condition.lock(); held = false; condition.broadcast(); condition.unlock() }
+    /// Returns once a scan is blocked in the gate.
+    func waitForEntry() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            condition.lock()
+            if entered { condition.unlock(); c.resume() } else { waiter = c; condition.unlock() }
+        }
+    }
+    func pass() {
+        condition.lock()
+        entered = true
+        waiter?.resume()
+        waiter = nil
+        while held { condition.wait() }
+        condition.unlock()
+    }
 }

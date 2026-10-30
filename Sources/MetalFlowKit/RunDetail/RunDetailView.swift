@@ -41,7 +41,7 @@ struct DetailBody: Component {
                     Text(verbatim: WorkingChip.statusText(run)).font(size: 12).foregroundColor(Palette.muted)
                         .accessibilityIdentifier("detail.status")
                     Spacer()
-                    Button("Discard") { model.confirmingDiscard = true }
+                    Button("Discard") { model.confirmingDiscard = runID }
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("detail.discard")
                 }
@@ -82,7 +82,8 @@ struct DetailBody: Component {
             Spacer().frame(width: 0, height: 0).accessibilityIdentifier("detail")
         }
         .alert("Discard this run?", isPresented: Binding(
-            get: { model.confirmingDiscard }, set: { model.confirmingDiscard = $0 })) {
+            get: { model.confirmingDiscard == runID },
+            set: { if !$0, model.confirmingDiscard == runID { model.confirmingDiscard = nil } })) {
             Button("Discard", role: .destructive) { Task { await model.discard(runID) } }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -124,10 +125,16 @@ struct StepsSection: Component {
         var state: NodeState
     }
 
+    /// One row per execution, in plan order. A node with no execution yet is one waiting row.
     static func rows(_ run: Run) -> [Row] {
+        let order = (try? run.flow.validate().order) ?? run.flow.nodes.map(\.id)
         var rows: [Row] = []
-        for node in run.flow.nodes {
-            let keys = run.nodes.keys.filter { $0.node == node.id }.sorted { ($0.lane ?? "") < ($1.lane ?? "") }
+        for id in order {
+            guard let node = run.flow.node(id) else { continue }
+            let keys = run.nodes.keys.filter { $0.node == id }.sorted { ($0.lane ?? "") < ($1.lane ?? "") }
+            if keys.isEmpty {
+                rows.append(Row(key: NodeKey(node: id), title: node.title, state: .waiting))
+            }
             for key in keys {
                 guard let state = run.nodes[key]?.state else { continue }
                 rows.append(Row(key: key, title: node.title, state: state))
@@ -163,7 +170,7 @@ struct StepRow: Component {
         let runID = run.id
         let key = row.key
         if case .needsYou(.question(let question)) = row.state {
-            Text(verbatim: question).font(size: 13).foregroundColor(Color(Hsla.rgb(0xc9ced6)))
+            Text(verbatim: question).font(size: 13).foregroundColor(Palette.body)
             AnswerBox(model: model, runID: runID, key: key)
         }
         if case .needsYou(.deniedTools(let tools)) = row.state {

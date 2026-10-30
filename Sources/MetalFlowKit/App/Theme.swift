@@ -12,6 +12,8 @@ public enum Palette {
     public static let line = Color(Hsla.rgb(0x23272e))
     /// Primary text.
     public static let text = Color(Hsla.rgb(0xe6e8eb))
+    /// Body text in cards: between text and muted.
+    public static let body = Color(Hsla.rgb(0xc9ced6))
     /// Secondary text.
     public static let muted = Color(Hsla.rgb(0x9aa1ab))
     /// Accent blue.

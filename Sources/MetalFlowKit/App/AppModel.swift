@@ -86,8 +86,13 @@ public final class AppModel {
     public internal(set) var openDiff: DiffKey?
     /// Parsed diffs by lane. Absent while loading.
     public internal(set) var diffChunks: [DiffKey: [AttributedString]] = [:]
-    /// True while the confirmation for discarding the shown run is up.
-    public var confirmingDiscard = false
+    /// The run whose "Discard this run?" confirmation is up, if any.
+    public var confirmingDiscard: RunID?
+    var diffRevisions: [DiffKey: Int] = [:]
+    var diffInFlight: Set<DiffKey> = []
+    /// True once `start()` has restored the saved runs and made the first repo selection.
+    public private(set) var isReady = false
+    private var readyWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// The feed's capacity.
     public static let activityLimit = 200
@@ -123,7 +128,16 @@ public final class AppModel {
         } catch {
             notice = Notice(error.localizedDescription)
         }
+        isReady = true
+        for waiter in readyWaiters { waiter.resume() }
+        readyWaiters = []
         for await run in client.updates { apply(run) }
+    }
+
+    /// Returns once `start()` has restored the saved runs and scanned the first repo.
+    public func waitUntilReady() async {
+        if isReady { return }
+        await withCheckedContinuation { readyWaiters.append($0) }
     }
 
     /// Takes a snapshot of a run: stale ones (revision not above the stored one) are ignored.
@@ -137,6 +151,7 @@ public final class AppModel {
         if old == nil {
             insertID(run)
         }
+        if old != nil { dropStaleDiffs(of: run.id) }
         let before = old.map(bucket(of:))
         let after = bucket(of: run)
         if before == after {

@@ -44,13 +44,28 @@ extension AppModel {
     }
 
     /// Opens the lane's diff (loading it), or closes it if it is the open one. One diff is open at a time.
+    /// A cached diff is reused only while the run is unchanged; a load already in flight is not repeated.
     public func toggleDiff(_ run: RunID, lane: LaneID) async {
         let key = DiffKey(run: run, lane: lane)
         if openDiff == key { openDiff = nil; return }
         openDiff = key
-        guard diffChunks[key] == nil else { return }
+        let revision = runs[run]?.revision ?? 0
+        if diffChunks[key] != nil, diffRevisions[key] == revision { return }
+        guard !diffInFlight.contains(key) else { return }
+        diffChunks[key] = nil
+        diffInFlight.insert(key)
+        defer { diffInFlight.remove(key) }
         let text = await client.diff(run, lane: lane)
         diffChunks[key] = diffAttributed(text)
+        diffRevisions[key] = revision
+    }
+
+    /// Forgets the cached diffs of a run that changed, except the one on screen (it is reloaded when reopened).
+    func dropStaleDiffs(of run: RunID) {
+        for key in diffChunks.keys where key.run == run && key != openDiff {
+            diffChunks[key] = nil
+            diffRevisions[key] = nil
+        }
     }
 
     /// Whether the branch-name field of a lane is open.

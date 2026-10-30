@@ -23,11 +23,12 @@ import Testing
         return run
     }
 
-    func fixture(_ run: Run) async throws -> (AppModel, FakeEngineClient, TestWindow) {
-        let client = FakeEngineClient(restored: [run], repos: [URL(fileURLWithPath: "/repo")])
+    func fixture(_ run: Run, others: [Run] = []) async throws -> (AppModel, FakeEngineClient, TestWindow) {
+        let client = FakeEngineClient(restored: [run] + others, repos: [URL(fileURLWithPath: "/repo")])
         let model = AppModel(client: client, notifier: NoopNotifier())
         let window = try appWindow(model: model)
         try await window.runUntilIdle()
+        await model.waitUntilReady()
         model.open(run: run.id)
         try await window.runUntilIdle()
         return (model, client, window)
@@ -111,13 +112,33 @@ import Testing
         let (model, client, _) = try await fixture(run)
         await client.holdPicks()
         let first = Task { await model.pick(run.id, lane: "a") }
-        await Task.yield()
-        #expect(model.pickingRun == run.id)
-        #expect(await model.pick(run.id, lane: "b") == nil, "the second pick is a no-op")
+        while model.pickingRun == nil { await Task.yield() }
+        // The second call must return at once with the first still held. The fake holds only the first call,
+        // so a broken guard shows up as a recorded pick-start(b) instead of a hang.
+        let second = Task { await model.pick(run.id, lane: "b") }
+        let result = await second.value
+        let started = await client.calls.filter { $0.hasPrefix("pick-start") }
         await client.releasePicks()
         _ = await first.value
+        #expect(result == nil, "the second pick is a no-op")
+        #expect(started == ["pick-start(a)"], "the second pick never reached the client")
         #expect(model.pickingRun == nil)
-        #expect(await client.calls.filter { $0.hasPrefix("pick-start") } == ["pick-start(a)"])
+    }
+
+    @Test func aNewPickClearsTheLanesOldOutcome() async throws {
+        let (model, client, window) = try await fixture(pickRun())
+        await client.setPick(.conflict(files: ["x"]))
+        try await press("cand.a.pick", in: window)
+        _ = try window.element(identifier: "cand.a.result")
+        await client.holdPicks()
+        let again = Task { await model.pick(model.selectedRun!, lane: "a") }
+        while model.pickingRun == nil { await Task.yield() }
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "cand.a.result")) == nil, "cleared while the new attempt runs")
+        await client.releasePicks()
+        _ = await again.value
+        try await window.runUntilIdle()
+        _ = try window.element(identifier: "cand.a.result")
     }
 
     @Test func pickButtonsDisableWhileInFlight() async throws {
@@ -208,5 +229,93 @@ import Testing
         try await press("cand.b.diff", in: window)
         #expect(model.openDiff == DiffKey(run: run.id, lane: "b"))
         #expect(await client.calls.filter { $0.hasPrefix("diff") } == ["diff(a)", "diff(b)"])
+    }
+
+    @Test func stepListShowsEveryFlowNodeInPlanOrder() async throws {
+        let (_, _, window) = try await fixture(pickRun())
+        // Only "pick" and "judge" have entries; the rest have not started.
+        for id in ["issue", "repo", "plan", "implement", "gate"] {
+            #expect(try window.element(identifier: "detail.node.\(id).state").value == "Waiting", "\(id)")
+        }
+        #expect(try window.element(identifier: "detail.node.judge.state").value == "Done")
+        let order = try window.elements { ($0.identifier ?? "").hasPrefix("detail.node.") && !($0.identifier ?? "").hasSuffix(".state") }
+            .filter { ($0.identifier ?? "").split(separator: ".").count == 3 }
+            .sorted { $0.frame.origin.y < $1.frame.origin.y }.compactMap(\.identifier)
+        let expected = try BuiltinFlows.fixGitHubIssue.validate().order.map { "detail.node.\($0.rawValue)" }
+        #expect(order == expected)
+    }
+
+    @Test func confirmationBelongsToOneRun() async throws {
+        let a = pickRun()
+        let b = makeRun("other", status: .needsYou, createdAt: Date(timeIntervalSince1970: 2_000))
+        let (model, _, window) = try await fixture(a, others: [b])
+        try await press("detail.discard", in: window)
+        #expect(model.confirmingDiscard == a.id)
+        #expect(window.presentedAlert != nil)
+        model.open(run: b.id)
+        try await window.runUntilIdle()
+        #expect(window.presentedAlert == nil, "run A's confirmation does not show on run B")
+        #expect(model.confirmingDiscard != b.id)
+    }
+
+    @Test func candidateShowsBranchChipAndRemovedCount() async throws {
+        let (_, _, window) = try await fixture(pickRun())
+        #expect(try window.element(identifier: "cand.b.removed").value == "−9")
+        _ = try window.elements { $0.value == "mf/x-b" }.first.map { $0 } ?? { throw TestHarnessError.nothingPresented("branch chip") }()
+    }
+
+    @Test func resumeAndRetryInTheDetailCallTheModel() async throws {
+        let run = makeRun("cut", status: .needsYou, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .interrupted),
+            NodeKey(node: "gate", lane: "a"): NodeRun(state: .failed("nope"))])
+        let (_, client, window) = try await fixture(run)
+        try await press("detail.node.plan.resume", in: window)
+        try await press("detail.node.gate@a.retry", in: window)
+        let calls = await client.calls
+        #expect(calls.contains("resume"))
+        #expect(calls.contains("retry(gate@a)"))
+    }
+
+    @Test func loadingLineShowsWhileTheDiffLoads() async throws {
+        let (_, client, window) = try await fixture(pickRun())
+        await client.holdDiffs()
+        try window.click(window.element(identifier: "cand.a.diff"))
+        await client.waitForDiffStart()
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "detail.diff.loading").value == "Loading diff…")
+        await client.releaseDiffs()
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "detail.diff.loading")) == nil)
+    }
+
+    @Test func reopeningWhileALoadRunsCallsTheClientOnce() async throws {
+        let run = pickRun()
+        let (model, client, _) = try await fixture(run)
+        await client.holdDiffs()
+        await client.setDiff("@@ -1 +1 @@\n+x\n")
+        let first = Task { await model.toggleDiff(run.id, lane: "a") }
+        await client.waitForDiffStart()
+        await model.toggleDiff(run.id, lane: "a")   // close
+        await model.toggleDiff(run.id, lane: "a")   // reopen
+        await client.releaseDiffs()
+        await first.value
+        #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 1)
+        #expect(model.openDiff == DiffKey(run: run.id, lane: "a"))
+        #expect(model.diffChunks[DiffKey(run: run.id, lane: "a")] != nil)
+    }
+
+    @Test func aCachedDiffIsReloadedAfterTheRunChanges() async throws {
+        let run = pickRun()
+        let (model, client, _) = try await fixture(run)
+        await model.toggleDiff(run.id, lane: "a")
+        await model.toggleDiff(run.id, lane: "a")   // close
+        await model.toggleDiff(run.id, lane: "a")   // reopen: cached, same revision
+        #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 1)
+        await model.toggleDiff(run.id, lane: "a")   // close
+        var changed = run
+        changed.revision += 1
+        model.apply(changed)
+        await model.toggleDiff(run.id, lane: "a")   // reopen after the run changed
+        #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 2)
     }
 }

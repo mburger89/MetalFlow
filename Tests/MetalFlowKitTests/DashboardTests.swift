@@ -15,6 +15,8 @@ import Testing
         let model = AppModel(client: client, notifier: NoopNotifier())
         let window = try appWindow(model: model)
         try await window.runUntilIdle()
+        await model.waitUntilReady()
+        try await window.runUntilIdle()
         return (model, client, window)
     }
 
@@ -266,14 +268,16 @@ import Testing
     }
 
     @Test func changingRepoClearsTheFlowUntilTheScanReturns() async throws {
-        let (model, _, _) = try await fixture(gitRepos: ["/other"])
+        let (model, client, _) = try await fixture(gitRepos: ["/other"])
         model.launchForm.issue = "42"
-        #expect(model.canLaunch)
+        try #require(model.canLaunch)
+        client.scanGate.hold()
         let task = Task { await model.selectRepo(URL(fileURLWithPath: "/other")) }
-        await Task.yield()
+        await client.scanGate.waitForEntry()
         #expect(model.launchForm.flow == nil)
         #expect(model.repoFlows.isEmpty)
         #expect(!model.canLaunch)
+        client.scanGate.release()
         await task.value
         #expect(model.canLaunch)
     }

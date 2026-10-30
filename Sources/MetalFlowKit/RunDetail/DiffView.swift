@@ -4,10 +4,6 @@ import MetalUI
 /// The most input lines a diff shows.
 let diffLineLimit = 2000
 
-private let diffOK = Color(Hsla.rgb(0x56d364))
-private let diffBad = Color(Hsla.rgb(0xff7b72))
-private let diffMuted = Color(Hsla.rgb(0x9aa1ab))
-private let diffMono = Font.custom("Menlo", size: 12)
 
 /// Splits a unified diff into one coloured chunk per hunk. Lines before the first `@@` (the file headers) form a
 /// leading chunk, all muted. `+` lines are green on a faint green, `-` lines red on a faint red, `@@` and the
@@ -33,17 +29,17 @@ func diffAttributed(_ text: String) -> [AttributedString] {
             inHeader = false
         }
         var piece = AttributedString(line + "\n")
-        piece.font = diffMono
+        piece.font = Theme.mono(12)
         if inHeader || line.hasPrefix("@@") {
-            piece.foregroundColor = diffMuted
+            piece.foregroundColor = Palette.muted
         } else if line.hasPrefix("+") {
-            piece.foregroundColor = diffOK
-            piece.backgroundColor = diffOK.opacity(0.14)
+            piece.foregroundColor = Palette.ok
+            piece.backgroundColor = Palette.ok.opacity(0.14)
         } else if line.hasPrefix("-") {
-            piece.foregroundColor = diffBad
-            piece.backgroundColor = diffBad.opacity(0.14)
+            piece.foregroundColor = Palette.bad
+            piece.backgroundColor = Palette.bad.opacity(0.14)
         } else {
-            piece.foregroundColor = Color(Hsla.rgb(0xc9ced6))
+            piece.foregroundColor = Palette.body
         }
         current.append(piece)
         hasLines = true
@@ -51,8 +47,8 @@ func diffAttributed(_ text: String) -> [AttributedString] {
     flush()
     if hidden > 0 {
         var more = AttributedString("… \(hidden) more lines")
-        more.font = diffMono
-        more.foregroundColor = diffMuted
+        more.font = Theme.mono(12)
+        more.foregroundColor = Palette.muted
         chunks.append(more)
     }
     return chunks
@@ -71,7 +67,7 @@ struct DiffView: Component {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 if chunks.isEmpty {
-                    Text(verbatim: "No changes").font(size: 12).foregroundColor(diffMuted)
+                    Text(verbatim: "No changes").font(size: 12).foregroundColor(Palette.muted)
                         .accessibilityIdentifier("diff.empty")
                 }
                 ForEach(Array(chunks.enumerated()), id: \.offset) { index, chunk in
