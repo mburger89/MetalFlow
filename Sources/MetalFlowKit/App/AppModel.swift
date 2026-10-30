@@ -70,6 +70,8 @@ public final class AppModel {
     public internal(set) var repoFlows: [URL] = []
     /// Unsent answer text, keyed by `AppModel.draftKey(_:_:)`.
     public var answerDrafts: [String: String] = [:]
+    /// True while a launch from the launch bar is in flight.
+    public internal(set) var isLaunching = false
     var addedRepos: [URL] = []
 
     /// The feed's capacity.
@@ -82,6 +84,8 @@ public final class AppModel {
     let client: EngineClient
     let notifier: Notifier
     private let clock: @MainActor () -> Date
+    /// The model's notion of now (injected in tests).
+    public var now: Date { clock() }
 
     private enum Bucket { case needsYou, running, finished }
 
@@ -98,7 +102,7 @@ public final class AppModel {
     public func start() async {
         guard !started else { return }
         started = true
-        refreshRepos()
+        await refreshRepos()
         do {
             for run in try await client.restore() { apply(run, restoring: true) }
         } catch {
@@ -140,7 +144,10 @@ public final class AppModel {
         switch run.status {
         case .needsYou: .needsYou
         case .running: .running
-        case .merged, .discarded, .failed, .cancelled, .completed: .finished
+        case .failed:
+            // A failed node can be retried, so such a run waits for the user instead of being history.
+            run.nodes.values.contains { if case .failed = $0.state { true } else { false } } ? .needsYou : .finished
+        case .merged, .discarded, .cancelled, .completed: .finished
         }
     }
 

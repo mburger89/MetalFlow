@@ -70,19 +70,31 @@ extension AppModel {
         return items
     }
 
+    /// The text with surrounding whitespace and newlines removed: the one trim used by buttons and actions.
+    public static func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     /// Re-reads the known repos, merges the added ones, and keeps the selection valid.
-    public func refreshRepos() {
+    public func refreshRepos() async {
         var merged = client.knownRepos()
         for url in addedRepos where !merged.contains(url) { merged.append(url) }
         repos = merged
-        if launchForm.repo == nil || !merged.contains(launchForm.repo!) { selectRepo(merged.first) }
+        if launchForm.repo == nil || !merged.contains(launchForm.repo!) { await selectRepo(merged.first) }
     }
 
-    /// Selects a repo and loads its flows, choosing the first.
-    public func selectRepo(_ url: URL?) {
+    /// Selects a repo and loads its flows (scanned off the main actor), choosing the first. A result for a
+    /// repo that is no longer selected is dropped.
+    public func selectRepo(_ url: URL?) async {
         launchForm.repo = url
-        repoFlows = url.map { client.flows(in: $0) } ?? []
-        if launchForm.flow == nil || !repoFlows.contains(launchForm.flow!) { launchForm.flow = repoFlows.first }
+        guard let url else {
+            repoFlows = []
+            launchForm.flow = nil
+            return
+        }
+        let client = client
+        let found = await Task.detached { client.flows(in: url) }.value
+        guard launchForm.repo == url else { return }
+        repoFlows = found
+        if launchForm.flow == nil || !found.contains(launchForm.flow!) { launchForm.flow = found.first }
     }
 
     /// Selects a flow file.
@@ -90,14 +102,16 @@ extension AppModel {
 
     /// Whether the launch bar has a repo, a flow and a non-empty issue.
     public var canLaunch: Bool {
-        launchForm.repo != nil && launchForm.flow != nil
-            && !launchForm.issue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isLaunching && launchForm.repo != nil && launchForm.flow != nil && !Self.trimmed(launchForm.issue).isEmpty
     }
+
+    /// Whether the "Add repo..." field holds a path.
+    public var canAddRepo: Bool { !Self.trimmed(launchForm.newRepoPath).isEmpty }
 
     /// Adds the repo at `path` if it is a git repo top level, and selects it. Otherwise sets a notice.
     @discardableResult
     public func addRepo(path: String) async -> Bool {
-        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.trimmed(path)
         guard !trimmed.isEmpty else { return false }
         let url = URL(fileURLWithPath: (trimmed as NSString).expandingTildeInPath).standardizedFileURL
         guard await client.isGitRepo(url) else {
@@ -105,9 +119,9 @@ extension AppModel {
             return false
         }
         if !addedRepos.contains(url) { addedRepos.append(url) }
-        refreshRepos()
-        selectRepo(url)
-        launchForm.newRepoPath = ""
+        await refreshRepos()
+        await selectRepo(url)
+        if launchForm.newRepoPath == path { launchForm.newRepoPath = "" }
         return true
     }
 
@@ -115,14 +129,17 @@ extension AppModel {
     @discardableResult
     public func launchFromForm() async -> RunID? {
         guard canLaunch, let repo = launchForm.repo, let file = launchForm.flow else { return nil }
-        let issue = launchForm.issue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = launchForm.issue
+        let issue = Self.trimmed(typed)
         let flow: Flow
         do { flow = try client.loadFlow(file) } catch {
             notice = Notice(error.localizedDescription)
             return nil
         }
+        isLaunching = true
+        defer { isLaunching = false }
         let id = await launch(flow: flow, repo: repo, input: issue)
-        if id != nil { launchForm.issue = "" }
+        if id != nil, launchForm.issue == typed { launchForm.issue = "" }
         return id
     }
 }

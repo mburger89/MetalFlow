@@ -48,7 +48,8 @@ struct FinishedRow: Component {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(verbatim: result).font(size: 12).foregroundColor(color)
                     .accessibilityIdentifier("finished.\(id.rawValue).result")
-                Text(verbatim: ageText(Date().timeIntervalSince(finishedAt))).font(size: 12).foregroundColor(Palette.muted)
+                Text(verbatim: ageText(model.now.timeIntervalSince(finishedAt))).font(size: 12).foregroundColor(Palette.muted)
+                    .accessibilityIdentifier("finished.\(id.rawValue).age")
                     .frame(width: Pixels(56), alignment: .trailing)
             }
             .padding(insets(top: 8, right: 0, bottom: 8, left: 0))

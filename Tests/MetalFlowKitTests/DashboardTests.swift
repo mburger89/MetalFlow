@@ -30,11 +30,13 @@ import Testing
         _ = try window.element(identifier: "launch.flow")
         _ = try window.element(identifier: "launch.repo")
         #expect(!model.canLaunch, "Launch waits for an issue")
+        #expect(try !window.element(identifier: "launch.go").isEnabled, "the rendered button is disabled")
 
         try window.click(window.element(identifier: "launch.issue"))
         window.typeText("42")
         try await window.runUntilIdle()
         #expect(model.launchForm.issue == "42")
+        #expect(try window.element(identifier: "launch.go").isEnabled)
         try await press("launch.go", in: window)
 
         #expect(await client.calls.contains("launch(Fix GitHub issue, /repo, 42)"))
@@ -72,6 +74,69 @@ import Testing
         }
     }
 
+    @Test func compareAndPickAndOpenRunSelectTheRun() async throws {
+        let pick = makeRun("pick", status: .needsYou, nodes: [
+            NodeKey(node: "pick"): NodeRun(state: .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))])
+        let ask = makeRun("ask", status: .needsYou, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .needsYou(.question("Which file?")))])
+        let (model, _, window) = try await fixture([pick, ask])
+        try await press("needs.\(pick.id.rawValue).pick.primary", in: window)
+        #expect(model.selectedRun == pick.id)
+        model.selectedRun = nil
+        try await press("needs.\(ask.id.rawValue).plan.open", in: window)
+        #expect(model.selectedRun == ask.id)
+    }
+
+    @Test func aFailedRunWithAFailedNodeShowsARetryCard() async throws {
+        let failed = makeRun("failed", status: .failed("boom"), nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .failed("boom"))])
+        let (model, client, window) = try await fixture([failed])
+        #expect(model.finished.isEmpty)
+        #expect(model.needsYou.map(\.id) == [failed.id])
+        #expect(try window.element(identifier: "needs.\(failed.id.rawValue).plan.primary").label == "Retry")
+        try await press("needs.\(failed.id.rawValue).plan.primary", in: window)
+        #expect(await client.calls.contains("retry(plan)"))
+    }
+
+    @Test func doubleSubmitLaunchesOnce() async throws {
+        let (model, client, _) = try await fixture()
+        model.launchForm.issue = "42"
+        async let a = model.launchFromForm()
+        async let b = model.launchFromForm()
+        _ = await (a, b)
+        let launches = await client.calls.filter { $0.hasPrefix("launch(") }
+        #expect(launches.count == 1)
+    }
+
+    @Test func textTypedDuringALaunchSurvives() async throws {
+        let (model, client, _) = try await fixture()
+        await client.holdLaunches()
+        model.launchForm.issue = "42"
+        let task = Task { await model.launchFromForm() }
+        await Task.yield()
+        #expect(model.isLaunching)
+        #expect(!model.canLaunch)
+        model.launchForm.issue = "43"
+        await client.releaseLaunches()
+        _ = await task.value
+        #expect(model.launchForm.issue == "43")
+        #expect(!model.isLaunching)
+
+        model.launchForm.issue = "44"
+        _ = await model.launchFromForm()
+        #expect(model.launchForm.issue == "", "an unchanged field is cleared")
+    }
+
+    @Test func repoPathTextTypedDuringValidationSurvives() async throws {
+        let (model, _, _) = try await fixture(gitRepos: ["/other"])
+        model.launchForm.newRepoPath = "/other"
+        #expect(await model.addRepo(path: model.launchForm.newRepoPath))
+        #expect(model.launchForm.newRepoPath == "")
+        model.launchForm.newRepoPath = "/x"
+        #expect(await model.addRepo(path: "/other"))
+        #expect(model.launchForm.newRepoPath == "/x", "text that is not the validated path stays")
+    }
+
     @Test func retryAndResumeCallTheClient() async throws {
         let cut = makeRun("cut", status: .needsYou, nodes: [NodeKey(node: "plan"): NodeRun(state: .interrupted)])
         let bad = makeRun("bad", status: .needsYou, nodes: [NodeKey(node: "gate", lane: "a"): NodeRun(state: .failed("nope"))])
@@ -107,6 +172,12 @@ import Testing
         let id = run.id.rawValue
         #expect(try window.element(identifier: "run.\(id)").value == "#63 Word diff")
         #expect(try window.element(identifier: "run.\(id).log").value == "▸ Edit DiffView.swift")
+        let pillIDs = try window.elements { ($0.identifier ?? "").hasPrefix("pill.") }
+            .sorted { $0.frame.origin.x < $1.frame.origin.x }.compactMap(\.identifier)
+        let names = pillIDs.map { String($0.split(separator: ".")[1]) }
+        #expect(names == (try run.flow.validate().order.map(\.rawValue)))
+        #expect(names.firstIndex(of: "plan")! < names.firstIndex(of: "implement")!)
+        #expect(names.firstIndex(of: "implement")! < names.firstIndex(of: "gate")!)
         _ = try window.element(identifier: "pill.plan.done")
         _ = try window.element(identifier: "pill.implement.run")
         _ = try window.element(identifier: "pill.gate.wait")
@@ -136,6 +207,9 @@ import Testing
         let new = makeRun("#40 new", status: .discarded, createdAt: Date(timeIntervalSince1970: 2_000))
         let (model, _, window) = try await fixture([old, new])
         #expect(model.finished.map(\.title) == ["#40 new", "#39 old"])
+        let rows = try window.elements { ($0.identifier ?? "").hasPrefix("finished.") && ($0.identifier ?? "").split(separator: ".").count == 2 }
+            .sorted { $0.frame.origin.y < $1.frame.origin.y }.compactMap(\.value)
+        #expect(rows == ["#40 new", "#39 old"], "rendered newest first")
         #expect(try window.element(identifier: "finished.\(old.id.rawValue).result").value == "Merged A")
         #expect(try window.element(identifier: "finished.\(new.id.rawValue).result").value == "Discarded")
     }
@@ -143,8 +217,9 @@ import Testing
     @Test func finishedListCapsAtTwenty() async throws {
         let runs = (0..<25).map { makeRun("r\($0)", status: .completed, createdAt: Date(timeIntervalSince1970: Double(1_000 + $0))) }
         let (_, _, window) = try await fixture(runs)
-        let rows = try window.elements { ($0.identifier ?? "").hasSuffix(".result") && ($0.identifier ?? "").hasPrefix("finished.") }
-        #expect(rows.count == 20)
+        let rows = try window.elements { ($0.identifier ?? "").hasPrefix("finished.") && ($0.identifier ?? "").split(separator: ".").count == 2 }
+            .sorted { $0.frame.origin.y < $1.frame.origin.y }.compactMap(\.value)
+        #expect(rows == (5..<25).reversed().map { "r\($0)" }, "the 20 newest, newest first")
     }
 
     @Test func workingChipOpensAndDismisses() async throws {
@@ -165,5 +240,24 @@ import Testing
         model.apply(run)
         try await window.runUntilIdle()
         #expect(try window.elements { $0.identifier == "activity.item" }.count == 1)
+    }
+
+    @Test func workingChipIDsAreUniqueAcrossRepos() async throws {
+        let (model, _, window) = try await fixture()
+        model.open(flow: URL(fileURLWithPath: "/a/x.flow"))
+        model.open(flow: URL(fileURLWithPath: "/b/x.flow"))
+        try await window.runUntilIdle()
+        let titles = try window.elements { ($0.identifier ?? "").hasPrefix("working.flow.") && !($0.identifier ?? "").hasSuffix("open") && !($0.identifier ?? "").hasSuffix("dismiss") }
+        #expect(Set(titles.compactMap(\.identifier)).count == 2)
+    }
+
+    @Test func agesFollowTheModelClock() async throws {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let run = makeRun("old", status: .completed, createdAt: now.addingTimeInterval(-7_200))
+        let client = FakeEngineClient(restored: [run], repos: [repo], flowFiles: [flowFile])
+        let model = AppModel(client: client, notifier: NoopNotifier(), clock: { now })
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "finished.\(run.id.rawValue).age").value == "2h")
     }
 }

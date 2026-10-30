@@ -88,7 +88,7 @@ struct WorkingChip: Component {
         case .flow(let url):
             (
                 "FLOW", url.deletingPathExtension().lastPathComponent, "Open in Flow Studio",
-                "working.flow.\(url.lastPathComponent)"
+                "working.flow.\(url.path)"
             )
         case .run(let id):
             ("RUN", model.runs[id]?.title ?? "Run", model.runs[id].map(Self.statusText) ?? "", "working.run.\(id.rawValue)")

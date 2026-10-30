@@ -39,7 +39,7 @@ struct LaunchBar: Component {
                     } else {
                         Picker("Repo", selection: Binding(
                             get: { model.launchForm.repo ?? model.repos[0] },
-                            set: { model.selectRepo($0) })) {
+                            set: { url in let model = model; Task { await model.selectRepo(url) } })) {
                             ForEach(model.repos, id: \.self) { url in
                                 Text(verbatim: url.lastPathComponent).tag(url)
                             }
@@ -62,7 +62,7 @@ struct LaunchBar: Component {
                 Button("Add") { addRepo() }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("launch.addrepo.go")
-                    .disabled(form.newRepoPath.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!model.canAddRepo)
             }
         }
         .padding(Edges(all: Spacing.md))

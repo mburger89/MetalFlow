@@ -41,7 +41,19 @@ actor FakeEngineClient: EngineClient {
     }
 
     func restore() async throws -> [Run] { try record("restore"); return restored }
+    private var holding = false
+    private var held: [CheckedContinuation<Void, Never>] = []
+    /// Makes `launch` suspend until `releaseLaunches()`.
+    func holdLaunches() { holding = true }
+    /// Resumes every suspended `launch`.
+    func releaseLaunches() {
+        holding = false
+        for c in held { c.resume() }
+        held = []
+    }
+
     func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
+        if holding { await withCheckedContinuation { held.append($0) } }
         try record("launch(\(flow.name), \(repo.path), \(input))")
         return RunID()
     }
