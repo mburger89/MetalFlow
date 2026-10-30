@@ -64,6 +64,11 @@ public struct Git: Sendable {
         try await run(repo, ["worktree", "add", "-b", newBranch, path.path, from])
     }
 
+    /// Adds a worktree at `path` that checks out the existing branch `existingBranch`.
+    public func addWorktree(repo: URL, path: URL, existingBranch: String) async throws {
+        try await run(repo, ["worktree", "add", path.path, existingBranch])
+    }
+
     /// Force-removes the worktree at `path`.
     public func removeWorktree(repo: URL, path: URL) async throws {
         try await run(repo, ["worktree", "remove", "--force", path.path])

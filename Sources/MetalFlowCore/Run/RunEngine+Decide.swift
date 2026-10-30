@@ -29,12 +29,21 @@ extension RunEngine {
         requestPass(id)
     }
 
-    /// Resumes every interrupted node with "Continue where you left off."; throws if there is none.
+    /// Resumes every interrupted node with "Continue where you left off.". A run that stopped between nodes (nothing
+    /// interrupted, nothing waiting on you) simply continues. Throws `nothingToResume` when there is nothing to do.
     public func resumeInterrupted(_ id: RunID) throws {
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         let keys = run.nodes.filter { $0.value.state == .interrupted }.map(\.key)
             .sorted { $0.description < $1.description }
-        guard !keys.isEmpty else { throw RunEngineError.nothingToResume }
+        guard !keys.isEmpty else {
+            // The process died between nodes: the run reloaded as needs-you but nothing is waiting on the user.
+            guard run.status == .needsYou, run.needsYou.isEmpty, !picking.contains(id) else {
+                throw RunEngineError.nothingToResume
+            }
+            mutate(id) { $0.status = .running }
+            requestPass(id)
+            return
+        }
         for key in keys { try answer(id, node: key, reply: "Continue where you left off.") }
     }
 

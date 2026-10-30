@@ -229,7 +229,7 @@ public actor RunEngine {
     /// Settles the run's status after a pass.
     private func finalize(_ id: RunID) {
         guard let run = runs[id], run.status == .running, !rerunRequested.contains(id) else { return }
-        if !run.needsYou.isEmpty {
+        if !run.needsYou.isEmpty || hasInterrupted(run) {
             mutate(id) { $0.status = .needsYou }
             return
         }
@@ -241,6 +241,11 @@ public actor RunEngine {
         }
         // The pass ended with nothing runnable left and nothing waiting on the user; failed lanes count as finished.
         mutate(id) { $0.status = .completed }
+    }
+
+    /// True while any node is interrupted: it waits for an explicit answer or resume, never restarts on its own.
+    func hasInterrupted(_ run: Run) -> Bool {
+        run.nodes.values.contains { $0.state == .interrupted }
     }
 
     /// Suspends until the run's background execution (including a pass interrupted by `cancel`) has fully ended.
@@ -276,6 +281,8 @@ public actor RunEngine {
         if !laneNodes.isEmpty {
             try await runLaneGroup(id, plan: plan, nodes: laneNodes)
             if !(runs[id]?.needsYou.isEmpty ?? true) { return }
+            // An interrupted lane node blocks the judge until it is resumed.
+            if let current = runs[id], hasInterrupted(current) { return }
             // A lane answered during this pass is waiting again; the requested rerun finishes it before judge/pick.
             if rerunRequested.contains(id) || (runs[id]?.nodes.contains { $0.key.lane != nil && $0.value.state == .waiting } ?? false) {
                 return
@@ -299,6 +306,7 @@ public actor RunEngine {
         case .succeeded: return true
         case .failed: return false
         case .needsYou where !isPick: return false
+        case .interrupted: return false
         default: break
         }
         await runNode(id, key, plan: plan)
@@ -331,7 +339,7 @@ public actor RunEngine {
             let key = NodeKey(node: node, lane: lane)
             switch nodeState(id, key) {
             case .succeeded: continue
-            case .failed, .needsYou: return
+            case .failed, .needsYou, .interrupted: return
             default: break
             }
             await runNode(id, key, plan: plan)
@@ -339,23 +347,41 @@ public actor RunEngine {
         }
     }
 
-    /// Commits the run worktree and creates one worktree per candidate model, once per run.
+    /// Commits the run worktree and creates the worktree of every candidate lane that does not exist yet.
+    /// Safe to repeat after a crash: lanes already recorded are kept, and a lane branch or worktree left behind
+    /// by an interrupted attempt is adopted instead of recreated.
     private func ensureLanes(_ id: RunID, plan: FlowPlan) async throws {
-        guard let run = runs[id], run.lanes.isEmpty, let fan = plan.fanOut,
+        guard let run = runs[id], let fan = plan.fanOut,
               case .prompt(let config)? = run.flow.node(fan)?.kind else { return }
         guard config.candidates.count <= 26 else { throw RunEngineError.tooManyCandidates(config.candidates.count) }
-        _ = try await git.commitAll(worktree: run.worktree, message: "MetalFlow: before fan-out")
+        if run.lanes.count >= config.candidates.count { return }
+        if run.lanes.isEmpty {
+            _ = try await git.commitAll(worktree: run.worktree, message: "MetalFlow: before fan-out")
+        }
         for (index, model) in config.candidates.enumerated() {
             try Task.checkCancellation()
             let laneID = String(UnicodeScalar(UInt8(97 + index)))
+            if runs[id]?.lanes.contains(where: { $0.id == laneID }) == true { continue }
             let branch = BranchNaming.laneBranch(run: run.branch, lane: laneID)
             let path = store.worktreesDirectory.appendingPathComponent(id.rawValue).appendingPathComponent(laneID)
-            try await git.addWorktree(repo: run.repo, path: path, newBranch: branch, from: run.branch)
+            try await adoptOrAddWorktree(run: run, path: path, branch: branch)
             // Recorded even if the run was cancelled meanwhile, so cleanup can find the worktree.
             guard var current = runs[id] else { return }
             current.lanes.append(Lane(id: laneID, model: model, branch: branch, worktree: path))
             runs[id] = current
             persist(current)
+        }
+    }
+
+    private func adoptOrAddWorktree(run: Run, path: URL, branch: String) async throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path.appendingPathComponent(".git").path) { return }
+        let existing = try await git.branches(repo: run.repo)
+        if existing.contains(branch) {
+            try await git.pruneWorktrees(repo: run.repo)
+            try await git.addWorktree(repo: run.repo, path: path, existingBranch: branch)
+        } else {
+            try await git.addWorktree(repo: run.repo, path: path, newBranch: branch, from: run.branch)
         }
     }
 }
