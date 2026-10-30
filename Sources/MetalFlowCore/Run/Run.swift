@@ -197,13 +197,15 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
     public var lanes: [Lane]
     /// Lane recommended by the judge.
     public var recommendation: LaneID?
+    /// Branches created with "branch from here"; cleanup never deletes them.
+    public var keptBranches: [String]
 
     /// Creates a run.
     public init(
         id: RunID = RunID(), flow: Flow, title: String, repo: URL, baseBranch: String,
         branch: String, worktree: URL, inputs: [String: String] = [:], createdAt: Date = Date(),
         status: RunStatus = .running, nodes: [NodeKey: NodeRun] = [:], lanes: [Lane] = [],
-        recommendation: LaneID? = nil
+        recommendation: LaneID? = nil, keptBranches: [String] = []
     ) {
         self.id = id
         self.flow = flow
@@ -218,6 +220,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         self.nodes = nodes
         self.lanes = lanes
         self.recommendation = recommendation
+        self.keptBranches = keptBranches
     }
 
     /// Nodes waiting on the user, ordered by index in `flow.nodes`, then lane.
@@ -238,7 +241,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, flow, title, repo, baseBranch, branch, worktree, inputs, createdAt
-        case status, nodes, lanes, recommendation
+        case status, nodes, lanes, recommendation, keptBranches
     }
 
     /// Decodes a run; `nodes` is a JSON object keyed by `NodeKey.description`.
@@ -256,6 +259,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         status = try c.decode(RunStatus.self, forKey: .status)
         lanes = try c.decode([Lane].self, forKey: .lanes)
         recommendation = try c.decodeIfPresent(LaneID.self, forKey: .recommendation)
+        keptBranches = try c.decodeIfPresent([String].self, forKey: .keptBranches) ?? []
         let raw = try c.decode([String: NodeRun].self, forKey: .nodes)
         var parsed: [NodeKey: NodeRun] = [:]
         for (k, v) in raw {
@@ -283,6 +287,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         try c.encode(status, forKey: .status)
         try c.encode(lanes, forKey: .lanes)
         try c.encodeIfPresent(recommendation, forKey: .recommendation)
+        try c.encode(keptBranches, forKey: .keptBranches)
         var raw: [String: NodeRun] = [:]
         for (k, v) in nodes { raw[k.description] = v }
         try c.encode(raw, forKey: .nodes)

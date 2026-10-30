@@ -57,6 +57,16 @@ public struct Git: Sendable {
         try await run(repo, ["worktree", "remove", "--force", path.path])
     }
 
+    /// Creates a local branch `name` at `startPoint` without checking it out.
+    public func createBranch(repo: URL, name: String, at startPoint: String) async throws {
+        try await run(repo, ["branch", name, startPoint])
+    }
+
+    /// Removes administrative records of worktrees whose directories are gone.
+    public func pruneWorktrees(repo: URL) async throws {
+        try await run(repo, ["worktree", "prune"])
+    }
+
     /// Force-deletes a local branch.
     public func deleteBranch(repo: URL, name: String) async throws {
         try await run(repo, ["branch", "-D", name])

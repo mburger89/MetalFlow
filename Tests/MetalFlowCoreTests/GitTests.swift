@@ -18,6 +18,17 @@ import Testing
         #expect(try await git.branches(repo: repo.url) == ["main"])
     }
 
+    @Test func createBranchAndPrune() async throws {
+        let repo = try TempRepo()
+        try await git.createBranch(repo: repo.url, name: "keep", at: "main")
+        #expect(try await git.branches(repo: repo.url).contains("keep"))
+        let wt = repo.worktreePath("wt")
+        try await git.addWorktree(repo: repo.url, path: wt, newBranch: "flow/p", from: "main")
+        try FileManager.default.removeItem(at: wt)
+        try await git.pruneWorktrees(repo: repo.url)
+        #expect(try repo.git(["worktree", "list"]).split(separator: "\n").count == 1)
+    }
+
     @Test func commitAllReportsNothingToCommit() async throws {
         let repo = try TempRepo()
         #expect(try await git.commitAll(worktree: repo.url, message: "none") == false)

@@ -12,6 +12,16 @@ public enum RunEngineError: Error, Equatable {
     case invalid(FlowError)
     /// A fan-out node lists more candidates than there are lane letters (26).
     case tooManyCandidates(Int)
+    /// The node is not waiting on a question, denied tools or an interruption, or the run is over.
+    case notAnswerable(NodeKey)
+    /// The run is not waiting for a winner, the lane does not exist, or a pick is already in progress.
+    case notPickable
+    /// The run is still running (or being picked); cancel it first.
+    case notDiscardable
+    /// The run has no lane with this ID.
+    case unknownLane(LaneID)
+    /// The run is already merged or discarded, so no branch can be made from it.
+    case notBranchable
 }
 
 /// Executes flow runs as headless agent sessions in git worktrees.
@@ -34,6 +44,7 @@ public actor RunEngine {
     var runs: [RunID: Run] = [:]
     var tasks: [RunID: Task<Void, Never>] = [:]
     var rerunRequested: Set<RunID> = []
+    var picking: Set<RunID> = []
 
     /// Creates an engine. `shellEnvironment` is merged into the environment of shell and gate nodes.
     public init(store: RunStore, runner: any CommandRunner, agent: any AgentSession, issues: GitHubIssues,
