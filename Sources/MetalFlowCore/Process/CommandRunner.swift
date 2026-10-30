@@ -51,6 +51,23 @@ public enum CommandError: Error, Equatable {
     case failed(Command, exitCode: Int32, stderr: String)
 }
 
+extension CommandError: LocalizedError {
+    /// A readable message naming the executable and, for failures, the exit code and stderr.
+    public var errorDescription: String? {
+        switch self {
+        case .executableNotFound(let name):
+            return "\(name): executable not found on PATH"
+        case .launchFailed(let detail):
+            return "could not start \(detail)"
+        case .failed(let command, let code, let stderr):
+            let line = ([command.executable] + command.arguments).joined(separator: " ")
+            let shown = line.count > 200 ? String(line.prefix(200)) + "…" : line
+            let tail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "\(command.executable) exited with status \(code) (\(shown))" + (tail.isEmpty ? "" : ": \(tail)")
+        }
+    }
+}
+
 /// Runs external programs.
 public protocol CommandRunner: Sendable {
     /// Runs a command to completion and captures its output, whatever the exit code.

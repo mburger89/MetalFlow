@@ -40,6 +40,11 @@ final class FakeAgent: AgentSession {
         state.withLock { $0.scripts.append(Script(match: match, effect: effect, events: events, hold: hold)) }
     }
 
+    /// Registers a script whose stream fails with `error` as soon as it starts.
+    func script(_ match: @escaping @Sendable (AgentRequest) -> Bool, throwing error: any Error) {
+        script(match, effect: { _ in throw error }, events: [])
+    }
+
     func run(_ r: AgentRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         let script: Script? = state.withLock { s in
             s.requests.append(r)

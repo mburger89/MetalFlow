@@ -22,6 +22,23 @@ public enum FlowError: Error, Equatable, Sendable {
     case unwiredPlaceholder(NodeID, String)
 }
 
+extension FlowError: LocalizedError {
+    /// A readable message.
+    public var errorDescription: String? {
+        switch self {
+        case .invalidNodeID(let id): return "invalid node id '\(id.rawValue)' (use letters, digits, _ and -)"
+        case .cycle(let ids): return "the flow has a cycle through \(ids.map(\.rawValue).joined(separator: ", "))"
+        case .danglingWire(let w): return "wire \(w.from.rawValue) -> \(w.to.rawValue) references a missing node"
+        case .duplicateNode(let id): return "two nodes share the id '\(id.rawValue)'"
+        case .duplicateInput(let id, let name): return "node '\(id.rawValue)' has two wires feeding {\(name)}"
+        case .nestedFanOut(let id): return "fan-out node '\(id.rawValue)' sits downstream of another fan-out"
+        case .multipleFanOuts(let id): return "the flow has more than one fan-out node ('\(id.rawValue)')"
+        case .judgeWithoutFanOut(let id): return "judge '\(id.rawValue)' has no fan-out upstream"
+        case .unwiredPlaceholder(let id, let name): return "node '\(id.rawValue)' uses {\(name)} but nothing is wired to it"
+        }
+    }
+}
+
 /// The result of validating a flow: execution order and fan-out structure.
 public struct FlowPlan: Hashable, Sendable {
     /// Topological order, ties broken by node order in the flow.

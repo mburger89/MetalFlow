@@ -38,3 +38,12 @@ public enum FlowFile {
         try data.write(to: url, options: .atomic)
     }
 }
+
+extension FlowFile.LoadError: LocalizedError {
+    /// A readable message.
+    public var errorDescription: String? {
+        switch self {
+        case .unsupportedFormatVersion(let v): return "unsupported flow file format version \(v)"
+        }
+    }
+}

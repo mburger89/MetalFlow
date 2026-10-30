@@ -221,6 +221,19 @@ import Testing
         #expect(RunEngine.recommendation(in: "`RECOMMEND: a`", lanes: lanes) == "a")
     }
 
+    @Test func missingExecutableErrorIsReadable() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.contains("short numbered plan") }, throwing: CommandError.executableNotFound("claude"))
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let run = await h.settled(id)
+        guard case .failed(let message)? = run.nodes[NodeKey(node: "plan")]?.state else {
+            Issue.record("plan did not fail"); return
+        }
+        #expect(message.contains("claude"))
+        #expect(CommandError.failed(Command(executable: "git", arguments: ["x"]), exitCode: 2, stderr: "boom\n")
+            .localizedDescription.contains("boom"))
+    }
+
     @Test func ghErrorThrowsFromLaunchWithoutWorktree() async throws {
         let h = try Harness()
         h.gh.stub("gh", ["issue", "view"], result: CommandResult(exitCode: 1, stdout: "", stderr: "no such issue"))

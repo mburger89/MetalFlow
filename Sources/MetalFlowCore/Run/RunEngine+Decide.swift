@@ -126,20 +126,20 @@ extension RunEngine {
         for path in run.lanes.map(\.worktree) + [run.worktree] {
             guard fm.fileExists(atPath: path.path) else { continue }
             do { try await git.removeWorktree(repo: run.repo, path: path) } catch {
-                let text = String(describing: error)
+                let text = error.localizedDescription
                 if !text.contains("not a working tree") && !text.contains("not a worktree") { errors.append(text) }
             }
         }
         let existing = (try? await git.branches(repo: run.repo)) ?? []
         for branch in run.lanes.map(\.branch) + [run.branch]
         where existing.contains(branch) && !run.keptBranches.contains(branch) {
-            do { try await git.deleteBranch(repo: run.repo, name: branch) } catch { errors.append(String(describing: error)) }
+            do { try await git.deleteBranch(repo: run.repo, name: branch) } catch { errors.append(error.localizedDescription) }
         }
         let directory = store.worktreesDirectory.appendingPathComponent(id.rawValue)
         if fm.fileExists(atPath: directory.path) {
-            do { try fm.removeItem(at: directory) } catch { errors.append(String(describing: error)) }
+            do { try fm.removeItem(at: directory) } catch { errors.append(error.localizedDescription) }
         }
-        do { try await git.pruneWorktrees(repo: run.repo) } catch { errors.append(String(describing: error)) }
+        do { try await git.pruneWorktrees(repo: run.repo) } catch { errors.append(error.localizedDescription) }
         if !errors.isEmpty {
             let key = pickNodeKey(run) ?? run.flow.nodes.first.map { NodeKey(node: $0.id) }
             setDirect(id) { run in

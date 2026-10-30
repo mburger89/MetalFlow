@@ -43,7 +43,7 @@ func run() async -> Int32 {
                 ?? repo.appendingPathComponent(FlowFile.directoryName).appendingPathComponent("fix-issue.flow")
             let flow: Flow
             do { flow = try FlowFile.load(from: flowURL) } catch {
-                throw CommandFailure(message: "cannot load flow \(flowURL.path): \(error)")
+                throw CommandFailure(message: "cannot load flow \(flowURL.path): \(error.localizedDescription)")
             }
             let id = try await engine.launch(flow: flow, repo: repo, input: args.positionals[0])
             print(id.rawValue)
@@ -110,7 +110,7 @@ func run() async -> Int32 {
         stderrPrint("mflow: \(e.message)")
         return 1
     } catch {
-        stderrPrint("mflow: \(error)")
+        stderrPrint("mflow: \(error.localizedDescription)")
         return 1
     }
 }

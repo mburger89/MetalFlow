@@ -22,8 +22,33 @@ public enum RunEngineError: Error, Equatable {
     case unknownLane(LaneID)
     /// The run is already merged or discarded, so no branch can be made from it.
     case notBranchable
-    /// No node of the run is interrupted.
+    /// Nothing is interrupted and nothing is waiting, so there is nothing to resume.
     case nothingToResume
+    /// Another engine (typically another `mflow` process) is working on this run.
+    case runBusy(RunID)
+    /// The name is not a valid git branch name.
+    case invalidBranchName(String)
+}
+
+extension RunEngineError: LocalizedError {
+    /// A readable message.
+    public var errorDescription: String? {
+        switch self {
+        case .detachedHead: return "the repository has a detached HEAD; check out a branch first"
+        case .multipleFlowInputs: return "the flow has more than one flow-input node"
+        case .unknownRun(let id): return "no run \(id.rawValue)"
+        case .invalid(let error): return "the flow is not valid: \(error.localizedDescription)"
+        case .tooManyCandidates(let n): return "a fan-out lists \(n) candidates; at most 26 are supported"
+        case .notAnswerable(let key): return "\(key) is not waiting for an answer (or the run is over)"
+        case .notPickable: return "the run is not waiting for a winner, the lane does not exist, or a pick is in progress"
+        case .notDiscardable: return "the run is still running; cancel it first"
+        case .unknownLane(let lane): return "the run has no lane '\(lane)'"
+        case .notBranchable: return "the run is already merged or discarded"
+        case .nothingToResume: return "nothing to resume: no node is interrupted or waiting"
+        case .runBusy(let id): return "run \(id.rawValue) is running in another mflow"
+        case .invalidBranchName(let name): return "'\(name)' is not a valid branch name"
+        }
+    }
 }
 
 /// Executes flow runs as headless agent sessions in git worktrees.
@@ -150,7 +175,7 @@ public actor RunEngine {
             try store.save(run)
             lastSaveError = nil
         } catch {
-            lastSaveError = String(describing: error)
+            lastSaveError = error.localizedDescription
         }
         continuation.yield(run)
     }
@@ -197,7 +222,7 @@ public actor RunEngine {
                 try await execute(id)
             } catch is CancellationError {
             } catch {
-                mutate(id) { $0.status = .failed(String(describing: error)) }
+                mutate(id) { $0.status = .failed(error.localizedDescription) }
             }
             finalize(id)
         } while rerunRequested.contains(id) && !Task.isCancelled

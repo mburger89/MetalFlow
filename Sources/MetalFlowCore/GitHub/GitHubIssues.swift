@@ -32,6 +32,16 @@ public enum GitHubError: Error, Equatable {
     case invalidReference(String)
 }
 
+extension GitHubError: LocalizedError {
+    /// A readable message.
+    public var errorDescription: String? {
+        switch self {
+        case .invalidReference(let ref):
+            return "'\(ref)' is not an issue number (42, #42) or an http(s) issue URL"
+        }
+    }
+}
+
 /// Fetches issues through the `gh` CLI.
 public struct GitHubIssues: Sendable {
     private let runner: any CommandRunner

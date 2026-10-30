@@ -18,6 +18,18 @@ public enum GitError: Error, Equatable {
     case abortFailed(checkout: URL, stderr: String)
 }
 
+extension GitError: LocalizedError {
+    /// A readable message including git's stderr.
+    public var errorDescription: String? {
+        switch self {
+        case .mergeFailed(let stderr):
+            return "git merge failed: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+        case .abortFailed(let checkout, let stderr):
+            return "git merge --abort failed; \(checkout.path) may still be mid-merge: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+    }
+}
+
 /// Git operations used for run and candidate worktrees.
 public struct Git: Sendable {
     private let runner: CommandRunner
