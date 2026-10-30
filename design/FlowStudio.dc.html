@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flow Studio</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d0f12}
+a{color:#8cc4ff}a:hover{color:#b9dbff}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button{font:inherit;cursor:pointer}
+.dots{background-color:#101215;background-image:radial-gradient(#2a2f37 1px,transparent 1px);background-size:20px 20px}
+</style>
+</helmet>
+<div style="min-height: 900px; display: flex; flex-direction: column; background: #111316; color: #e6e8eb; font-family: Inter, system-ui, sans-serif; font-size: 13px">
+
+  <!-- toolbar -->
+  <div style="min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 6px 14px; background: #0d0f12; border-bottom: 1px solid #23272e; flex-wrap: wrap">
+    <div aria-hidden="true" style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span></div>
+    <span style="margin-left: 8px; color: #9aa1ab">Flows /</span>
+    <span style="font-weight: 600">Issue → Plan → Implement ×3 → Judge</span>
+    <span style="font-size: 12px; color: #9aa1ab">Saved · .flows/undo-graph.flow</span>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+      <div role="group" aria-label="Variants" style="display: flex; align-items: center; border: 1px solid #2f343c; border-radius: 8px; height: 30px">
+        <button aria-label="Fewer variants" style="width: 28px; height: 28px; border: 0; background: transparent; color: #b9c0ca">−</button>
+        <span style="padding: 0 6px; font-size: 12px">Variants ×3</span>
+        <button aria-label="More variants" style="width: 28px; height: 28px; border: 0; background: transparent; color: #b9c0ca">+</button>
+      </div>
+      <button style="height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb">Run from selected</button>
+      <button style="height: 30px; padding: 0 14px; border-radius: 8px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600">▶ Run flow</button>
+    </div>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+    <!-- palette -->
+    <aside aria-label="Node palette" style="flex: 0 1 200px; background: #14161a; border-right: 1px solid #23272e; padding: 12px 10px; display: flex; flex-direction: column; gap: 4px">
+      <label for="fs-find" class="sr">Find a node</label>
+      <input id="fs-find" placeholder="Find a node…" style="height: 30px; border-radius: 6px; border: 1px solid #2a2f37; background: #111316; color: #e6e8eb; padding: 0 10px; font: inherit; margin-bottom: 8px">
+      <sc-for list="{{palette}}" as="g" hint-placeholder-count="3">
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab; padding: 10px 4px 4px">{{g.label}}</div>
+        <sc-for list="{{g.items}}" as="it">
+          <button style="display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; border: 1px solid #23272e; border-radius: 6px; background: #171a1f; color: #e6e8eb; padding: 0 8px; margin-bottom: 4px; text-align: left"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: {{g.color}}"></span>{{it}}</button>
+        </sc-for>
+      </sc-for>
+    </aside>
+
+    <!-- graph + outputs -->
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+      <div class="dots" style="flex: 1; min-height: 520px; overflow: auto; position: relative">
+        <div style="position: relative; width: 980px; height: 520px; margin: 10px">
+          <sc-for list="{{wires}}" as="w" hint-placeholder-count="8">
+            <svg aria-hidden="true" width="{{w.w}}" height="{{w.h}}" style="position: absolute; left: {{w.x}}px; top: {{w.y}}px; overflow: visible"><path d="{{w.d}}" fill="none" stroke="{{w.color}}" stroke-width="2"></path></svg>
+          </sc-for>
+          <sc-for list="{{nodes}}" as="n" hint-placeholder-count="8">
+            <div style="position: absolute; left: {{n.x}}px; top: {{n.y}}px; width: 200px; height: {{n.h}}px; box-sizing: border-box; border-radius: 10px; background: #181b21; border: {{n.border}}; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px">
+              <span aria-hidden="true" style="position: absolute; left: -5px; top: {{n.port}}px; width: 8px; height: 8px; border-radius: 5px; background: #111316; border: 1px solid #5d6470"></span>
+              <span aria-hidden="true" style="position: absolute; right: -5px; top: {{n.port}}px; width: 8px; height: 8px; border-radius: 5px; background: #111316; border: 1px solid #5d6470"></span>
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; color: #b9c0ca"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: {{n.kc}}"></span>{{n.kind}}<span style="margin-left: auto; font-weight: 500; letter-spacing: 0; color: #9aa1ab">{{n.model}}</span></div>
+              <div style="font-weight: 600; font-size: 14px">{{n.title}}</div>
+              <div style="font-size: 12px; color: #b9c0ca; line-height: 1.4">{{n.body}}</div>
+              <div style="margin-top: auto; font-size: 12px; color: {{n.sc}}">{{n.status}}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="position: absolute; right: 12px; bottom: 12px; display: flex; gap: 4px; background: #171a1f; border: 1px solid #2a2f37; border-radius: 8px; padding: 4px">
+          <button aria-label="Zoom out" style="width: 28px; height: 28px; border: 0; background: transparent; color: #b9c0ca">−</button>
+          <span style="align-self: center; font-size: 12px; color: #b9c0ca; padding: 0 4px">100%</span>
+          <button aria-label="Zoom in" style="width: 28px; height: 28px; border: 0; background: transparent; color: #b9c0ca">+</button>
+          <button style="height: 28px; border: 0; background: transparent; color: #b9c0ca; font-size: 12px">Fit</button>
+        </div>
+      </div>
+
+      <!-- output comparison -->
+      <section aria-label="Run outputs" style="border-top: 1px solid #23272e; background: #111316; padding: 12px 14px">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px"><span style="font-weight: 600">Outputs</span><span style="font-size: 12px; color: #9aa1ab">Run 7 · 3 candidates · judge picked B</span><span style="margin-left: auto; font-size: 12px; color: #9aa1ab">Compare side by side</span></div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+          <sc-for list="{{outs}}" as="o" hint-placeholder-count="3">
+            <div style="border: {{o.border}}; border-radius: 10px; background: #14161a; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0">
+              <div style="display: flex; align-items: center; gap: 8px"><span style="font-weight: 600">{{o.name}}</span><span style="font-size: 11px; color: #9aa1ab">{{o.model}}</span><span style="margin-left: auto; font-size: 11px; font-weight: 600; color: {{o.tagColor}}">{{o.tag}}</span></div>
+              <div style="display: flex; gap: 12px; font-size: 12px; color: #b9c0ca"><span style="color: {{o.testColor}}">{{o.tests}}</span><span><span style="color: #56d364">{{o.add}}</span> <span style="color: #ff7b72">{{o.del}}</span></span><span>{{o.files}}</span></div>
+              <div style="font-size: 12px; color: #9aa1ab; line-height: 1.4">{{o.note}}</div>
+              <div style="display: flex; gap: 6px"><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 0; background: {{o.btnBg}}; color: {{o.btnFg}}; font-size: 12px; font-weight: 600">Choose</button><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">View diff</button><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Branch from here</button></div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+    </main>
+
+    <!-- inspector -->
+    <aside aria-label="Inspector" style="flex: 1 1 340px; max-width: 380px; min-width: 300px; background: #14161a; border-left: 1px solid #23272e; display: flex; flex-direction: column">
+      <div style="padding: 12px 14px; border-bottom: 1px solid #23272e">
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab">PROMPT NODE</div>
+        <div style="font-size: 16px; font-weight: 600; margin-top: 2px">Implement B</div>
+      </div>
+      <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow: auto">
+        <div style="display: flex; gap: 8px">
+          <div style="flex: 1"><label for="fs-model" style="display: block; font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Model</label><select id="fs-model" style="width: 100%; height: 30px; border-radius: 6px; border: 1px solid #2a2f37; background: #111316; color: #e6e8eb; font: inherit"><option>Opus</option><option>Sonnet</option><option>Haiku</option></select></div>
+          <div style="flex: 1"><label for="fs-temp" style="display: block; font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Temperature 0.4</label><input id="fs-temp" type="range" min="0" max="1" step="0.1" value="0.4" style="width: 100%"></div>
+        </div>
+        <div>
+          <div style="font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Inputs</div>
+          <div style="display: flex; flex-direction: column; gap: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px">
+            <div style="display: flex; justify-content: space-between; padding: 6px 8px; border-radius: 6px; background: #1a1d23"><span style="color: #f0a35e">plan</span><span style="color: #9aa1ab">← Plan.output</span></div>
+            <div style="display: flex; justify-content: space-between; padding: 6px 8px; border-radius: 6px; background: #1a1d23"><span style="color: #f0a35e">files</span><span style="color: #9aa1ab">← Graph sources</span></div>
+            <div style="display: flex; justify-content: space-between; padding: 6px 8px; border-radius: 6px; background: #1a1d23"><span style="color: #f0a35e">style</span><span style="color: #9aa1ab">← "minimal diff"</span></div>
+          </div>
+        </div>
+        <div>
+          <label for="fs-prompt" style="display: block; font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Prompt</label>
+          <textarea id="fs-prompt" rows="7" style="width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid #2a2f37; background: #111316; color: #e6e8eb; padding: 10px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5; resize: vertical">Implement the plan below in the given files. Prefer the {style} approach. Keep public API unchanged and add tests.
+
+Plan:
+{plan}
+
+Files:
+{files}</textarea>
+        </div>
+        <div>
+          <div style="font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Gate</div>
+          <div style="padding: 8px 10px; border-radius: 6px; background: #1a1d23; font-family: 'JetBrains Mono', monospace; font-size: 12px">swift test --filter Graph <span style="color: #56d364">· must pass</span></div>
+        </div>
+        <div>
+          <div style="font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Last output</div>
+          <div style="border-radius: 8px; border: 1px solid #23272e; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 19px; padding: 6px 0; overflow-x: auto">
+            <div style="white-space: pre; padding: 0 10px; background: rgba(255,123,114,0.12)"><span style="color: #ff7b72">− </span>nodes[id]?.position = p</div>
+            <div style="white-space: pre; padding: 0 10px; background: rgba(86,211,100,0.12)"><span style="color: #56d364">+ </span>apply(.move(id, from: old, to: p))</div>
+            <div style="white-space: pre; padding: 0 10px; background: rgba(86,211,100,0.12)"><span style="color: #56d364">+ </span>undoStack.coalesceDrags()</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5aa9ff","options":["#5aa9ff","#f0a35e","#b48cff","#4fd1a5"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#5aa9ff';
+    const KC = { ctx: '#8b93a1', prompt: accent, judge: '#f0a35e', out: '#56d364' };
+    const N = (id, x, y, h, k, kind, model, title, body, status, sc, sel) => ({ id, x, y, h, kind, model, title, body, status, sc, kc: KC[k], port: Math.round(h / 2) - 4, border: sel ? '2px solid ' + accent : '1px solid #2f343c' });
+    const nodes = [
+      N('ctx', 24, 40, 120, 'ctx', 'CONTEXT', '', 'Graph sources', 'Sources/Graph/*.swift · 6 files', 'Ready', '#9aa1ab'),
+      N('issue', 24, 230, 110, 'ctx', 'CONTEXT', '', 'Issue #42', 'Undo is missing on the canvas', 'Ready', '#9aa1ab'),
+      N('plan', 264, 130, 140, 'prompt', 'PROMPT', 'Opus', 'Plan', 'Write a step plan for {issue} using {files}.', '✓ Done · 0:14', '#56d364'),
+      N('a', 504, 10, 140, 'prompt', 'PROMPT', 'Sonnet', 'Implement A', 'Plan → code, style: "explicit"', '✓ Tests 24/24', '#56d364'),
+      N('b', 504, 185, 140, 'prompt', 'PROMPT', 'Opus', 'Implement B', 'Plan → code, style: "minimal diff"', '✓ Tests 24/24', '#56d364', true),
+      N('c', 504, 360, 140, 'prompt', 'PROMPT', 'Haiku', 'Implement C', 'Plan → code, style: "fast"', '✕ Tests 21/24', '#ff7b72'),
+      N('judge', 744, 120, 150, 'judge', 'JUDGE', 'Opus', 'Pick best', 'Passing tests first, then smallest diff', '→ Picked B', '#f0a35e'),
+      N('out', 744, 360, 110, 'out', 'OUTPUT', '', 'Patch → Review', 'Opens in the diff viewer', 'Ready to apply', '#56d364')
+    ];
+    const byId = {}; nodes.forEach((n) => { byId[n.id] = n; });
+    const wire = (a, b, color) => {
+      const A = byId[a], B = byId[b];
+      const x1 = A.x + 200, y1 = A.y + A.h / 2, x2 = B.x, y2 = B.y + B.h / 2;
+      const x = x1, y = Math.min(y1, y2) - 2, w = x2 - x1, h = Math.abs(y2 - y1) + 4;
+      const ya = y1 - y, yb = y2 - y;
+      return { x, y, w, h, color: color || '#4a515c', d: 'M0 ' + ya + ' C ' + (w / 2) + ' ' + ya + ', ' + (w / 2) + ' ' + yb + ', ' + w + ' ' + yb };
+    };
+    const J = byId.judge;
+    const wires = [
+      wire('ctx', 'plan'), wire('issue', 'plan'),
+      wire('plan', 'a'), wire('plan', 'b', accent), wire('plan', 'c'),
+      wire('a', 'judge'), wire('b', 'judge', accent), wire('c', 'judge'),
+      { x: J.x + 96, y: J.y + J.h, w: 8, h: 360 - (J.y + J.h), color: '#56d364', d: 'M4 0 L4 ' + (360 - (J.y + J.h)) }
+    ];
+    const palette = [
+      { label: 'INPUTS', color: '#8b93a1', items: ['Files', 'Selection', 'Issue', 'Web page'] },
+      { label: 'STEPS', color: accent, items: ['Prompt', 'Fan-out', 'Tool call', 'Shell command', 'Merge'] },
+      { label: 'DECIDE', color: '#f0a35e', items: ['Judge', 'Human pick', 'Condition'] },
+      { label: 'OUTPUTS', color: '#56d364', items: ['Patch', 'Message', 'New file'] }
+    ];
+    const O = (name, model, tests, ok, add, del, files, note, pick) => ({ name, model, tests, add, del, files, note, testColor: ok ? '#56d364' : '#ff7b72', tag: pick ? 'JUDGE PICK' : '', tagColor: '#f0a35e', border: pick ? '2px solid ' + accent : '1px solid #262a31', btnBg: pick ? accent : '#262c36', btnFg: pick ? '#0b1220' : '#e6e8eb' });
+    const outs = [
+      O('A', 'Sonnet', 'Tests 24/24', true, '+31', '−7', '3 files', 'Separate UndoManager type; more code, very explicit.'),
+      O('B', 'Opus', 'Tests 24/24', true, '+22', '−5', '3 files', 'GraphCommand enum with inverses; coalesces drags.', true),
+      O('C', 'Haiku', 'Tests 21/24', false, '+40', '−12', '4 files', 'Snapshots the whole graph; fails redo after delete.')
+    ];
+    return { accent, nodes, wires, palette, outs };
+  }
+}
+</script>
+</body>
+</html>

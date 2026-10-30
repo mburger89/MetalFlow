@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d0f12}
+a{color:#8cc4ff}a:hover{color:#b9dbff}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="min-height: 900px; display: flex; flex-direction: column; background: #111316; color: #e6e8eb; font-family: Inter, system-ui, sans-serif; font-size: 13px">
+
+  <!-- title bar -->
+  <div style="min-height: 38px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #0d0f12; border-bottom: 1px solid #23272e; flex-wrap: wrap">
+    <div aria-hidden="true" style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span></div>
+    <span style="font-weight: 600; margin-left: 8px">MetalFlow</span>
+    <nav aria-label="Views" style="margin-left: 16px; display: flex; gap: 4px">
+      <a href="#" style="text-decoration: none; padding: 4px 10px; border-radius: 6px; background: #1d2128; color: #e6e8eb; font-size: 12px">Dashboard</a>
+      <a href="#" style="text-decoration: none; padding: 4px 10px; border-radius: 6px; color: #9aa1ab; font-size: 12px">Flow Studio</a>
+    </nav>
+    <span style="margin-left: auto; font-size: 12px; color: #9aa1ab">3 running · <span style="color: #f0a35e">3 need you</span></span>
+  </div>
+
+  <!-- launch bar -->
+  <div style="padding: 18px 20px 4px">
+    <form style="max-width: 1100px; margin: 0 auto; border: 1px solid #2f343c; border-radius: 14px; background: #171a1f; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+      <div style="flex: 1 1 220px"><label for="db-flow" style="display: block; font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Flow</label><select id="db-flow" style="width: 100%; height: 34px; border-radius: 8px; border: 1px solid #2a2f37; background: #111316; color: #e6e8eb; font: inherit"><option>Fix GitHub issue</option><option>Release notes</option></select></div>
+      <div style="flex: 2 1 260px"><label for="db-issue" style="display: block; font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Issue</label><input id="db-issue" placeholder="#68 or issue URL" style="width: 100%; box-sizing: border-box; height: 34px; border-radius: 8px; border: 1px solid #2a2f37; background: #111316; color: #e6e8eb; padding: 0 10px; font: inherit"></div>
+      <div style="flex: 1 1 180px"><label for="db-repo" style="display: block; font-size: 12px; color: #9aa1ab; margin-bottom: 4px">Repo</label><select id="db-repo" style="width: 100%; height: 34px; border-radius: 8px; border: 1px solid #2a2f37; background: #111316; color: #e6e8eb; font: inherit"><option>MetalFlow</option><option>MetalUI</option></select></div>
+      <button type="submit" style="height: 34px; padding: 0 18px; border-radius: 8px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600">Launch run</button>
+    </form>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+    <main style="flex: 999 1 640px; min-width: 0; padding: 14px 20px 20px; display: flex; flex-direction: column; gap: 22px">
+
+      <!-- needs you -->
+      <section aria-label="Needs you">
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #f0a35e">NEEDS YOU</span><span style="font-size: 12px; color: #9aa1ab">Waits here until you get to it</span></div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px">
+          <sc-for list="{{needs}}" as="n" hint-placeholder-count="3">
+            <div style="border: 1px solid {{n.c}}; border-radius: 10px; background: #1a1712; padding: 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0">
+              <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: {{n.c}}">{{n.kind}}</div>
+              <div style="font-weight: 600">{{n.title}}</div>
+              <div style="color: #c9ced6; line-height: 1.45">{{n.sub}}</div>
+              <div style="display: flex; gap: 6px; margin-top: 4px"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{n.c}}; color: #1a1206; font-size: 12px; font-weight: 600">{{n.primary}}</button><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Open run</button></div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <!-- working on -->
+      <section aria-label="Working on">
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab">WORKING ON</span><span style="font-size: 12px; color: #9aa1ab">Flows and runs you have open</span></div>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px">
+          <sc-for list="{{working}}" as="w" hint-placeholder-count="3">
+            <div style="flex: 1 1 240px; display: flex; align-items: center; gap: 10px; border: 1px solid #262a31; border-radius: 10px; background: #14161a; padding: 10px 12px; min-width: 0">
+              <span style="font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: #1f232a; color: #b9c0ca">{{w.type}}</span>
+              <div style="flex: 1; min-width: 0"><div style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{w.title}}</div><div style="font-size: 12px; color: #9aa1ab">{{w.what}}</div></div>
+              <button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Open</button>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <!-- running -->
+      <section aria-label="Running">
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab">RUNNING</span><span style="font-size: 12px; color: #9aa1ab">Each run in its own worktree</span></div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px">
+          <sc-for list="{{running}}" as="r" hint-placeholder-count="3">
+            <div style="border: 1px solid #262a31; border-radius: 10px; background: #14161a; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0">
+              <div style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.title}}</div>
+              <div style="display: flex; gap: 6px; font-size: 11px; color: #b9c0ca; flex-wrap: wrap"><span style="padding: 2px 6px; border-radius: 4px; background: #1f232a">{{r.flow}}</span><span style="padding: 2px 6px; border-radius: 4px; background: #1f232a; font-family: 'JetBrains Mono', monospace">{{r.branch}}</span><span style="margin-left: auto; color: #9aa1ab">{{r.elapsed}}</span></div>
+              <div style="display: flex; gap: 4px; flex-wrap: wrap">
+                <sc-for list="{{r.steps}}" as="p"><span style="font-size: 11px; padding: 3px 7px; border-radius: 4px; background: {{p.bg}}; color: {{p.fg}}">{{p.label}}</span></sc-for>
+              </div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #9aa1ab; background: #111316; border-radius: 6px; padding: 6px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.last}}</div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <!-- finished -->
+      <section aria-label="Recently finished">
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab; margin-bottom: 6px">RECENTLY FINISHED</div>
+        <sc-for list="{{done}}" as="d" hint-placeholder-count="3">
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #1d2026"><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{d.title}}</span><span style="font-size: 12px; color: {{d.c}}">{{d.result}}</span><span style="width: 56px; text-align: right; font-size: 12px; color: #9aa1ab">{{d.when}}</span></div>
+        </sc-for>
+      </section>
+    </main>
+
+    <!-- activity -->
+    <aside aria-label="Activity" style="flex: 1 1 300px; max-width: 360px; min-width: 260px; border-left: 1px solid #23272e; background: #111316; padding: 14px 16px; display: flex; flex-direction: column">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab; margin-bottom: 6px">ACTIVITY</div>
+      <sc-for list="{{feed}}" as="f" hint-placeholder-count="8">
+        <div style="display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #1d2026; line-height: 1.4"><span style="width: 36px; flex: none; font-size: 11px; color: #9aa1ab; padding-top: 1px">{{f.time}}</span><span><span style="color: {{f.c}}">{{f.who}}</span> <span style="color: #d7dae0">{{f.what}}</span></span></div>
+      </sc-for>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5aa9ff","options":["#5aa9ff","#f0a35e","#b48cff","#4fd1a5"]},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#5aa9ff';
+    const N = (kind, title, sub, primary, c) => ({ kind, title, sub, primary, c });
+    const needs = [
+      N('PICK A WINNER', '#42 Undo is missing on the canvas', 'Judge recommends B · tests 24/24 · +22 −5', 'Compare & pick', '#f0a35e'),
+      N('QUESTION', '#57 Variable autocomplete in prompts', 'Should variables also complete inside code fences?', 'Answer', '#f0a35e'),
+      N('GATE FAILED', '#61 Large-file scroll is slow', 'All 3 candidates fail testScrollKeepsSelection', 'Steer', '#ff9b94')
+    ];
+    const W = (type, title, what) => ({ type, title, what });
+    const working = [
+      W('FLOW', 'Fix GitHub issue', 'Editing in Flow Studio · 1 unsaved change'),
+      W('RUN', '#42 Undo is missing on the canvas', 'Comparing candidates'),
+      W('FLOW', 'Release notes', 'Draft · never run')
+    ];
+    const S = { done: ['#16261b', '#56d364'], run: ['#152235', accent], wait: ['#1b1e23', '#8b93a1'] };
+    const steps = (states, labels) => labels.map((label, i) => ({ label, bg: S[states[i]][0], fg: S[states[i]][1] }));
+    const L = ['Plan', 'Implement ×3', 'Gate', 'Judge', 'You pick'];
+    const R = (title, branch, elapsed, states, last) => ({ title, flow: 'Fix GitHub issue', branch, elapsed, steps: steps(states, L), last });
+    const running = [
+      R('#63 Word-level diff highlight', 'flow/63-word-diff', '6m', ['done', 'run', 'wait', 'wait', 'wait'], '▸ B: Edit DiffView.swift'),
+      R('#64 Syntax colors via tree-sitter', 'flow/64-treesitter', '3m', ['done', 'run', 'wait', 'wait', 'wait'], '▸ A: swift build'),
+      R('#66 Rename FlowRunner → Executor', 'flow/66-rename', '40s', ['run', 'wait', 'wait', 'wait', 'wait'], '▸ Grep "FlowRunner" · 38 hits')
+    ];
+    const done = [
+      { title: '#39 Crash on empty graph', result: 'Merged A', c: '#56d364', when: '1h' },
+      { title: '#40 Minimap flickers on zoom', result: 'Discarded all', c: '#9aa1ab', when: '3h' },
+      { title: '#35 Copy and paste wires', result: 'Merged B', c: '#56d364', when: 'Tue' }
+    ];
+    const F = (time, who, what, c) => ({ time, who, what, c });
+    const feed = [
+      F('now', '#42', 'judge recommends B — waiting on you', '#f0a35e'),
+      F('1m', '#63 · B', 'edited DiffView.swift', '#b9c0ca'),
+      F('2m', '#57', 'asked you a question', '#f0a35e'),
+      F('4m', '#61', 'gate failed on all 3 candidates', '#ff9b94'),
+      F('5m', '#66', 'started in flow/66-rename', '#b9c0ca'),
+      F('9m', '#64 · A', 'ran swift build', '#b9c0ca'),
+      F('1h', '#39', 'merged candidate A into main', '#56d364'),
+      F('1h', 'You', 'launched Fix GitHub issue on #63', '#b9c0ca')
+    ];
+    return { accent, needs, working, running, done, feed };
+  }
+}
+</script>
+</body>
+</html>

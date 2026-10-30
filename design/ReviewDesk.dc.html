@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review Desk</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d0f12}
+a{color:#8cc4ff}a:hover{color:#b9dbff}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="min-height: 900px; display: flex; flex-direction: column; background: #111316; color: #e6e8eb; font-family: Inter, system-ui, sans-serif; font-size: 13px">
+
+  <div style="height: 38px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #0d0f12; border-bottom: 1px solid #23272e">
+    <div aria-hidden="true" style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span></div>
+    <span style="font-weight: 600; margin-left: 8px">MetalFlow</span>
+    <span style="color: #9aa1ab">· Review</span>
+    <span style="margin-left: auto; font-size: 12px; color: #9aa1ab">4 proposals waiting · J / K to move</span>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+    <!-- proposals -->
+    <nav aria-label="Proposals" style="flex: 0 1 280px; background: #0f1114; border-right: 1px solid #23272e; display: flex; flex-direction: column">
+      <div style="display: flex; gap: 6px; padding: 12px; border-bottom: 1px solid #23272e; flex-wrap: wrap">
+        <button aria-pressed="true" style="height: 26px; padding: 0 10px; border-radius: 13px; border: 0; background: #262c36; color: #e6e8eb; font-size: 12px">Waiting 4</button>
+        <button aria-pressed="false" style="height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid #2f343c; background: transparent; color: #b9c0ca; font-size: 12px">Running 2</button>
+        <button aria-pressed="false" style="height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid #2f343c; background: transparent; color: #b9c0ca; font-size: 12px">Merged</button>
+      </div>
+      <sc-for list="{{proposals}}" as="p" hint-placeholder-count="5">
+        <a href="#" style="display: block; text-decoration: none; color: #e6e8eb; padding: 12px 14px; border-bottom: 1px solid #1d2026; background: {{p.bg}}">
+          <div style="display: flex; align-items: center; gap: 8px"><span style="font-weight: 600; flex: 1">{{p.title}}</span></div>
+          <div style="display: flex; gap: 8px; margin-top: 6px; font-size: 12px; color: #9aa1ab; align-items: center">
+            <span style="padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; color: {{p.pillFg}}; background: {{p.pillBg}}">{{p.status}}</span>
+            <span>{{p.source}}</span>
+            <span style="margin-left: auto"><span style="color: #56d364">{{p.add}}</span> <span style="color: #ff7b72">{{p.del}}</span></span>
+          </div>
+        </a>
+      </sc-for>
+    </nav>
+
+    <!-- diff -->
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; background: #14161a">
+      <div style="padding: 14px 18px 10px; border-bottom: 1px solid #23272e">
+        <div style="font-size: 16px; font-weight: 600">Diff viewer: word-level highlight</div>
+        <div style="font-size: 12px; color: #9aa1ab; margin-top: 4px">From flow “Implement ×3” · candidate B · branch agent/word-diff · 3 files</div>
+      </div>
+      <div role="tablist" style="height: 34px; display: flex; align-items: stretch; border-bottom: 1px solid #23272e; overflow-x: auto; background: #111316">
+        <button role="tab" aria-selected="true" style="border: 0; border-bottom: 2px solid {{accent}}; background: transparent; color: #e6e8eb; padding: 0 14px; font-size: 12px; font-family: 'JetBrains Mono', monospace">DiffHunk.swift <span style="color: #56d364">+18</span> <span style="color: #ff7b72">−6</span></button>
+        <button role="tab" aria-selected="false" style="border: 0; background: transparent; color: #9aa1ab; padding: 0 14px; font-size: 12px; font-family: 'JetBrains Mono', monospace">WordDiff.swift <span style="color: #56d364">+44</span></button>
+        <button role="tab" aria-selected="false" style="border: 0; background: transparent; color: #9aa1ab; padding: 0 14px; font-size: 12px; font-family: 'JetBrains Mono', monospace">DiffTests.swift <span style="color: #56d364">+29</span> <span style="color: #ff7b72">−2</span></button>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 6px; padding-right: 12px">
+          <button aria-pressed="true" style="height: 24px; padding: 0 8px; border-radius: 6px; border: 0; background: #262c36; color: #e6e8eb; font-size: 12px">Split</button>
+          <button aria-pressed="false" style="height: 24px; padding: 0 8px; border-radius: 6px; border: 0; background: transparent; color: #9aa1ab; font-size: 12px">Unified</button>
+        </div>
+      </div>
+      <div style="flex: 1; overflow: auto; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 21px">
+        <div style="padding: 6px 12px; background: #171d27; color: #8cc4ff; font-size: 12px">@@ -28,14 +28,24 @@ struct DiffHunk</div>
+        <sc-for list="{{rowsA}}" as="r" hint-placeholder-count="10">
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr))">
+            <div style="display: flex; background: {{r.lbg}}; white-space: pre; overflow: hidden"><span style="width: 40px; flex: none; text-align: right; padding-right: 10px; color: #5d6470">{{r.ln}}</span><span style="color: {{r.lfg}}">{{r.l}}</span></div>
+            <div style="display: flex; background: {{r.rbg}}; white-space: pre; overflow: hidden; border-left: 1px solid #23272e"><span style="width: 40px; flex: none; text-align: right; padding-right: 10px; color: #5d6470">{{r.rn}}</span><span style="color: {{r.rfg}}">{{r.r}}</span></div>
+          </div>
+        </sc-for>
+        <!-- inline thread -->
+        <div style="margin: 8px 12px 8px 50%; padding-left: 12px; font-family: Inter, system-ui, sans-serif; font-size: 13px; line-height: 1.5">
+          <div style="border: 1px solid #2f343c; border-radius: 10px; background: #171a1f; overflow: hidden">
+            <div style="padding: 10px 12px"><span style="font-weight: 600">You</span> <span style="color: #9aa1ab; font-size: 12px">· line 37</span><div style="margin-top: 2px">Why drop the line cache here? Large files re-tokenise on every scroll.</div></div>
+            <div style="padding: 10px 12px; border-top: 1px solid #23272e; background: #14161a"><span style="font-weight: 600; color: {{accent}}">Agent</span><div style="margin-top: 2px; color: #d7dae0">The cache keyed on line text, so word diffs went stale after edits. I can key it on (line, revision) instead and keep it.</div>
+              <div style="display: flex; gap: 6px; margin-top: 8px"><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 0; background: {{accent}}; color: #0b1220; font-size: 12px; font-weight: 600">Do that</button><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Resolve</button></div>
+            </div>
+          </div>
+        </div>
+        <sc-for list="{{rowsB}}" as="r" hint-placeholder-count="8">
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr))">
+            <div style="display: flex; background: {{r.lbg}}; white-space: pre; overflow: hidden"><span style="width: 40px; flex: none; text-align: right; padding-right: 10px; color: #5d6470">{{r.ln}}</span><span style="color: {{r.lfg}}">{{r.l}}</span></div>
+            <div style="display: flex; background: {{r.rbg}}; white-space: pre; overflow: hidden; border-left: 1px solid #23272e"><span style="width: 40px; flex: none; text-align: right; padding-right: 10px; color: #5d6470">{{r.rn}}</span><span style="color: {{r.rfg}}">{{r.r}}</span></div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-top: 1px solid #23272e; background: #111316; flex-wrap: wrap">
+        <span style="font-size: 12px; color: #9aa1ab">Hunk 1 of 4</span>
+        <button style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Accept hunk  A</button>
+        <button style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Reject hunk  X</button>
+        <button style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Edit by hand  E</button>
+        <span style="margin-left: auto; font-size: 12px; color: #9aa1ab">Next hunk  N</span>
+      </div>
+    </main>
+
+    <!-- rationale -->
+    <aside aria-label="Proposal details" style="flex: 1 1 340px; max-width: 380px; min-width: 300px; background: #111316; border-left: 1px solid #23272e; display: flex; flex-direction: column">
+      <div style="padding: 14px; border-bottom: 1px solid #23272e; display: flex; flex-direction: column; gap: 8px">
+        <button style="height: 34px; border-radius: 8px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600">Accept and commit</button>
+        <div style="display: flex; gap: 8px"><button style="flex: 1; height: 30px; border-radius: 8px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb">Request changes</button><button style="flex: 1; height: 30px; border-radius: 8px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb">Discard</button></div>
+      </div>
+      <div style="padding: 14px; display: flex; flex-direction: column; gap: 16px; flex: 1; overflow: auto">
+        <section>
+          <h2 style="margin: 0 0 6px; font-size: 12px; letter-spacing: 0.06em; color: #9aa1ab">SUMMARY</h2>
+          <div style="line-height: 1.55; color: #d7dae0">Adds a Myers word diff inside changed line pairs and paints it as inline highlights. Hunks now carry a revision so cached tokens invalidate on edit.</div>
+        </section>
+        <section>
+          <h2 style="margin: 0 0 6px; font-size: 12px; letter-spacing: 0.06em; color: #9aa1ab">CHECKS</h2>
+          <sc-for list="{{checks}}" as="c" hint-placeholder-count="4">
+            <div style="display: flex; gap: 8px; padding: 5px 0"><span aria-hidden="true" style="width: 14px; color: {{c.color}}">{{c.icon}}</span><span style="flex: 1">{{c.name}}</span><span style="color: #9aa1ab; font-size: 12px">{{c.detail}}</span></div>
+          </sc-for>
+        </section>
+        <section>
+          <h2 style="margin: 0 0 6px; font-size: 12px; letter-spacing: 0.06em; color: #9aa1ab">HOW IT GOT HERE</h2>
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #b9c0ca">
+            <div>Issue #51 → Plan (Opus)</div>
+            <div>→ Implement ×3 → judge picked <span style="color: {{accent}}">B</span></div>
+            <div><a href="#">Open flow run</a> · <a href="#">Compare with A, C</a></div>
+          </div>
+        </section>
+      </div>
+      <form style="margin: 12px; border: 1px solid #2f343c; border-radius: 10px; background: #171a1f; padding: 10px">
+        <label for="rd-ask" class="sr">Ask about this change</label>
+        <textarea id="rd-ask" rows="2" placeholder="Ask about this change, or describe a fix…" style="width: 100%; box-sizing: border-box; resize: none; border: 0; background: transparent; color: #e6e8eb; font: inherit; outline: none"></textarea>
+        <div style="display: flex; justify-content: flex-end"><button type="submit" style="height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: #262c36; color: #e6e8eb; font-size: 12px">Re-run with feedback</button></div>
+      </form>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5aa9ff","options":["#5aa9ff","#f0a35e","#b48cff","#4fd1a5"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#5aa9ff';
+    const P = (title, status, source, add, del, sel) => {
+      const pill = { Ready: ['#0f2a17', '#56d364'], 'Needs input': ['#33240f', '#f0a35e'], 'Tests failing': ['#3a1614', '#ff9b94'] }[status];
+      return { title, status, source, add, del, pillBg: pill[0], pillFg: pill[1], bg: sel ? '#1a1f27' : 'transparent' };
+    };
+    const proposals = [
+      P('Diff viewer: word-level highlight', 'Ready', 'flow · B', '+91', '−8', true),
+      P('Add undo to the node graph', 'Needs input', 'thread', '+31', '−7'),
+      P('Prompt node: variable autocomplete', 'Ready', 'thread', '+64', '−3'),
+      P('Speed up large-file scroll', 'Tests failing', 'flow · A', '+120', '−44'),
+      P('Rename FlowRunner → Executor', 'Ready', 'refactor', '+38', '−38')
+    ];
+    const ADD = 'rgba(86,211,100,0.12)', DEL = 'rgba(255,123,114,0.12)', EMPTY = '#101215';
+    const R = (ln, l, rn, r, kind) => ({
+      ln, l, rn, r,
+      lbg: kind === 'chg' || kind === 'del' ? DEL : kind === 'add' ? EMPTY : 'transparent',
+      rbg: kind === 'chg' || kind === 'add' ? ADD : kind === 'del' ? EMPTY : 'transparent',
+      lfg: kind === 'chg' || kind === 'del' ? '#e8c2be' : '#c4c9d1',
+      rfg: kind === 'chg' || kind === 'add' ? '#c9efd0' : '#c4c9d1'
+    });
+    const rowsA = [
+      R(28, 'struct DiffHunk {', 28, 'struct DiffHunk {'),
+      R(29, '    var oldRange: Range<Int>', 29, '    var oldRange: Range<Int>'),
+      R(30, '    var newRange: Range<Int>', 30, '    var newRange: Range<Int>'),
+      R(31, '    var lines: [DiffLine]', 31, '    var lines: [DiffLine]'),
+      R('', '', 32, '    var revision: Int', 'add'),
+      R(32, '', 33, '', ''),
+      R(33, '    func render() -> some View {', 34, '    func render() -> some View {'),
+      R(34, '        ForEach(lines) { line in', 35, '        ForEach(pairs) { pair in', 'chg'),
+      R(35, '            LineView(line)', 36, '            LineView(pair.new,', 'chg'),
+      R(36, '                .cached(by: line.text)', 37, '                     words: pair.wordDiff)', 'chg')
+    ];
+    const rowsB = [
+      R('', '', 38, '                .cached(by: [pair.id, revision])', 'add'),
+      R(37, '        }', 39, '        }'),
+      R(38, '    }', 40, '    }'),
+      R('', '', 41, '', 'add'),
+      R('', '', 42, '    var pairs: [LinePair] {', 'add'),
+      R('', '', 43, '        LinePair.match(lines)', 'add'),
+      R('', '', 44, '    }', 'add'),
+      R(39, '}', 45, '}')
+    ];
+    const C = (name, ok, detail) => ({ name, detail, icon: ok === true ? '✓' : ok === false ? '✕' : '!', color: ok === true ? '#56d364' : ok === false ? '#ff7b72' : '#f0a35e' });
+    const checks = [C('swift build', true, '41s'), C('swift test', true, '312 passed'), C('Lint', null, '2 warnings'), C('Public API unchanged', true, '')];
+    return { accent, proposals, rowsA, rowsB, checks };
+  }
+}
+</script>
+</body>
+</html>

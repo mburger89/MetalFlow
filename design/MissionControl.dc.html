@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mission Control</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d0f12}
+a{color:#8cc4ff}a:hover{color:#b9dbff}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="min-height: 900px; display: flex; flex-direction: column; background: #111316; color: #e6e8eb; font-family: Inter, system-ui, sans-serif; font-size: 13px">
+
+  <div style="height: 38px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #0d0f12; border-bottom: 1px solid #23272e">
+    <div aria-hidden="true" style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span></div>
+    <span style="font-weight: 600; margin-left: 8px">MetalFlow</span>
+    <span style="color: #9aa1ab">· Mission Control</span>
+    <nav aria-label="Views" style="margin-left: 24px; display: flex; gap: 4px">
+      <a href="#" style="text-decoration: none; padding: 4px 10px; border-radius: 6px; background: #1d2128; color: #e6e8eb; font-size: 12px">Agents</a>
+      <a href="#" style="text-decoration: none; padding: 4px 10px; border-radius: 6px; color: #9aa1ab; font-size: 12px">Editor</a>
+      <a href="#" style="text-decoration: none; padding: 4px 10px; border-radius: 6px; color: #9aa1ab; font-size: 12px">Flows</a>
+      <a href="#" style="text-decoration: none; padding: 4px 10px; border-radius: 6px; color: #9aa1ab; font-size: 12px">Review 4</a>
+    </nav>
+    <span style="margin-left: auto; font-size: 12px; color: #9aa1ab">5 running · 1 waiting on you</span>
+  </div>
+
+  <!-- command bar -->
+  <div style="padding: 18px 20px 6px">
+    <form style="max-width: 1100px; margin: 0 auto; border: 1px solid #2f343c; border-radius: 14px; background: #171a1f; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+      <label for="mc-task" class="sr">Describe a task</label>
+      <input id="mc-task" placeholder="Describe a task for a new agent…  @ files, # issues, / flows" style="flex: 1 1 360px; height: 34px; border: 0; background: transparent; color: #e6e8eb; font: inherit; font-size: 15px; outline: none">
+      <div role="group" aria-label="Run as" style="display: flex; border: 1px solid #2f343c; border-radius: 8px; overflow: hidden">
+        <button type="button" aria-pressed="false" style="height: 30px; padding: 0 12px; border: 0; background: transparent; color: #b9c0ca; font-size: 12px">Single</button>
+        <button type="button" aria-pressed="true" style="height: 30px; padding: 0 12px; border: 0; background: #262c36; color: #e6e8eb; font-size: 12px">Best of 3</button>
+        <button type="button" aria-pressed="false" style="height: 30px; padding: 0 12px; border: 0; background: transparent; color: #b9c0ca; font-size: 12px">Flow ▾</button>
+      </div>
+      <button type="submit" style="height: 32px; padding: 0 16px; border-radius: 8px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600">Launch</button>
+    </form>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; gap: 0; min-height: 0">
+    <main style="flex: 999 1 640px; min-width: 0; padding: 14px 20px 20px; display: flex; flex-direction: column; gap: 18px">
+
+      <!-- best of N group -->
+      <section aria-label="Best of 3" style="border: 1px solid #2f343c; border-radius: 14px; background: #14161a; padding: 14px">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap">
+          <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #f0a35e">BEST OF 3</span>
+          <span style="font-weight: 600; font-size: 15px">Add undo to the node graph</span>
+          <span style="font-size: 12px; color: #9aa1ab">2 finished · 1 running</span>
+          <button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Compare diffs</button>
+          <button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600; font-size: 12px">Pick B</button>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+          <sc-for list="{{cands}}" as="t" hint-placeholder-count="3">
+            <div style="border: {{t.border}}; border-radius: 10px; background: #181b21; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0">
+              <div style="display: flex; align-items: center; gap: 8px"><span style="font-weight: 600">{{t.name}}</span><span style="font-size: 11px; color: #9aa1ab">{{t.model}}</span><span style="margin-left: auto; font-size: 11px; font-weight: 600; color: {{t.sc}}">{{t.status}}</span></div>
+              <div style="height: 4px; border-radius: 2px; background: #262a31"><div style="height: 4px; border-radius: 2px; width: {{t.pct}}; background: {{t.sc}}"></div></div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 18px; color: #9aa1ab; background: #111316; border-radius: 6px; padding: 6px 8px; white-space: pre; overflow: hidden">{{t.log}}</div>
+              <div style="display: flex; gap: 10px; font-size: 12px"><span style="color: #56d364">{{t.add}}</span><span style="color: #ff7b72">{{t.del}}</span><span style="color: #9aa1ab">{{t.tests}}</span></div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <!-- other agents -->
+      <section aria-label="Agents">
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab; margin-bottom: 10px">ALL AGENTS</div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+          <sc-for list="{{agents}}" as="t" hint-placeholder-count="6">
+            <div style="border: 1px solid #262a31; border-radius: 10px; background: #14161a; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0">
+              <div style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 4px; background: {{t.sc}}"></span><span style="font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{t.title}}</span></div>
+              <div style="display: flex; gap: 6px; font-size: 11px; color: #b9c0ca; flex-wrap: wrap"><span style="padding: 2px 6px; border-radius: 4px; background: #1f232a; font-family: 'JetBrains Mono', monospace">{{t.branch}}</span><span style="padding: 2px 6px; border-radius: 4px; background: #1f232a">{{t.kind}}</span></div>
+              <div style="font-size: 12px; color: {{t.sc}}">{{t.status}}</div>
+              <div style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: #9aa1ab; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{t.last}}</div>
+              <div style="display: flex; gap: 6px; margin-top: 2px"><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">{{t.action}}</button><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Open</button></div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+    </main>
+
+    <!-- activity feed -->
+    <aside aria-label="Activity" style="flex: 1 1 320px; max-width: 360px; min-width: 280px; border-left: 1px solid #23272e; background: #111316; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab; margin-bottom: 8px">NEEDS YOU</div>
+      <div style="border: 1px solid #f0a35e; border-radius: 10px; padding: 10px 12px; background: #1c1812; margin-bottom: 14px; line-height: 1.5">
+        <div style="font-weight: 600">Prompt autocomplete is asking</div>
+        <div style="color: #d7dae0; margin-top: 2px">Should variables also complete inside code fences?</div>
+        <div style="display: flex; gap: 6px; margin-top: 8px"><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 0; background: #f0a35e; color: #1a1206; font-size: 12px; font-weight: 600">Yes</button><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">No</button><button style="height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; font-size: 12px">Reply…</button></div>
+      </div>
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: #9aa1ab; margin-bottom: 4px">ACTIVITY</div>
+      <sc-for list="{{feed}}" as="f" hint-placeholder-count="8">
+        <div style="display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #1d2026; line-height: 1.4"><span style="width: 40px; flex: none; font-size: 11px; color: #9aa1ab; padding-top: 1px">{{f.time}}</span><span><span style="color: {{f.c}}">{{f.who}}</span> <span style="color: #d7dae0">{{f.what}}</span></span></div>
+      </sc-for>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5aa9ff","options":["#5aa9ff","#f0a35e","#b48cff","#4fd1a5"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#5aa9ff';
+    const K = (name, model, status, sc, pct, log, add, del, tests, pick) => ({ name, model, status, sc, pct, log, add, del, tests, border: pick ? '2px solid ' + accent : '1px solid #262a31' });
+    const cands = [
+      K('A', 'Sonnet', 'DONE', '#56d364', '100%', '✓ swift test  24 passed\n✓ swift build\n  wrote UndoManager.swift', '+31', '−7', 'Tests 24/24'),
+      K('B', 'Opus', 'DONE · BEST', accent, '100%', '✓ swift test  24 passed\n✓ swift build\n  coalesced drag commands', '+22', '−5', 'Tests 24/24', true),
+      K('C', 'Haiku', 'TESTING', '#f0a35e', '70%', '✕ testRedoAfterDelete\n  retrying with fix\n▸ swift test …', '+40', '−12', 'Tests 21/24')
+    ];
+    const A = (title, branch, kind, status, sc, last, action) => ({ title, branch, kind, status, sc, last, action });
+    const agents = [
+      A('Diff viewer: word-level highlight', 'agent/word-diff', 'Flow', 'Ready for review', '#56d364', 'Proposed 3 files · +91 −8', 'Review'),
+      A('Prompt node: variable autocomplete', 'agent/var-complete', 'Thread', 'Waiting on you', '#f0a35e', 'Asked a question 2m ago', 'Answer'),
+      A('Speed up large-file scroll', 'agent/scroll-perf', 'Flow', 'Tests failing · retry 2/3', '#ff7b72', '✕ testScrollKeepsSelection', 'Steer'),
+      A('Syntax colors via tree-sitter', 'agent/treesitter', 'Single', 'Running · step 3 of 6', accent, '▸ Edit Highlighter.swift', 'Watch'),
+      A('Explain FlowRunner.swift', 'main', 'Ask', 'Answered', '#9aa1ab', 'No changes', 'Read'),
+      A('Rename FlowRunner → Executor', 'agent/rename', 'Single', 'Running · step 1 of 2', accent, '▸ Grep "FlowRunner" · 38 hits', 'Watch')
+    ];
+    const F = (time, who, what, c) => ({ time, who, what, c });
+    const feed = [
+      F('now', 'Undo · C', 'is retrying after 3 failed tests', '#f0a35e'),
+      F('1m', 'Undo · B', 'finished — judge ranks it first', accent),
+      F('2m', 'Autocomplete', 'asked you a question', '#f0a35e'),
+      F('4m', 'Word diff', 'opened a proposal for review', '#56d364'),
+      F('6m', 'Tree-sitter', 'edited Highlighter.swift', '#b9c0ca'),
+      F('9m', 'Scroll perf', 'ran swift test — 2 failures', '#ff9b94'),
+      F('12m', 'You', 'launched Best of 3: undo', '#b9c0ca'),
+      F('15m', 'Rename', 'started on agent/rename', '#b9c0ca')
+    ];
+    return { accent, cands, agents, feed };
+  }
+}
+</script>
+</body>
+</html>

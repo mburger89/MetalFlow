@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Thread</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d0f12}
+a{color:#8cc4ff}a:hover{color:#b9dbff}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="min-height: 900px; display: flex; flex-direction: column; background: #111316; color: #e6e8eb; font-family: Inter, system-ui, sans-serif; font-size: 13px">
+
+  <div style="height: 38px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #0d0f12; border-bottom: 1px solid #23272e">
+    <div aria-hidden="true" style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span></div>
+    <span style="font-weight: 600; margin-left: 8px">MetalFlow</span>
+    <span style="color: #9aa1ab">/ Add undo to the node graph</span>
+    <span style="margin-left: auto; font-size: 12px; color: #9aa1ab">worktree: agent/undo-graph</span>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+    <!-- sessions -->
+    <nav aria-label="Sessions" style="flex: 0 1 236px; background: #0f1114; border-right: 1px solid #23272e; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px">
+      <button style="height: 34px; margin: 0 4px 10px; border-radius: 8px; border: 1px solid #2f343c; background: #171a1f; color: #e6e8eb; text-align: left; padding: 0 12px">+ New thread  <span style="float: right; color: #9aa1ab">⌘N</span></button>
+      <div style="padding: 6px 10px; font-size: 11px; color: #9aa1ab; font-weight: 600; letter-spacing: 0.06em">TODAY</div>
+      <sc-for list="{{sessions}}" as="s" hint-placeholder-count="7">
+        <a href="#" style="display: block; text-decoration: none; padding: 8px 10px; border-radius: 8px; background: {{s.bg}}; color: #e6e8eb">
+          <div style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 7px; height: 7px; border-radius: 4px; background: {{s.dot}}"></span><span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{s.title}}</span></div>
+          <div style="font-size: 11px; color: #9aa1ab; margin: 3px 0 0 15px">{{s.meta}}</div>
+        </a>
+      </sc-for>
+    </nav>
+
+    <!-- conversation -->
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; background: #111316">
+      <div style="flex: 1; overflow: auto; padding: 28px 24px 12px">
+        <div style="max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; line-height: 1.55">
+
+          <div style="align-self: flex-end; max-width: 80%; background: #1d2633; border-radius: 12px; padding: 12px 14px">Add undo/redo to the flow graph. Moving nodes, connecting wires and editing prompts should all be undoable, and ⌘Z should work while the canvas has focus.</div>
+
+          <!-- plan -->
+          <div style="border: 1px solid #262a31; border-radius: 12px; background: #14161a; padding: 14px 16px">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px"><span style="font-weight: 600">Plan</span><span style="font-size: 12px; color: #9aa1ab">3 of 5 done</span><span style="margin-left: auto; font-size: 12px; color: #9aa1ab">Edit plan</span></div>
+            <sc-for list="{{plan}}" as="p" hint-placeholder-count="5">
+              <div style="display: flex; gap: 10px; padding: 4px 0; color: {{p.fg}}"><span aria-hidden="true" style="width: 16px; color: {{p.ic}}">{{p.icon}}</span><span>{{p.text}}</span></div>
+            </sc-for>
+          </div>
+
+          <!-- tool activity -->
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #9aa1ab; font-family: 'JetBrains Mono', monospace">
+            <div>▸ Read  Sources/Graph/FlowGraph.swift  (212 lines)</div>
+            <div>▸ Grep  "func move(node"  — 3 matches</div>
+            <div>▸ Ran   swift test --filter FlowGraphTests  — <span style="color: #56d364">24 passed</span></div>
+          </div>
+
+          <div>Moves and connections now go through a single <code style="font-family: 'JetBrains Mono', monospace; color: #82cfff">GraphCommand</code> enum so each one records its inverse. Here is the core change:</div>
+
+          <!-- inline diff card -->
+          <div style="border: 1px solid #262a31; border-radius: 12px; overflow: hidden; background: #14161a">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #171a1f; border-bottom: 1px solid #23272e">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px">Sources/Graph/FlowGraph.swift</span>
+              <span style="font-size: 12px"><span style="color: #56d364">+12</span> <span style="color: #ff7b72">−3</span></span>
+              <span style="margin-left: auto; font-size: 12px; color: #9aa1ab">1 of 3 files</span>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 20px; padding: 6px 0; overflow-x: auto">
+              <sc-for list="{{diff}}" as="d" hint-placeholder-count="12">
+                <div style="display: flex; background: {{d.bg}}; white-space: pre">
+                  <span style="width: 40px; text-align: right; padding-right: 10px; color: #5d6470">{{d.n}}</span>
+                  <span style="width: 18px; color: {{d.sc}}">{{d.sign}}</span>
+                  <span style="color: {{d.fg}}">{{d.text}}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid #23272e; flex-wrap: wrap">
+              <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600">Accept</button>
+              <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb">Reject</button>
+              <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb">Comment on hunk</button>
+              <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb; margin-left: auto">Open in editor →</button>
+            </div>
+          </div>
+
+          <div style="color: #d7dae0">Next I'll wire ⌘Z / ⇧⌘Z through the canvas's key handler<span style="color: {{accent}}"> ▍</span></div>
+        </div>
+      </div>
+
+      <!-- composer -->
+      <div style="padding: 12px 24px 18px">
+        <form style="max-width: 760px; margin: 0 auto; border: 1px solid #2f343c; border-radius: 14px; background: #171a1f; padding: 12px">
+          <label for="th-msg" class="sr">Message the agent</label>
+          <textarea id="th-msg" rows="2" placeholder="Reply, steer, or @mention a file…" style="width: 100%; box-sizing: border-box; resize: none; border: 0; background: transparent; color: #e6e8eb; font: inherit; outline: none"></textarea>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+            <div role="group" aria-label="Mode" style="display: flex; border: 1px solid #2f343c; border-radius: 8px; overflow: hidden">
+              <button type="button" aria-pressed="false" style="height: 28px; padding: 0 12px; border: 0; background: transparent; color: #b9c0ca; font-size: 12px">Ask</button>
+              <button type="button" aria-pressed="false" style="height: 28px; padding: 0 12px; border: 0; background: transparent; color: #b9c0ca; font-size: 12px">Plan</button>
+              <button type="button" aria-pressed="true" style="height: 28px; padding: 0 12px; border: 0; background: #262c36; color: #e6e8eb; font-size: 12px">Act</button>
+            </div>
+            <button type="button" style="height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid #2f343c; background: transparent; color: #b9c0ca; font-size: 12px">+ Context</button>
+            <button type="button" style="height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid #2f343c; background: transparent; color: #b9c0ca; font-size: 12px">Save as flow node</button>
+            <button type="button" style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 8px; border: 1px solid #ff7b72; background: transparent; color: #ff9b94; font-size: 12px">Stop</button>
+            <button type="submit" style="height: 28px; padding: 0 14px; border-radius: 8px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600">Send</button>
+          </div>
+        </form>
+      </div>
+    </main>
+
+    <!-- review pane -->
+    <aside aria-label="Changes" style="flex: 1 1 440px; max-width: 480px; min-width: 300px; display: flex; flex-direction: column; background: #14161a; border-left: 1px solid #23272e">
+      <div style="padding: 12px 14px; border-bottom: 1px solid #23272e">
+        <div style="display: flex; align-items: center"><span style="font-weight: 600">Changes</span><span style="margin-left: 8px; color: #9aa1ab; font-size: 12px">3 files · +31 −7</span><button style="margin-left: auto; height: 26px; padding: 0 10px; border-radius: 6px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600; font-size: 12px">Accept all</button></div>
+        <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 2px">
+          <sc-for list="{{files}}" as="f" hint-placeholder-count="3">
+            <div style="display: flex; gap: 8px; padding: 6px 8px; border-radius: 6px; background: {{f.bg}}; font-size: 12px"><span style="color: {{f.sc}}; width: 12px">{{f.status}}</span><span style="flex: 1; font-family: 'JetBrains Mono', monospace">{{f.name}}</span><span style="color: #56d364">{{f.add}}</span><span style="color: #ff7b72">{{f.del}}</span></div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="height: 30px; display: flex; align-items: center; gap: 14px; padding: 0 14px; font-size: 12px; border-bottom: 1px solid #23272e"><span style="font-weight: 600; border-bottom: 2px solid {{accent}}; padding: 6px 0">Editor</span><span style="color: #9aa1ab">Diff</span><span style="color: #9aa1ab">Terminal</span></div>
+      <div style="flex: 1; overflow: auto; padding: 8px 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 20px">
+        <sc-for list="{{code}}" as="ln" hint-placeholder-count="22">
+          <div style="display: flex; background: {{ln.bg}}">
+            <span style="width: 3px; background: {{ln.mark}}"></span>
+            <span style="width: 40px; text-align: right; padding-right: 12px; color: #5d6470">{{ln.n}}</span>
+            <span style="white-space: pre"><sc-for list="{{ln.toks}}" as="tok"><span style="color: {{tok.c}}">{{tok.t}}</span></sc-for></span>
+          </div>
+        </sc-for>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5aa9ff","options":["#5aa9ff","#f0a35e","#b48cff","#4fd1a5"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  hl(src, start) {
+    const KW = new Set(['import','struct','var','let','func','return','some','if','else','for','in','private','self','case','enum','true','false','nil','mutating','switch','guard']);
+    const C = { kw: '#c792ea', ty: '#82cfff', st: '#f0b37e', cm: '#8b93a1', nu: '#f78c6c', pl: '#d7dae0', at: '#ff9cac' };
+    return src.split('\n').map((line, i) => {
+      const toks = []; const re = /(\/\/.*$)|("[^"]*")|(@[A-Za-z]+)|([A-Za-z_][A-Za-z0-9_]*)|(\d+(?:\.\d+)?)|(\s+)|(.)/g; let m;
+      while ((m = re.exec(line))) {
+        let c = C.pl;
+        if (m[1]) c = C.cm; else if (m[2]) c = C.st; else if (m[3]) c = C.at;
+        else if (m[4]) { if (KW.has(m[4])) c = C.kw; else if (/^[A-Z]/.test(m[4])) c = C.ty; }
+        else if (m[5]) c = C.nu;
+        toks.push({ t: m[0], c });
+      }
+      if (!toks.length) toks.push({ t: ' ', c: C.pl });
+      return { n: i + start, toks };
+    });
+  }
+  renderVals() {
+    const accent = this.props.accent ?? '#5aa9ff';
+    const Ses = (title, meta, dot, sel) => ({ title, meta, dot, bg: sel ? '#1d2128' : 'transparent' });
+    const sessions = [
+      Ses('Add undo to the node graph', 'Working · 3 files', accent, true),
+      Ses('Diff viewer: word-level highlight', 'Needs review', '#f0a35e'),
+      Ses('Fix wire hit-testing at zoom', 'Done · merged', '#56d364'),
+      Ses('Explain FlowRunner.swift', 'Answered', '#5d6470'),
+      Ses('Prompt node: variable autocomplete', 'Paused', '#5d6470'),
+      Ses('Port syntax colors to tree-sitter', 'Done', '#56d364'),
+      Ses('Speed up large-file scroll', 'Failed tests', '#ff7b72')
+    ];
+    const P = (text, state) => ({ text, icon: state === 'done' ? '✓' : state === 'now' ? '◐' : '○', ic: state === 'done' ? '#56d364' : state === 'now' ? accent : '#5d6470', fg: state === 'todo' ? '#9aa1ab' : '#e6e8eb' });
+    const plan = [
+      P('Introduce GraphCommand with an inverse for every mutation', 'done'),
+      P('Route move / connect / disconnect through apply(_:)', 'done'),
+      P('Keep an undo stack on FlowGraph, coalesce drags', 'done'),
+      P('Bind ⌘Z and ⇧⌘Z on the canvas', 'now'),
+      P('Tests: round-trip every command', 'todo')
+    ];
+    const D = (n, sign, text) => ({ n, sign, text, bg: sign === '+' ? 'rgba(86,211,100,0.12)' : sign === '−' ? 'rgba(255,123,114,0.12)' : 'transparent', sc: sign === '+' ? '#56d364' : '#ff7b72', fg: sign === '−' ? '#c4a6a3' : '#d7dae0' });
+    const diff = [
+      D(41, ' ', '    var nodes: [FlowNode.ID: FlowNode] = [:]'),
+      D(42, '+', '    private(set) var undoStack: [GraphCommand] = []'),
+      D(43, '+', '    private(set) var redoStack: [GraphCommand] = []'),
+      D(44, ' ', ''),
+      D(45, '−', '    mutating func move(node id: FlowNode.ID, to p: CGPoint) {'),
+      D(46, '−', '        nodes[id]?.position = p'),
+      D(45, '+', '    mutating func apply(_ command: GraphCommand) {'),
+      D(46, '+', '        let inverse = command.inverse(in: self)'),
+      D(47, '+', '        command.perform(on: &self)'),
+      D(48, '+', '        undoStack.append(inverse)'),
+      D(49, '+', '        redoStack.removeAll()'),
+      D(50, ' ', '    }')
+    ];
+    const F = (name, status, add, del, sel) => ({ name, status, add, del, sc: status === 'A' ? '#56d364' : '#f0a35e', bg: sel ? '#1d2128' : 'transparent' });
+    const files = [F('FlowGraph.swift', 'M', '+12', '−3', true), F('GraphCommand.swift', 'A', '+15', '−0'), F('GraphCanvas.swift', 'M', '+4', '−4')];
+    const src = [
+      'enum GraphCommand {',
+      '    case move(FlowNode.ID, from: CGPoint, to: CGPoint)',
+      '    case connect(Wire)',
+      '    case disconnect(Wire)',
+      '    case editPrompt(FlowNode.ID, old: String, new: String)',
+      '',
+      '    func inverse(in graph: FlowGraph) -> GraphCommand {',
+      '        switch self {',
+      '        case let .move(id, from, to):',
+      '            return .move(id, from: to, to: from)',
+      '        case let .connect(wire):',
+      '            return .disconnect(wire)',
+      '        case let .disconnect(wire):',
+      '            return .connect(wire)',
+      '        case let .editPrompt(id, old, new):',
+      '            return .editPrompt(id, old: new, new: old)',
+      '        }',
+      '    }',
+      '}'
+    ].join('\n');
+    const code = this.hl(src, 1).map((l) => ({ ...l, bg: 'rgba(86,211,100,0.06)', mark: '#56d364' }));
+    return { accent, sessions, plan, diff, files, code };
+  }
+}
+</script>
+</body>
+</html>

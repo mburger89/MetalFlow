@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Workbench</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d0f12}
+a{color:#8cc4ff}a:hover{color:#b9dbff}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="min-height: 900px; display: flex; flex-direction: column; background: #111316; color: #e6e8eb; font-family: Inter, system-ui, sans-serif; font-size: 13px">
+
+  <!-- title bar -->
+  <div style="height: 38px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #0d0f12; border-bottom: 1px solid #23272e; flex-wrap: wrap">
+    <div aria-hidden="true" style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #3a3f47"></span></div>
+    <div style="flex: 1; display: flex; justify-content: center">
+      <button style="width: 420px; max-width: 100%; height: 26px; border-radius: 6px; border: 1px solid #2a2f37; background: #171a1f; color: #9aa1ab; text-align: left; padding: 0 10px; font-size: 12px">MetalFlow — Search files, symbols, or ask the agent  ⌘K</button>
+    </div>
+    <span style="font-size: 12px; color: #9aa1ab">main · 2 agents running</span>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+    <!-- activity rail -->
+    <nav aria-label="Activity" style="width: 48px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 8px; background: #0f1114; border-right: 1px solid #23272e">
+      <button aria-label="Explorer" style="width: 40px; height: 40px; border: 0; border-radius: 8px; background: #1d2128; color: {{accent}}"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h6l2 2h10v10H3z"/></svg></button>
+      <button aria-label="Search" style="width: 40px; height: 40px; border: 0; border-radius: 8px; background: transparent; color: #9aa1ab"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></svg></button>
+      <button aria-label="Source control" style="width: 40px; height: 40px; border: 0; border-radius: 8px; background: transparent; color: #9aa1ab"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 8v8M18 11c0 4-6 3-10 6"/></svg></button>
+      <button aria-label="Flows" style="width: 40px; height: 40px; border: 0; border-radius: 8px; background: transparent; color: #9aa1ab"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="6" height="5" rx="1"/><rect x="15" y="4" width="6" height="5" rx="1"/><rect x="9" y="15" width="6" height="5" rx="1"/><path d="M6 9v3h12V9M12 12v3"/></svg></button>
+      <button aria-label="Agents" style="width: 40px; height: 40px; border: 0; border-radius: 8px; background: transparent; color: #9aa1ab"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H9l-5 4z"/></svg></button>
+    </nav>
+
+    <!-- explorer -->
+    <aside aria-label="Explorer" style="width: 240px; flex: 0 1 240px; background: #14161a; border-right: 1px solid #23272e; padding: 10px 0">
+      <div style="padding: 0 14px 8px; font-size: 11px; letter-spacing: 0.06em; color: #9aa1ab; font-weight: 600">EXPLORER</div>
+      <sc-for list="{{tree}}" as="f" hint-placeholder-count="14">
+        <div style="height: 24px; display: flex; align-items: center; gap: 6px; padding-left: {{f.pad}}; padding-right: 10px; background: {{f.bg}}; color: {{f.fg}}">
+          <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{f.name}}</span>
+          <span style="font-size: 11px; color: {{f.badgeColor}}; font-weight: 600">{{f.badge}}</span>
+        </div>
+      </sc-for>
+    </aside>
+
+    <!-- center -->
+    <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; background: #14161a">
+      <div role="tablist" style="height: 36px; display: flex; align-items: stretch; background: #0f1114; border-bottom: 1px solid #23272e; overflow-x: auto">
+        <button role="tab" aria-selected="true" style="border: 0; border-top: 2px solid {{accent}}; background: #14161a; color: #e6e8eb; padding: 0 14px; font-size: 12px">FlowNodeView.swift  <span style="color: #f0a35e">●</span></button>
+        <button role="tab" aria-selected="false" style="border: 0; background: transparent; color: #9aa1ab; padding: 0 14px; font-size: 12px">FlowNode.swift</button>
+        <button role="tab" aria-selected="false" style="border: 0; background: transparent; color: #9aa1ab; padding: 0 14px; font-size: 12px">Diff · Agent run #12</button>
+      </div>
+      <div style="height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 14px; font-size: 12px; color: #9aa1ab; border-bottom: 1px solid #1d2026">Sources › MetalFlow › Graph › FlowNodeView.swift › body
+        <span style="margin-left: auto; color: #f0a35e">Agent edited 3 lines · Review</span>
+      </div>
+      <div style="flex: 1; min-height: 360px; overflow: auto; padding: 8px 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 21px">
+        <sc-for list="{{code}}" as="ln" hint-placeholder-count="24">
+          <div style="display: flex; background: {{ln.bg}}">
+            <span style="width: 3px; background: {{ln.mark}}"></span>
+            <span style="width: 48px; text-align: right; padding-right: 16px; color: #5d6470">{{ln.n}}</span>
+            <span style="white-space: pre"><sc-for list="{{ln.toks}}" as="tok"><span style="color: {{tok.c}}">{{tok.t}}</span></sc-for></span>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- bottom panel: flow -->
+      <section aria-label="Flow run" style="border-top: 1px solid #23272e; background: #111316">
+        <div style="height: 32px; display: flex; align-items: center; gap: 18px; padding: 0 14px; font-size: 12px; border-bottom: 1px solid #1d2026">
+          <span style="color: #e6e8eb; font-weight: 600; border-bottom: 2px solid {{accent}}; padding: 7px 0">FLOW · Add run button</span>
+          <span style="color: #9aa1ab">TERMINAL</span>
+          <span style="color: #9aa1ab">PROBLEMS 0</span>
+          <span style="margin-left: auto; color: #9aa1ab">Step 4 of 5 · 1m 12s</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; padding: 14px; overflow-x: auto">
+          <sc-for list="{{flow}}" as="s" hint-placeholder-count="5">
+            <div style="display: flex; align-items: center; gap: 10px">
+              <div style="min-width: 150px; padding: 10px 12px; border-radius: 8px; background: #1a1d23; border: 1px solid {{s.border}}">
+                <div style="font-size: 11px; color: #9aa1ab; letter-spacing: 0.04em">{{s.kind}}</div>
+                <div style="font-weight: 600; margin-top: 2px">{{s.title}}</div>
+                <div style="font-size: 12px; margin-top: 4px; color: {{s.statusColor}}">{{s.status}}</div>
+              </div>
+              <span aria-hidden="true" style="color: #5d6470">{{s.arrow}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+    </main>
+
+    <!-- chat -->
+    <aside aria-label="Agent chat" style="flex: 1 1 380px; max-width: 420px; min-width: 300px; display: flex; flex-direction: column; background: #111316; border-left: 1px solid #23272e">
+      <div style="height: 36px; display: flex; align-items: center; padding: 0 14px; gap: 8px; border-bottom: 1px solid #23272e">
+        <span style="font-weight: 600">Agent</span>
+        <span style="font-size: 12px; color: #9aa1ab">· Add run button to nodes</span>
+        <span style="margin-left: auto; font-size: 12px; color: #9aa1ab">History</span>
+      </div>
+      <div style="flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px">
+        <div style="align-self: flex-end; max-width: 85%; background: #1d2633; border-radius: 10px; padding: 10px 12px; line-height: 1.5">Add a run button to each flow node and show its outputs as chips under the prompt editor.</div>
+        <div style="line-height: 1.55; color: #d7dae0">I'll bind a <code style="font-family: 'JetBrains Mono', monospace; color: #82cfff">RunButton</code> to <code style="font-family: 'JetBrains Mono', monospace; color: #82cfff">node.runState</code> and render outputs with a <code style="font-family: 'JetBrains Mono', monospace; color: #82cfff">ForEach</code> of chips. Two files change.</div>
+        <div style="border: 1px solid #262a31; border-radius: 10px; overflow: hidden">
+          <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: #171a1f"><span>Edited FlowNodeView.swift</span><span><span style="color: #56d364">+14</span> <span style="color: #ff7b72">−2</span></span></div>
+          <div style="display: flex; justify-content: space-between; padding: 8px 12px; background: #171a1f; border-top: 1px solid #23272e"><span>Edited FlowNode.swift</span><span><span style="color: #56d364">+6</span> <span style="color: #ff7b72">−0</span></span></div>
+          <div style="padding: 8px 12px; border-top: 1px solid #23272e; color: #9aa1ab; font-family: 'JetBrains Mono', monospace; font-size: 12px">$ swift test --filter Flow  ·  <span style="color: #56d364">18 passed</span></div>
+          <div style="display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #23272e">
+            <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600">Accept all</button>
+            <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb">Review diff</button>
+            <button style="height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #e6e8eb">Undo</button>
+          </div>
+        </div>
+        <div style="color: #9aa1ab; font-size: 12px">Agent is waiting for your review.</div>
+      </div>
+      <form style="margin: 12px; border: 1px solid #2f343c; border-radius: 10px; background: #171a1f; padding: 10px">
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px">
+          <span style="font-size: 11px; padding: 3px 8px; border-radius: 4px; background: #222730; color: #b9c0ca">@FlowNodeView.swift</span>
+          <span style="font-size: 11px; padding: 3px 8px; border-radius: 4px; background: #222730; color: #b9c0ca">Selection L12–19</span>
+        </div>
+        <label for="wb-msg" class="sr">Message the agent</label>
+        <textarea id="wb-msg" rows="3" placeholder="Ask, or type / for commands" style="width: 100%; box-sizing: border-box; resize: none; border: 0; background: transparent; color: #e6e8eb; font: inherit; outline: none"></textarea>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px">
+          <button type="button" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #b9c0ca; font-size: 12px">Opus ▾</button>
+          <button type="button" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #2f343c; background: transparent; color: #b9c0ca; font-size: 12px">Act ▾</button>
+          <button type="submit" style="margin-left: auto; height: 28px; padding: 0 14px; border-radius: 6px; border: 0; background: {{accent}}; color: #0b1220; font-weight: 600">Send ⏎</button>
+        </div>
+      </form>
+    </aside>
+  </div>
+
+  <!-- status bar -->
+  <div style="height: 24px; display: flex; align-items: center; gap: 16px; padding: 0 12px; font-size: 11px; color: #b9c0ca; background: #0d0f12; border-top: 1px solid #23272e">
+    <span>⎇ main</span><span>Swift 6</span><span>Ln 17, Col 9</span><span style="margin-left: auto">Context 38k / 200k</span><span style="color: #56d364">Build ok</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5aa9ff","options":["#5aa9ff","#f0a35e","#b48cff","#4fd1a5"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  hl(src) {
+    const KW = new Set(['import','struct','var','let','func','return','some','if','else','for','in','private','self','case','enum','true','false','nil']);
+    const C = { kw: '#c792ea', ty: '#82cfff', st: '#f0b37e', cm: '#8b93a1', nu: '#f78c6c', pl: '#d7dae0', at: '#ff9cac' };
+    return src.split('\n').map((line, i) => {
+      const toks = []; const re = /(\/\/.*$)|("[^"]*")|(@[A-Za-z]+)|([A-Za-z_][A-Za-z0-9_]*)|(\d+(?:\.\d+)?)|(\s+)|(.)/g; let m;
+      while ((m = re.exec(line))) {
+        let c = C.pl;
+        if (m[1]) c = C.cm; else if (m[2]) c = C.st; else if (m[3]) c = C.at;
+        else if (m[4]) { if (KW.has(m[4])) c = C.kw; else if (/^[A-Z]/.test(m[4])) c = C.ty; }
+        else if (m[5]) c = C.nu;
+        toks.push({ t: m[0], c });
+      }
+      if (!toks.length) toks.push({ t: ' ', c: C.pl });
+      return { n: i + 1, toks };
+    });
+  }
+  renderVals() {
+    const accent = this.props.accent ?? '#5aa9ff';
+    const src = [
+      'import MetalUI',
+      '',
+      '// One node in a prompt flow: a prompt, its model, and its outputs.',
+      'struct FlowNodeView: View {',
+      '    @Binding var node: FlowNode',
+      '    var isSelected: Bool',
+      '    var onRun: () -> Void',
+      '',
+      '    var body: some View {',
+      '        VStack(alignment: .leading, spacing: 8) {',
+      '            HStack {',
+      '                Text(node.title).font(.headline)',
+      '                Spacer()',
+      '                ModelBadge(model: node.model)',
+      '            }',
+      '            PromptEditor(text: $node.prompt)',
+      '                .frame(minHeight: 96)',
+      '            RunButton(state: node.runState, action: onRun)',
+      '            ForEach(node.outputs) { output in',
+      '                OutputChip(output: output)',
+      '            }',
+      '        }',
+      '        .padding(12)',
+      '        .background(.regularMaterial)',
+      '        .overlay(selectionRing)',
+      '    }',
+      '}'
+    ].join('\n');
+    const added = new Set([18, 19, 20, 21]);
+    const code = this.hl(src).map((l) => ({ ...l, bg: added.has(l.n) ? 'rgba(86,211,100,0.08)' : 'transparent', mark: added.has(l.n) ? '#56d364' : 'transparent' }));
+    const T = (name, depth, opts = {}) => ({ name, pad: (14 + depth * 14) + 'px', bg: opts.sel ? '#1f2530' : 'transparent', fg: opts.dir ? '#b9c0ca' : '#e6e8eb', badge: opts.badge || '', badgeColor: opts.badge === 'M' ? '#f0a35e' : '#56d364' });
+    const tree = [
+      T('▾ MetalFlow', 0, { dir: true }),
+      T('▾ Sources', 1, { dir: true }),
+      T('▾ Graph', 2, { dir: true }),
+      T('FlowGraph.swift', 3),
+      T('FlowNode.swift', 3, { badge: 'M' }),
+      T('FlowNodeView.swift', 3, { sel: true, badge: 'M' }),
+      T('Wire.swift', 3),
+      T('▸ Agent', 2, { dir: true }),
+      T('▸ Editor', 2, { dir: true }),
+      T('▸ Diff', 2, { dir: true }),
+      T('RunButton.swift', 2, { badge: 'A' }),
+      T('▸ Tests', 1, { dir: true }),
+      T('Package.swift', 1),
+      T('.flows/add-run-button.flow', 1)
+    ];
+    const S = (kind, title, status, state, last) => ({ kind, title, status, arrow: last ? '' : '→', border: state === 'run' ? accent : '#262a31', statusColor: state === 'ok' ? '#56d364' : state === 'run' ? accent : '#9aa1ab' });
+    const flow = [
+      S('CONTEXT', '3 files + issue', 'Ready', 'ok'),
+      S('PROMPT', 'Plan the change', 'Done · 4 steps', 'ok'),
+      S('FAN-OUT ×3', 'Implement', '3 candidates', 'ok'),
+      S('TOOL', 'swift test', 'Running · 2 of 3', 'run'),
+      S('JUDGE', 'Pick best', 'Waiting', 'wait', true)
+    ];
+    return { accent, code, tree, flow };
+  }
+}
+</script>
+</body>
+</html>
