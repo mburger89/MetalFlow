@@ -252,6 +252,7 @@ import Testing
         let (model, _, window) = try await fixture()
         model.open(flow: URL(fileURLWithPath: "/a/x.flow"))
         model.open(flow: URL(fileURLWithPath: "/b/x.flow"))
+        model.screen = .dashboard
         try await window.runUntilIdle()
         let titles = try window.elements { ($0.identifier ?? "").hasPrefix("working.flow.") && !($0.identifier ?? "").hasSuffix("open") && !($0.identifier ?? "").hasSuffix("dismiss") }
         #expect(Set(titles.compactMap(\.identifier)).count == 2)

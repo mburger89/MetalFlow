@@ -93,8 +93,13 @@ actor FakeEngineClient: EngineClient {
     nonisolated let scanGate = ScanGate()
     nonisolated func flows(in repo: URL) -> [URL] { scanGate.pass(); return flowFiles }
     func isGitRepo(_ url: URL) async -> Bool { gitRepoPaths.contains(url.path) }
-    nonisolated func loadFlow(_ url: URL) throws -> Flow { BuiltinFlows.fixGitHubIssue }
-    nonisolated func saveFlow(_ flow: Flow, to url: URL) throws {}
+    /// Every `saveFlow` call, and whether `loadFlow` fails.
+    nonisolated let files = FileLog()
+    nonisolated func loadFlow(_ url: URL) throws -> Flow {
+        if files.failLoad { throw FakeFailure() }
+        return BuiltinFlows.fixGitHubIssue
+    }
+    nonisolated func saveFlow(_ flow: Flow, to url: URL) throws { files.record(flow, url) }
     private var holdingDiffs = false
     private var heldDiffs: [CheckedContinuation<Void, Never>] = []
     private var diffEntries = 0
@@ -160,4 +165,19 @@ final class ScanGate: @unchecked Sendable {
         while held { condition.wait() }
         condition.unlock()
     }
+}
+
+/// What the fake client was asked to save, readable from any context.
+final class FileLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _saved: [(Flow, URL)] = []
+    private var _failLoad = false
+    /// Every saved flow and its file, in order.
+    var saved: [(flow: Flow, url: URL)] { lock.withLock { _saved.map { (flow: $0.0, url: $0.1) } } }
+    /// When true, `loadFlow` throws.
+    var failLoad: Bool {
+        get { lock.withLock { _failLoad } }
+        set { lock.withLock { _failLoad = newValue } }
+    }
+    func record(_ flow: Flow, _ url: URL) { lock.withLock { _saved.append((flow, url)) } }
 }

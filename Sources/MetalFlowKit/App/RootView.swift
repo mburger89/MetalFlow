@@ -44,7 +44,7 @@ struct TopBar: Component {
     }
 }
 
-/// The dashboard or the studio. Real screens arrive in later tasks.
+/// The dashboard or the studio.
 struct ScreenBody: Component {
     let model: AppModel
 
@@ -57,8 +57,7 @@ struct ScreenBody: Component {
                 DashboardView(model: model)
             }
         case .studio:
-            Text("Flow Studio").foregroundColor(Palette.muted).accessibilityIdentifier("studio")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            StudioView(model: model)
         }
     }
 }

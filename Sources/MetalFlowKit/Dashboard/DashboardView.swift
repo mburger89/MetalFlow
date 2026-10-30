@@ -98,7 +98,7 @@ struct WorkingChip: Component {
     private func open() {
         switch item {
         case .run(let id): model.open(run: id)
-        case .flow: model.screen = .studio
+        case .flow(let url): model.open(flow: url)
         }
     }
 

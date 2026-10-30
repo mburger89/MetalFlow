@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reading and writing flow files (`.flows/<name>.json`).
+/// Reading and writing flow files (`.flows/<name>.flow`).
 public enum FlowFile {
     /// Directory (relative to a repo root) that holds flow files.
     public static let directoryName = ".flows"

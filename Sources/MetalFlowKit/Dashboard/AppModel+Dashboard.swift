@@ -90,6 +90,7 @@ extension AppModel {
             launchForm.flow = nil
         }
         launchForm.repo = url
+        retargetPristineDraft()
         guard let url else {
             repoFlows = []
             launchForm.flow = nil
@@ -135,16 +136,20 @@ extension AppModel {
     public func launchFromForm() async -> RunID? {
         guard canLaunch, let repo = launchForm.repo, let file = launchForm.flow else { return nil }
         let typed = launchForm.issue
-        let issue = Self.trimmed(typed)
         let flow: Flow
         do { flow = try client.loadFlow(file) } catch {
             notice = Notice(error.localizedDescription)
             return nil
         }
-        isLaunching = true
-        defer { isLaunching = false }
-        let id = await launch(flow: flow, repo: repo, input: issue)
+        let id = await launchGuarded(flow: flow, repo: repo, typed: typed)
         if id != nil, launchForm.issue == typed { launchForm.issue = "" }
         return id
+    }
+
+    /// The one launch path: marks the launch in flight and sends the trimmed issue text.
+    func launchGuarded(flow: Flow, repo: URL, typed: String) async -> RunID? {
+        isLaunching = true
+        defer { isLaunching = false }
+        return await launch(flow: flow, repo: repo, input: Self.trimmed(typed))
     }
 }

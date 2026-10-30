@@ -46,13 +46,21 @@ public final class AppModel {
     /// Run ids, newest first.
     public private(set) var order: [RunID] = []
     /// The visible screen.
-    public var screen: Screen = .dashboard
+    public var screen: Screen = .dashboard {
+        didSet { if screen == .studio { ensureDraft() } }
+    }
+    /// The flow open in the Studio, if any.
+    public var draft: FlowDraft?
+    /// The run overlaid on the Studio canvas; nil shows the definition only.
+    public var studioRun: RunID?
+    /// The issue typed in the Studio's launch field.
+    public var studioIssue = ""
     /// The run shown in detail, if any.
     public var selectedRun: RunID?
     /// The feed, newest first, at most `activityLimit` items.
     public private(set) var activity: [ActivityItem] = []
     /// Flows and runs the user has open.
-    public private(set) var workingOn: [WorkingItem] = []
+    public internal(set) var workingOn: [WorkingItem] = []
     /// The banner, if any.
     public var notice: Notice?
     /// Runs waiting for the user, newest first. Cached: updated by `apply`.
@@ -233,9 +241,11 @@ public final class AppModel {
         if !workingOn.contains(.run(id)) { workingOn.append(.run(id)) }
     }
 
-    /// Remembers an open flow.
+    /// Remembers an open flow, loads it into the Studio and shows the Studio. A flow that is already the
+    /// draft keeps its draft. A load error becomes a notice and the screen stays.
     public func open(flow url: URL) {
         if !workingOn.contains(.flow(url)) { workingOn.append(.flow(url)) }
+        loadDraft(from: url)
     }
 
     /// Removes an item from `workingOn`, closing the detail if it was showing that run.
