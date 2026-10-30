@@ -156,6 +156,29 @@ struct CommandRunnerTests {
         #expect(await gone(pid))
     }
 
+    @Test func backgroundDescendantHoldingPipesDoesNotHangRun() async throws {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let result = try await runner().run(Command(
+            executable: "/bin/sh", arguments: ["-c", "sleep 30 & echo \"hi $!\""]))
+        let elapsed = start.duration(to: clock.now)
+        let parts = result.stdout.split(separator: " ")
+        if let pid = parts.last.flatMap({ pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) {
+            kill(pid, SIGKILL)
+        }
+        #expect(parts.first == "hi")
+        #expect(elapsed < .seconds(10))
+    }
+
+    @Test func cancellingImmediatelyIsSafeRepeatedly() async throws {
+        let r = runner()
+        for _ in 0..<50 {
+            let task = Task { _ = try await r.run(Command(executable: "yes")) }
+            task.cancel()
+            _ = await task.result
+        }
+    }
+
     @Test func resolverFindsInSearchPath() async throws {
         let url = try await ExecutableResolver(searchPath: ["/nonexistent", "/bin"]).resolve("sh")
         #expect(url.path == "/bin/sh")

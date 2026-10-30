@@ -136,7 +136,6 @@ public actor ExecutableResolver {
                 }
                 guard let (data, status) = result else { return }
                 handle.readabilityHandler = nil
-                try? handle.close()
                 if force { box.killTree() }
                 guard status == 0 else { return cont.resume(returning: nil) }
                 let text = String(decoding: data, as: UTF8.self)
@@ -173,12 +172,17 @@ public actor ExecutableResolver {
 private final class ProcessBox: @unchecked Sendable {
     let process = Process()
     private let started = OSAllocatedUnfairLock(initialState: false)
+    private let terminated = OSAllocatedUnfairLock(initialState: false)
 
     func markStarted() { started.withLock { $0 = true } }
 
     /// SIGTERM the whole descendant tree (leaves first, then the child); SIGKILL survivors after five seconds.
+    /// Once-only: later calls do nothing.
     func terminate() {
-        guard started.withLock({ $0 }), process.isRunning else { return }
+        guard started.withLock({ $0 }), terminated.withLock({ done in
+            defer { done = true }
+            return !done
+        }), process.isRunning else { return }
         let root = process.processIdentifier
         // Collect before signalling: once the parent dies, children are reparented and lost.
         let victims = Self.descendants(of: root) + [root]
@@ -283,12 +287,18 @@ public struct ProcessRunner: CommandRunner {
         let (outChunks, outCont) = Self.chunks(from: outHandle)
         let (errChunks, errCont) = Self.chunks(from: errHandle)
 
-        // Idempotent: stop waiting for EOF (descendants may still hold the pipes open).
+        // Once-only: stop waiting for EOF (descendants may still hold the pipes open). The handles are never
+        // closed here: a readability handler may still be inside `availableData`, so the pipes' file descriptors
+        // are closed when the `Pipe` objects deallocate, after this function returns.
+        let stopped = OSAllocatedUnfairLock(initialState: false)
         let stopReading: @Sendable () -> Void = {
+            guard stopped.withLock({ done in
+                defer { done = true }
+                return !done
+            }) else { return }
             for (h, cont) in [(outHandle, outCont), (errHandle, errCont)] {
                 h.readabilityHandler = nil
                 cont.finish()
-                try? h.close()
             }
         }
 
@@ -311,7 +321,13 @@ public struct ProcessRunner: CommandRunner {
                 return code
             }.value
             if Task.isCancelled { stopReading() }
+            // A background descendant may keep the pipes open after the child exits: allow two seconds for EOF.
+            let grace = Task.detached {
+                try? await Task.sleep(for: .seconds(2))
+                if !Task.isCancelled { stopReading() }
+            }
             let (stdout, stderr) = await (outData, errData)
+            grace.cancel()
             if Task.isCancelled { throw CancellationError() }
             return Output(
                 exitCode: status,
@@ -344,6 +360,8 @@ public struct ProcessRunner: CommandRunner {
         var all = Data()
         var pending = Data()
         for await chunk in chunks {
+            // After cancellation the result is discarded, so do not work through a backlog of buffered output.
+            if Task.isCancelled { break }
             if keep { all.append(chunk) }
             var rest = chunk[...]
             while let nl = rest.firstIndex(of: 0x0A) {
