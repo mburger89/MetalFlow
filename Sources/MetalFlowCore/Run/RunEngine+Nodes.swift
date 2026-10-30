@@ -13,8 +13,9 @@ extension RunEngine {
             n.endedAt = nil
         }
         switch node.kind {
-        case .flowInput(let config):
-            await runFlowInput(id, key, config)
+        case .flowInput:
+            // launch initialises the flow input; reaching here means the run was not created by launch.
+            finish(id, key, .failed("The flow input was not set up by launch"))
         case .repo:
             finish(id, key, .succeeded, output: run.repo.path)
         case .prompt(let config):
@@ -42,23 +43,6 @@ extension RunEngine {
     }
 
     // MARK: - Inputs
-
-    private func runFlowInput(_ id: RunID, _ key: NodeKey, _ config: FlowInputConfig) async {
-        guard let run = runs[id] else { return }
-        let raw = run.inputs[config.name] ?? ""
-        switch config.source {
-        case .text:
-            finish(id, key, .succeeded, output: raw)
-        case .githubIssue:
-            do {
-                let issue = try await issues.fetch(raw, repo: run.repo)
-                mutate(id) { $0.title = "#\(issue.number) \(issue.title)" }
-                finish(id, key, .succeeded, output: issue.promptText)
-            } catch {
-                finish(id, key, .failed(error.localizedDescription))
-            }
-        }
-    }
 
     /// Placeholder values for a node from its wired inputs' outputs.
     func templateValues(_ id: RunID, _ key: NodeKey, plan: FlowPlan) -> [String: String] {
@@ -93,11 +77,21 @@ extension RunEngine {
                 sections.append("## \(lane.id) (\(lane.model)) — failed: \(message)")
                 continue
             }
-            let passed = lane.gatePassed == true ? "passed" : "failed"
-            let diff = (try? await git.diff(worktree: lane.worktree, base: run.branch)) ?? ""
-            let lines = diff.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-            let clipped = lines.prefix(Self.maxCandidateDiffLines).joined(separator: "\n")
-            sections.append("## \(lane.id) (\(lane.model)) — tests \(passed), +\(lane.added) −\(lane.removed)\n\(clipped)")
+            let tests: String
+            switch lane.gatePassed {
+            case true?: tests = "tests passed"
+            case false?: tests = "tests failed"
+            case nil: tests = "no gate"
+            }
+            let clipped: String
+            do {
+                let diff = try await git.diff(worktree: lane.worktree, base: run.branch)
+                let lines = diff.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+                clipped = lines.prefix(Self.maxCandidateDiffLines).joined(separator: "\n")
+            } catch {
+                clipped = "(diff unavailable: \(error.localizedDescription))"
+            }
+            sections.append("## \(lane.id) (\(lane.model)) — \(tests), +\(lane.added) −\(lane.removed)\n\(clipped)")
         }
         return sections.joined(separator: "\n\n")
     }
@@ -107,10 +101,10 @@ extension RunEngine {
     func runAgent(_ id: RunID, _ key: NodeKey, node: Node, config: PromptConfig, plan: FlowPlan, isJudge: Bool) async {
         guard let run = runs[id] else { return }
         let lane = key.lane.flatMap { laneID in run.lanes.first { $0.id == laneID } }
-        let current = run.nodes[key] ?? NodeRun()
 
         var values = templateValues(id, key, plan: plan)
         if isJudge { values["candidates"] = await candidatesText(id, plan: plan) }
+        let current = runs[id]?.nodes[key] ?? NodeRun()
 
         var request = AgentRequest(
             prompt: Template.fill(config.prompt, with: values),
@@ -147,11 +141,10 @@ extension RunEngine {
                 return finished
             }
         } catch {
-            if Task.isCancelled || error is CancellationError { return }
-            finish(id, key, .failed(error.localizedDescription))
+            // A cancelled run ignores this write; otherwise the node must not stay `.running`.
+            finish(id, key, .failed(error is CancellationError ? "interrupted" : error.localizedDescription))
             return
         }
-        if Task.isCancelled { return }
         guard let result else {
             finish(id, key, .failed("The agent ended without a result"))
             return
@@ -162,7 +155,12 @@ extension RunEngine {
             return
         }
         if let lane {
-            _ = try? await git.commitAll(worktree: lane.worktree, message: "\(node.title) (\(lane.id))")
+            do {
+                _ = try await git.commitAll(worktree: lane.worktree, message: "\(node.title) (\(lane.id))")
+            } catch {
+                finish(id, key, .failed("commit failed: \(error.localizedDescription)"), output: result.text)
+                return
+            }
         }
         if !result.deniedTools.isEmpty {
             finish(id, key, .needsYou(.deniedTools(result.deniedTools)), output: result.text)
@@ -201,8 +199,7 @@ extension RunEngine {
                 executable: "/bin/sh", arguments: ["-c", command],
                 workingDirectory: worktree, environment: shellEnvironment))
         } catch {
-            if Task.isCancelled || error is CancellationError { return }
-            finish(id, key, .failed(error.localizedDescription))
+            finish(id, key, .failed(error is CancellationError ? "interrupted" : error.localizedDescription))
             return
         }
         var lines = (result.stdout + result.stderr)

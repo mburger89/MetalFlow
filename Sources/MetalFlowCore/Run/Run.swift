@@ -165,6 +165,8 @@ public enum RunStatus: Codable, Hashable, Sendable {
     case failed(String)
     /// Cancelled by the user.
     case cancelled
+    /// Every node finished successfully and no step is left for the user.
+    case completed
 }
 
 /// One launch of a flow.

@@ -10,12 +10,17 @@ public enum RunEngineError: Error, Equatable {
     case unknownRun(RunID)
     /// The flow failed validation.
     case invalid(FlowError)
+    /// A fan-out node lists more candidates than there are lane letters (26).
+    case tooManyCandidates(Int)
 }
 
 /// Executes flow runs as headless agent sessions in git worktrees.
 public actor RunEngine {
     /// Every saved run state, in order. One shared stream; consumers filter by run ID.
     public nonisolated let updates: AsyncStream<Run>
+
+    /// The message of the last failed attempt to save a run, cleared by the next successful save.
+    public private(set) var lastSaveError: String?
 
     let continuation: AsyncStream<Run>.Continuation
     let store: RunStore
@@ -40,7 +45,7 @@ public actor RunEngine {
         self.git = Git(runner: runner)
         self.limiter = SessionLimiter(max: maxSessions)
         self.shellEnvironment = shellEnvironment
-        (updates, continuation) = AsyncStream.makeStream(of: Run.self)
+        (updates, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .bufferingNewest(256))
     }
 
     /// Loads persisted runs into memory and returns them; does not start any execution.
@@ -124,7 +129,12 @@ public actor RunEngine {
     // MARK: - State
 
     func persist(_ run: Run) {
-        try? store.save(run)
+        do {
+            try store.save(run)
+            lastSaveError = nil
+        } catch {
+            lastSaveError = String(describing: error)
+        }
         continuation.yield(run)
     }
 
@@ -186,6 +196,20 @@ public actor RunEngine {
                 return
             }
         }
+        if let plan = try? run.flow.validate(), isComplete(run, plan: plan) {
+            mutate(id) { $0.status = .completed }
+        }
+    }
+
+    private func isComplete(_ run: Run, plan: FlowPlan) -> Bool {
+        run.flow.nodes.allSatisfy { node in
+            if plan.laneScoped.contains(node.id) {
+                return !run.lanes.isEmpty && run.lanes.allSatisfy {
+                    run.nodes[NodeKey(node: node.id, lane: $0.id)]?.state == .succeeded
+                }
+            }
+            return run.nodes[NodeKey(node: node.id)]?.state == .succeeded
+        }
     }
 
     private func execute(_ id: RunID) async throws {
@@ -196,31 +220,46 @@ public actor RunEngine {
         do { plan = try run.flow.validate() } catch { throw RunEngineError.invalid(error) }
         let laneNodes = plan.order.filter { plan.laneScoped.contains($0) }
 
-        var lanesRan = false
-        for nodeID in plan.order {
-            try Task.checkCancellation()
-            if plan.laneScoped.contains(nodeID) {
-                if lanesRan { continue }
-                lanesRan = true
-                try await runLaneGroup(id, plan: plan, nodes: laneNodes)
-                if !(runs[id]?.needsYou.isEmpty ?? true) { return }
-                if !hasFinishedLane(id, nodes: laneNodes) {
-                    mutate(id) { $0.status = .failed("all candidates failed") }
-                    return
-                }
-                continue
+        // Non-lane nodes that feed lanes must run before them; the rest (judge, pick, ...) run after.
+        var children: [NodeID: [NodeID]] = [:]
+        for w in run.flow.wires { children[w.from, default: []].append(w.to) }
+        var afterLanes = Set<NodeID>()
+        var stack = Array(plan.laneScoped)
+        while let n = stack.popLast() {
+            for c in children[n] ?? [] where !plan.laneScoped.contains(c) && afterLanes.insert(c).inserted {
+                stack.append(c)
             }
-            let key = NodeKey(node: nodeID)
-            let isPick = { if case .pick = run.flow.node(nodeID)?.kind { return true } else { return false } }()
-            switch nodeState(id, key) {
-            case .succeeded: continue
-            case .failed: return
-            case .needsYou where !isPick: return
-            default: break
-            }
-            await runNode(id, key, plan: plan)
-            guard nodeState(id, key) == .succeeded else { return }
         }
+        let nonLane = plan.order.filter { !plan.laneScoped.contains($0) }
+        for nodeID in nonLane where !afterLanes.contains(nodeID) {
+            guard try await runNonLane(id, nodeID, run: run, plan: plan) else { return }
+        }
+        if !laneNodes.isEmpty {
+            try await runLaneGroup(id, plan: plan, nodes: laneNodes)
+            if !(runs[id]?.needsYou.isEmpty ?? true) { return }
+            if !hasFinishedLane(id, nodes: laneNodes) {
+                mutate(id) { $0.status = .failed("all candidates failed") }
+                return
+            }
+        }
+        for nodeID in nonLane where afterLanes.contains(nodeID) {
+            guard try await runNonLane(id, nodeID, run: run, plan: plan) else { return }
+        }
+    }
+
+    /// Runs a non-lane node unless already done; returns false when the pass must stop.
+    private func runNonLane(_ id: RunID, _ nodeID: NodeID, run: Run, plan: FlowPlan) async throws -> Bool {
+        try Task.checkCancellation()
+        let key = NodeKey(node: nodeID)
+        let isPick = { if case .pick = run.flow.node(nodeID)?.kind { return true } else { return false } }()
+        switch nodeState(id, key) {
+        case .succeeded: return true
+        case .failed: return false
+        case .needsYou where !isPick: return false
+        default: break
+        }
+        await runNode(id, key, plan: plan)
+        return nodeState(id, key) == .succeeded
     }
 
     private func hasFinishedLane(_ id: RunID, nodes: [NodeID]) -> Bool {
@@ -261,13 +300,18 @@ public actor RunEngine {
     private func ensureLanes(_ id: RunID, plan: FlowPlan) async throws {
         guard let run = runs[id], run.lanes.isEmpty, let fan = plan.fanOut,
               case .prompt(let config)? = run.flow.node(fan)?.kind else { return }
+        guard config.candidates.count <= 26 else { throw RunEngineError.tooManyCandidates(config.candidates.count) }
         _ = try await git.commitAll(worktree: run.worktree, message: "MetalFlow: before fan-out")
         for (index, model) in config.candidates.enumerated() {
             let laneID = String(UnicodeScalar(UInt8(97 + index)))
             let branch = BranchNaming.laneBranch(run: run.branch, lane: laneID)
             let path = store.worktreesDirectory.appendingPathComponent(id.rawValue).appendingPathComponent(laneID)
             try await git.addWorktree(repo: run.repo, path: path, newBranch: branch, from: run.branch)
-            mutate(id) { $0.lanes.append(Lane(id: laneID, model: model, branch: branch, worktree: path)) }
+            // Recorded even if the run was cancelled meanwhile, so cleanup can find the worktree.
+            guard var current = runs[id] else { return }
+            current.lanes.append(Lane(id: laneID, model: model, branch: branch, worktree: path))
+            runs[id] = current
+            persist(current)
         }
     }
 }

@@ -11,7 +11,7 @@ import Testing
         let engine: RunEngine
         let store: RunStore
 
-        init(planHold: AsyncStream<Void>? = nil) throws {
+        init(planHold: AsyncStream<Void>? = nil, maxSessions: Int = 4) throws {
             repo = try TempRepo()
             root = repo.worktreePath("store")
             store = RunStore(root: root)
@@ -19,7 +19,8 @@ import Testing
                 {"number":7,"title":"Crash on launch","body":"Boom","url":"https://x/7","labels":[]}
                 """, stderr: ""))
             let runner = RoutingRunner(gh: gh)
-            engine = RunEngine(store: store, runner: runner, agent: agent, issues: GitHubIssues(runner: runner))
+            engine = RunEngine(store: store, runner: runner, agent: agent, issues: GitHubIssues(runner: runner),
+                                maxSessions: maxSessions)
 
             func finished(_ text: String, error: Bool = false) -> [AgentEvent] {
                 [.started(sessionID: "s"), .text(text),
@@ -116,6 +117,79 @@ import Testing
         let run = await h.settled(id)
         #expect(run.status == .cancelled)
         #expect(run.nodes[NodeKey(node: "plan")]?.state == .cancelled)
+        // The pass has stopped writing: nothing is left running and a second cancel changes nothing.
+        let after = await h.engine.run(id)
+        #expect(after?.nodes.values.contains { $0.state == .running } == false)
+        await h.engine.cancel(id)
+        #expect(await h.engine.run(id) == after)
+    }
+
+    @Test func flowWithoutPickCompletes() async throws {
+        let h = try Harness()
+        let flow = Flow(name: "simple", nodes: [
+            Node(id: "repo", title: "Repo", kind: .repo, position: Point(x: 0, y: 0)),
+            Node(id: "plan", title: "Plan", kind: .prompt(PromptConfig(
+                model: "opus", prompt: "Write a short numbered plan for {repo}", candidates: [],
+                allowedTools: [], maxTurns: nil)), position: Point(x: 1, y: 0)),
+            Node(id: "show", title: "Show", kind: .shell(ShellConfig(command: "echo {plan}")), position: Point(x: 2, y: 0)),
+        ], wires: [Wire(from: "repo", to: "plan", input: "repo"), Wire(from: "plan", to: "show", input: "plan")])
+        let id = try await h.engine.launch(flow: flow, repo: h.repo.url, input: "")
+        let run = await h.settled(id)
+        #expect(run.status == .completed)
+        #expect(run.title == "simple")
+        #expect(run.nodes[NodeKey(node: "show")]?.state == .succeeded)
+    }
+
+    @Test func nonLaneFeederRunsBeforeLanes() async throws {
+        let h = try Harness()
+        let flow = Flow(name: "feeder", nodes: [
+            Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
+                model: "sonnet", prompt: "Fix this GitHub issue", candidates: ["sonnet", "opus"],
+                allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0)),
+            Node(id: "repo", title: "Repo", kind: .repo, position: Point(x: 0, y: 1)),
+            Node(id: "setup", title: "Setup", kind: .shell(ShellConfig(command: "echo SETUPOUT")), position: Point(x: 1, y: 1)),
+            Node(id: "gate", title: "Gate", kind: .gate(ShellConfig(command: "echo {setup}; test -f ok.txt")), position: Point(x: 2, y: 0)),
+        ], wires: [
+            Wire(from: "repo", to: "setup", input: "repo"),
+            Wire(from: "implement", to: "gate", input: "code"),
+            Wire(from: "setup", to: "gate", input: "setup"),
+        ])
+        let id = try await h.engine.launch(flow: flow, repo: h.repo.url, input: "")
+        let run = await h.settled(id)
+        #expect(run.status == .completed)
+        let out = run.nodes[NodeKey(node: "gate", lane: "a")]?.output ?? ""
+        #expect(out.contains("SETUPOUT"))
+        #expect(out.contains("exit 0"))
+    }
+
+    @Test func engineRoutesAgentCallsThroughLimiter() async throws {
+        let h = try Harness(maxSessions: 1)
+        var releases: [AsyncStream<Void>.Continuation] = []
+        for lane in ["a", "b", "c"] {
+            let (hold, cont) = AsyncStream<Void>.makeStream()
+            releases.append(cont)
+            h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == lane },
+                           hold: hold, events: [.finished(AgentResult(
+                            sessionID: lane, text: "done", isError: false, deniedTools: [], costUSD: 0, turns: 1))])
+        }
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        func started() -> Int { h.agent.requests.filter { $0.prompt.contains("Fix this GitHub issue") }.count }
+        while started() < 1 { await Task.yield() }
+        for _ in 0..<200 { await Task.yield() }
+        #expect(started() == 1)
+        releases.forEach { $0.finish() }
+        let run = await h.settled(id)
+        #expect(started() == 3)
+        #expect(run.status == .needsYou)
+    }
+
+    @Test func recommendationParsing() {
+        func lane(_ id: String) -> Lane { Lane(id: id, model: "m", branch: "b", worktree: URL(fileURLWithPath: "/tmp")) }
+        let lanes = [lane("a"), lane("b")]
+        #expect(RunEngine.recommendation(in: "no marker here", lanes: lanes) == nil)
+        #expect(RunEngine.recommendation(in: "RECOMMEND: z", lanes: lanes) == nil)
+        #expect(RunEngine.recommendation(in: "RECOMMEND: a\nthoughts\nRECOMMEND: b\n", lanes: lanes) == "b")
+        #expect(RunEngine.recommendation(in: "`RECOMMEND: a`", lanes: lanes) == "a")
     }
 
     @Test func ghErrorThrowsFromLaunchWithoutWorktree() async throws {
