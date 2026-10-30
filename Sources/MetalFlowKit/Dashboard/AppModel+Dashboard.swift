@@ -84,6 +84,11 @@ extension AppModel {
     /// Selects a repo and loads its flows (scanned off the main actor), choosing the first. A result for a
     /// repo that is no longer selected is dropped.
     public func selectRepo(_ url: URL?) async {
+        if launchForm.repo != url {
+            // The old repo's flows do not belong to the new one: nothing launches until its scan returns.
+            repoFlows = []
+            launchForm.flow = nil
+        }
         launchForm.repo = url
         guard let url else {
             repoFlows = []

@@ -260,4 +260,27 @@ import Testing
         try await window.runUntilIdle()
         #expect(try window.element(identifier: "finished.\(run.id.rawValue).age").value == "2h")
     }
+
+    @Test func changingRepoClearsTheFlowUntilTheScanReturns() async throws {
+        let (model, _, _) = try await fixture(gitRepos: ["/other"])
+        model.launchForm.issue = "42"
+        #expect(model.canLaunch)
+        let task = Task { await model.selectRepo(URL(fileURLWithPath: "/other")) }
+        await Task.yield()
+        #expect(model.launchForm.flow == nil)
+        #expect(model.repoFlows.isEmpty)
+        #expect(!model.canLaunch)
+        await task.value
+        #expect(model.canLaunch)
+    }
+
+    @Test func isLaunchingResetsAfterALaunchThrows() async throws {
+        let (model, client, _) = try await fixture()
+        await client.setFailure(FakeFailure())
+        model.launchForm.issue = "42"
+        #expect(await model.launchFromForm() == nil)
+        #expect(!model.isLaunching)
+        #expect(model.launchForm.issue == "42", "a failed launch keeps the text")
+        #expect(model.notice != nil)
+    }
 }
