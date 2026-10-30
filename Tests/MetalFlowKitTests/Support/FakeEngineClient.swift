@@ -16,8 +16,15 @@ actor FakeEngineClient: EngineClient {
     /// What `pick` returns.
     var pickResult: MergeResult = .merged(commit: "abc")
 
-    init(restored: [Run] = []) {
+    nonisolated let repos: [URL]
+    nonisolated let flowFiles: [URL]
+    nonisolated let gitRepoPaths: Set<String>
+
+    init(restored: [Run] = [], repos: [URL] = [], flowFiles: [URL] = [], gitRepoPaths: Set<String> = []) {
         self.restored = restored
+        self.repos = repos
+        self.flowFiles = flowFiles
+        self.gitRepoPaths = gitRepoPaths
         (updates, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .unbounded)
     }
 
@@ -35,7 +42,7 @@ actor FakeEngineClient: EngineClient {
 
     func restore() async throws -> [Run] { try record("restore"); return restored }
     func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
-        try record("launch(\(flow.name), \(input))")
+        try record("launch(\(flow.name), \(repo.path), \(input))")
         return RunID()
     }
     func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
@@ -52,8 +59,9 @@ actor FakeEngineClient: EngineClient {
     func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws {
         try record("branch(\(lane), \(name))")
     }
-    nonisolated func knownRepos() -> [URL] { [] }
-    nonisolated func flows(in repo: URL) -> [URL] { [] }
+    nonisolated func knownRepos() -> [URL] { repos }
+    nonisolated func flows(in repo: URL) -> [URL] { flowFiles }
+    func isGitRepo(_ url: URL) async -> Bool { gitRepoPaths.contains(url.path) }
     nonisolated func loadFlow(_ url: URL) throws -> Flow { BuiltinFlows.fixGitHubIssue }
     nonisolated func saveFlow(_ flow: Flow, to url: URL) throws {}
     func diff(_ id: RunID, lane: LaneID) async -> String { "" }

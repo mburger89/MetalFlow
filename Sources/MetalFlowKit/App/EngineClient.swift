@@ -27,6 +27,8 @@ public protocol EngineClient: Sendable {
     func knownRepos() -> [URL]
     /// The `.flow` files of a repository.
     func flows(in repo: URL) -> [URL]
+    /// Whether `url` is the top level of a git repository (it has a `.git` entry).
+    func isGitRepo(_ url: URL) async -> Bool
     /// Loads a flow file.
     func loadFlow(_ url: URL) throws -> Flow
     /// Saves a flow file.
@@ -99,6 +101,9 @@ public struct LiveEngineClient: EngineClient {
     }
     public func knownRepos() -> [URL] { store.knownRepos() }
     public func flows(in repo: URL) -> [URL] { RunEngine.flows(in: repo) }
+    public func isGitRepo(_ url: URL) async -> Bool {
+        FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
+    }
     public func loadFlow(_ url: URL) throws -> Flow { try FlowFile.load(from: url) }
     public func saveFlow(_ flow: Flow, to url: URL) throws { try FlowFile.save(flow, to: url) }
     public func diff(_ id: RunID, lane: LaneID) async -> String { await engine.value.laneDiff(id, lane: lane) }

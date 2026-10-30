@@ -51,8 +51,7 @@ struct ScreenBody: Component {
     var content: some ElementGroup {
         switch model.screen {
         case .dashboard:
-            Text("Dashboard").foregroundColor(Palette.muted).accessibilityIdentifier("dashboard")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            DashboardView(model: model)
         case .studio:
             Text("Flow Studio").foregroundColor(Palette.muted).accessibilityIdentifier("studio")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

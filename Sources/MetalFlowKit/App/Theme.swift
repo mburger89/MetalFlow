@@ -52,3 +52,13 @@ public enum Spacing {
 public let metalFlowWindowSize = Size(width: Pixels(1440), height: Pixels(900))
 /// The smallest window size.
 public let metalFlowMinimumSize = Size(width: Pixels(1000), height: Pixels(640))
+
+/// Edge insets from plain numbers.
+func insets(top: Double, right: Double, bottom: Double, left: Double) -> Edges<Pixels> {
+    Edges(top: Pixels(floatLiteral: top), right: Pixels(floatLiteral: right), bottom: Pixels(floatLiteral: bottom), left: Pixels(floatLiteral: left))
+}
+
+/// Edge insets for modifiers on text, which take `Length`.
+func lengthInsets(top: Double, right: Double, bottom: Double, left: Double) -> Edges<Length> {
+    Edges(top: .pixels(Pixels(floatLiteral: top)), right: .pixels(Pixels(floatLiteral: right)), bottom: .pixels(Pixels(floatLiteral: bottom)), left: .pixels(Pixels(floatLiteral: left)))
+}

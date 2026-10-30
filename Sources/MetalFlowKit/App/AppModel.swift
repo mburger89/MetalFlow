@@ -62,6 +62,16 @@ public final class AppModel {
     /// Runs that are over, newest first. Cached.
     public private(set) var finished: [Run] = []
 
+    /// The launch bar's selections and text.
+    public var launchForm = LaunchForm()
+    /// Repositories offered by the launch bar: the client's known repos plus ones added by path.
+    public internal(set) var repos: [URL] = []
+    /// The `.flow` files of the selected repo, cached when the repo changes.
+    public internal(set) var repoFlows: [URL] = []
+    /// Unsent answer text, keyed by `AppModel.draftKey(_:_:)`.
+    public var answerDrafts: [String: String] = [:]
+    var addedRepos: [URL] = []
+
     /// The feed's capacity.
     public static let activityLimit = 200
 
@@ -88,6 +98,7 @@ public final class AppModel {
     public func start() async {
         guard !started else { return }
         started = true
+        refreshRepos()
         do {
             for run in try await client.restore() { apply(run, restoring: true) }
         } catch {
