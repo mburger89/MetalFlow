@@ -22,6 +22,8 @@ public enum RunEngineError: Error, Equatable {
     case unknownLane(LaneID)
     /// The run is already merged or discarded, so no branch can be made from it.
     case notBranchable
+    /// No node of the run is interrupted.
+    case nothingToResume
 }
 
 /// Executes flow runs as headless agent sessions in git worktrees.
@@ -153,9 +155,13 @@ public actor RunEngine {
         continuation.yield(run)
     }
 
-    /// Applies a change and saves it. Ignored once the run is cancelled, so work finishing late cannot undo it.
+    /// Applies a change and saves it. Ignored once the run is cancelled, merged or discarded, so work finishing late cannot undo it.
     func mutate(_ id: RunID, _ body: (inout Run) -> Void) {
-        guard var run = runs[id], run.status != .cancelled else { return }
+        guard var run = runs[id] else { return }
+        switch run.status {
+        case .cancelled, .merged, .discarded: return
+        default: break
+        }
         body(&run)
         runs[id] = run
         persist(run)
@@ -200,7 +206,7 @@ public actor RunEngine {
 
     /// Settles the run's status after a pass.
     private func finalize(_ id: RunID) {
-        guard let run = runs[id], run.status == .running else { return }
+        guard let run = runs[id], run.status == .running, !rerunRequested.contains(id) else { return }
         if !run.needsYou.isEmpty {
             mutate(id) { $0.status = .needsYou }
             return
@@ -245,6 +251,10 @@ public actor RunEngine {
         if !laneNodes.isEmpty {
             try await runLaneGroup(id, plan: plan, nodes: laneNodes)
             if !(runs[id]?.needsYou.isEmpty ?? true) { return }
+            // A lane answered during this pass is waiting again; the requested rerun finishes it before judge/pick.
+            if rerunRequested.contains(id) || (runs[id]?.nodes.contains { $0.key.lane != nil && $0.value.state == .waiting } ?? false) {
+                return
+            }
             if !hasFinishedLane(id, nodes: laneNodes) {
                 mutate(id) { $0.status = .failed("all candidates failed") }
                 return

@@ -116,8 +116,6 @@ extension RunEngine {
             request.prompt = reply
             request.resumeSessionID = session
         }
-        updateNode(id, key) { $0.pendingReply = nil }
-
         let agent = self.agent
         let finalRequest = request
         let result: AgentResult?
@@ -127,7 +125,7 @@ extension RunEngine {
                 for try await event in agent.run(finalRequest) {
                     switch event {
                     case .started(let session):
-                        await self.updateNode(id, key) { $0.sessionID = session }
+                        await self.updateNode(id, key) { $0.sessionID = session; $0.pendingReply = nil }
                     case .text(let text):
                         let line = String(text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
                             .first ?? "").prefix(200)

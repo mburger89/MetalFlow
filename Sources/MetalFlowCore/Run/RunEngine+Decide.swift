@@ -9,9 +9,10 @@ extension RunEngine {
     public func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String] = []) throws {
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         switch run.status {
-        case .cancelled, .merged, .discarded: throw RunEngineError.notAnswerable(node)
+        case .cancelled, .merged, .discarded, .failed: throw RunEngineError.notAnswerable(node)
         default: break
         }
+        guard !picking.contains(id) else { throw RunEngineError.notAnswerable(node) }
         guard let current = run.nodes[node] else { throw RunEngineError.notAnswerable(node) }
         switch current.state {
         case .needsYou(.question), .needsYou(.deniedTools), .interrupted: break
@@ -33,7 +34,7 @@ extension RunEngine {
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         let keys = run.nodes.filter { $0.value.state == .interrupted }.map(\.key)
             .sorted { $0.description < $1.description }
-        guard !keys.isEmpty else { throw RunEngineError.notAnswerable(NodeKey(node: run.flow.nodes.first?.id ?? "")) }
+        guard !keys.isEmpty else { throw RunEngineError.nothingToResume }
         for key in keys { try answer(id, node: key, reply: "Continue where you left off.") }
     }
 
@@ -42,6 +43,7 @@ extension RunEngine {
     /// Merges a candidate into the base branch. Only a successful merge changes the run; otherwise the
     /// result (blocked by local changes, or conflicting files) is returned for the UI to show.
     public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult {
+        await waitForPass(id)
         guard let run = runs[id], run.status == .needsYou, !picking.contains(id),
               let pickNode = pickNodeKey(run),
               case .needsYou(.pickWinner)? = run.nodes[pickNode]?.state,
@@ -74,6 +76,9 @@ extension RunEngine {
 
     /// Throws away the run: its worktrees and branches are removed (except kept branches).
     public func discard(_ id: RunID) async throws {
+        guard runs[id] != nil else { throw RunEngineError.unknownRun(id) }
+        // Let a cancelled pass finish first, so it cannot write after the discard.
+        if runs[id]?.status == .cancelled { await waitForPass(id) }
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         switch run.status {
         case .needsYou, .failed, .completed, .cancelled: break
@@ -125,7 +130,6 @@ extension RunEngine {
                 if !text.contains("not a working tree") && !text.contains("not a worktree") { errors.append(text) }
             }
         }
-        do { try await git.pruneWorktrees(repo: run.repo) } catch { errors.append(String(describing: error)) }
         let existing = (try? await git.branches(repo: run.repo)) ?? []
         for branch in run.lanes.map(\.branch) + [run.branch]
         where existing.contains(branch) && !run.keptBranches.contains(branch) {
@@ -135,6 +139,7 @@ extension RunEngine {
         if fm.fileExists(atPath: directory.path) {
             do { try fm.removeItem(at: directory) } catch { errors.append(String(describing: error)) }
         }
+        do { try await git.pruneWorktrees(repo: run.repo) } catch { errors.append(String(describing: error)) }
         if !errors.isEmpty {
             let key = pickNodeKey(run) ?? run.flow.nodes.first.map { NodeKey(node: $0.id) }
             setDirect(id) { run in
@@ -143,8 +148,6 @@ extension RunEngine {
                 for e in errors { node.appendLog("cleanup: \(e)") }
                 run.nodes[key] = node
             }
-        } else if let current = runs[id] {
-            persist(current)
         }
     }
 }

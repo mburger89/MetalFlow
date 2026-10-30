@@ -182,4 +182,67 @@ import Testing
         try await h.engine.discard(id)
         #expect(await h.engine.run(id)?.status == .discarded)
     }
+
+    @Test func discardAfterCancelStaysDiscarded() async throws {
+        let (hold, cont) = AsyncStream<Void>.makeStream()
+        defer { cont.finish() }
+        let h = try Harness(planHold: hold)
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        for await run in h.engine.updates where run.id == id && run.nodes[NodeKey(node: "plan")]?.state == .running { break }
+        await h.engine.cancel(id)
+        try await h.engine.discard(id)
+        let after = try #require(await h.engine.run(id))
+        #expect(after.status == .discarded)
+        cont.yield()
+        await h.engine.waitForPass(id)
+        let end = try #require(await h.engine.run(id))
+        #expect(end.status == .discarded)
+        #expect(end.nodes == after.nodes)
+    }
+
+    @Test func answerDuringLivePassWaitsForLane() async throws {
+        let h = try Harness()
+        let (hold, cont) = AsyncStream<Void>.makeStream()
+        defer { cont.finish() }
+        h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "c" },
+                       hold: hold, events: [.finished(AgentResult(
+                        sessionID: "sc", text: "done", isError: false, deniedTools: [], costUSD: 0, turns: 1))])
+        h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "b" },
+                       events: [.started(sessionID: "sb"), .finished(AgentResult(
+                        sessionID: "sb", text: "QUESTION: Keep the API?", isError: false, deniedTools: [], costUSD: 0, turns: 1))])
+        resumeScript(h)
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let key = NodeKey(node: "implement", lane: "b")
+        while await h.engine.run(id)?.nodes[key]?.state != .needsYou(.question("Keep the API?")) { await Task.yield() }
+        try await h.engine.answer(id, node: key, reply: "Yes")
+        cont.yield()
+        let run = await h.settled(id)
+        let judges = h.agent.requests.filter { $0.prompt.contains("judging candidate") }
+        #expect(judges.count == 1)
+        #expect(judges.first?.prompt.contains("## b (opus) — tests passed") == true)
+        #expect(run.status == .needsYou)
+        #expect(run.nodes[NodeKey(node: "pick")] != nil)
+    }
+
+    @Test func replySurvivesAgentFailureBeforeStart() async throws {
+        let h = try Harness()
+        let id = try await pausedOnQuestion(h)
+        let key = NodeKey(node: "implement", lane: "b")
+        try await h.engine.answer(id, node: key, reply: "Yes")
+        let run = await h.settled(id)
+        #expect(run.nodes[key]?.state != .succeeded)
+        if case .failed? = run.nodes[key]?.state {} else { Issue.record("expected failed") }
+        #expect(run.nodes[key]?.pendingReply == "Yes")
+    }
+
+    @Test func answerRejectedOnFailedRunAndNothingToResume() async throws {
+        let h = try Harness()
+        let id = try await pausedOnQuestion(h)
+        await #expect(throws: RunEngineError.nothingToResume) { try await h.engine.resumeInterrupted(id) }
+        await h.engine.setDirect(id) { $0.status = .failed("x") }
+        let key = NodeKey(node: "implement", lane: "b")
+        await #expect(throws: RunEngineError.notAnswerable(key)) {
+            try await h.engine.answer(id, node: key, reply: "Yes")
+        }
+    }
 }
