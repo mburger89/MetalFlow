@@ -23,12 +23,16 @@ public enum BranchNaming {
         return result.isEmpty ? "run" : result
     }
 
-    /// Branch for a run, `flow/<issue>-<slug>` or `flow/<slug>`; a numeric suffix (`-2`, `-3`, ...) avoids names in `existing`.
+    /// Branch for a run, `flow/<issue>-<slug>` or `flow/<slug>`; a numeric suffix (`-2`, `-3`, ...) avoids names in `existing`
+    /// and names that still have leftover lane branches (`<name>--<lane>`), which a new run would otherwise adopt.
     public static func runBranch(issue: Int?, title: String, existing: Set<String>) -> String {
         let base = "flow/" + (issue.map { "\($0)-" } ?? "") + slug(title)
-        if !existing.contains(base) { return base }
+        func taken(_ name: String) -> Bool {
+            existing.contains(name) || existing.contains { $0.hasPrefix(name + "--") }
+        }
+        if !taken(base) { return base }
         var n = 2
-        while existing.contains("\(base)-\(n)") { n += 1 }
+        while taken("\(base)-\(n)") { n += 1 }
         return "\(base)-\(n)"
     }
 

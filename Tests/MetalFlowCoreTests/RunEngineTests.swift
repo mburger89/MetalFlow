@@ -64,6 +64,21 @@ import Testing
         #expect(run.lanes[0].added == 1)
     }
 
+    @Test func leftoverLaneBranchIsNotAdoptedByNewRun() async throws {
+        let h = try Harness()
+        try h.repo.git(["checkout", "-b", "flow/7-crash-on-launch--a"])
+        try h.repo.write("stale.txt", "stale\n")
+        try h.repo.commit("unrelated stale commit")
+        try h.repo.git(["checkout", "main"])
+        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let run = await h.settled(id)
+        #expect(run.branch == "flow/7-crash-on-launch-2")
+        let laneA = try #require(run.lanes.first { $0.id == "a" })
+        #expect(laneA.branch == "\(run.branch)--a")
+        let log = try h.repo.git(["log", "--format=%s", laneA.branch])
+        #expect(!log.contains("unrelated stale commit"))
+    }
+
     @Test func placeholdersReachPrompts() async throws {
         let h = try Harness()
         let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")

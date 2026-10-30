@@ -12,4 +12,9 @@ import Testing
         #expect(BranchNaming.runBranch(issue: nil, title: "Undo", existing: []) == "flow/undo")
         #expect(BranchNaming.laneBranch(run: "flow/42-undo", lane: "a") == "flow/42-undo--a")
     }
+
+    @Test func runBranchSkipsNamesWithLeftoverLaneBranches() {
+        #expect(BranchNaming.runBranch(issue: 42, title: "Undo", existing: ["flow/42-undo--a"]) == "flow/42-undo-2")
+        #expect(BranchNaming.runBranch(issue: 42, title: "Undo", existing: ["flow/42-undo-2--b", "flow/42-undo"]) == "flow/42-undo-3")
+    }
 }
