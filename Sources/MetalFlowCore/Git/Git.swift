@@ -10,6 +10,14 @@ public enum MergeResult: Equatable, Sendable {
     case conflict(files: [String])
 }
 
+/// Failures of git operations that are not ordinary merge conflicts.
+public enum GitError: Error, Equatable {
+    /// The merge failed for a reason other than a conflict (missing branch, hook, identity, untracked files in the way).
+    case mergeFailed(stderr: String)
+    /// A conflicted merge could not be aborted, so `checkout` is still mid-merge.
+    case abortFailed(checkout: URL, stderr: String)
+}
+
 /// Git operations used for run and candidate worktrees.
 public struct Git: Sendable {
     private let runner: CommandRunner
@@ -28,7 +36,7 @@ public struct Git: Sendable {
         try await runner.check(command(path, args)).stdout
     }
 
-    /// The branch currently checked out in `repo`.
+    /// The branch currently checked out in `repo`; returns "HEAD" when detached.
     public func currentBranch(repo: URL) async throws -> String {
         try await run(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -122,10 +130,13 @@ public struct Git: Sendable {
         return result
     }
 
+    /// Cleanup runs unstructured so a cancelled caller still removes the temporary worktree.
     private func cleanup(repo: URL, tmp: URL) async {
-        _ = try? await runner.run(command(repo, ["worktree", "remove", "--force", tmp.path]))
-        try? FileManager.default.removeItem(at: tmp)
-        _ = try? await runner.run(command(repo, ["worktree", "prune"]))
+        await Task {
+            _ = try? await runner.run(command(repo, ["worktree", "remove", "--force", tmp.path]))
+            try? FileManager.default.removeItem(at: tmp)
+            _ = try? await runner.run(command(repo, ["worktree", "prune"]))
+        }.value
     }
 
     private func mergeIn(_ dir: URL, branch: String, message: String) async throws -> MergeResult {
@@ -134,8 +145,20 @@ public struct Git: Sendable {
             let sha = try await run(dir, ["rev-parse", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
             return .merged(commit: sha)
         }
-        let names = try await run(dir, ["diff", "--name-only", "--diff-filter=U"])
-        _ = try? await runner.run(command(dir, ["merge", "--abort"]))
-        return .conflict(files: names.split(whereSeparator: \.isNewline).map(String.init))
+        // Failure handling must finish even if the caller is cancelled, so it never leaves a half-merged checkout.
+        return try await Task { try await handleFailedMerge(dir, stderr: result.stderr) }.value
+    }
+
+    private func handleFailedMerge(_ dir: URL, stderr: String) async throws -> MergeResult {
+        let hadMergeHead = (try? await runner.run(command(dir, ["rev-parse", "-q", "--verify", "MERGE_HEAD"])))?.succeeded ?? false
+        let names = (try? await runner.run(command(dir, ["diff", "--name-only", "--diff-filter=U", "-z"])))?.stdout ?? ""
+        let abort = try? await runner.run(command(dir, ["merge", "--abort"]))
+        let stillMerging = (try? await runner.run(command(dir, ["rev-parse", "-q", "--verify", "MERGE_HEAD"])))?.succeeded ?? true
+        if stillMerging {
+            throw GitError.abortFailed(checkout: dir, stderr: abort?.stderr ?? "")
+        }
+        let files = names.split(separator: "\0").map(String.init)
+        guard hadMergeHead, !files.isEmpty else { throw GitError.mergeFailed(stderr: stderr) }
+        return .conflict(files: files)
     }
 }

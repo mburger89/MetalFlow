@@ -1,7 +1,7 @@
 import Foundation
 
 /// A throwaway git repository with one commit on `main`; removed on deinit.
-final class TempRepo: @unchecked Sendable {
+final class TempRepo: Sendable {
     /// Symlink-resolved repository root.
     let url: URL
     private let root: URL

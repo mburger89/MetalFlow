@@ -42,7 +42,6 @@ import Testing
 
     @Test func checkoutFindsMainRepo() async throws {
         let repo = try TempRepo()
-        
         #expect(try await git.checkout(of: "main", repo: repo.url) == repo.url)
         #expect(try await git.checkout(of: "nope", repo: repo.url) == nil)
     }
@@ -58,6 +57,8 @@ import Testing
         let result = try await git.merge(repo: repo.url, branch: "flow/m", into: "release", message: "Merge m")
         let head = try repo.git(["rev-parse", "release"]).trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(result == .merged(commit: head))
+        let parents = try repo.git(["rev-list", "--parents", "-n1", "release"]).split(separator: " ")
+        #expect(parents.count == 3)
         #expect(try repo.git(["worktree", "list"]).split(separator: "\n").count == before)
     }
 
@@ -69,8 +70,58 @@ import Testing
         _ = try await git.commitAll(worktree: wt, message: "b")
         try repo.write("README.md", "main\n")
         try repo.commit("m")
+        let headBefore = try repo.git(["rev-parse", "HEAD"])
         let result = try await git.merge(repo: repo.url, branch: "flow/c", into: "main", message: "Merge")
         #expect(result == .conflict(files: ["README.md"]))
+        #expect(try repo.git(["rev-parse", "HEAD"]) == headBefore)
         #expect(try await git.isDirty(worktree: repo.url) == false)
+    }
+
+    private func conflictingBranch(_ repo: TempRepo, target: String) async throws {
+        let wt = repo.worktreePath("wt-\(UUID().uuidString)")
+        try await git.addWorktree(repo: repo.url, path: wt, newBranch: "flow/k", from: "main")
+        try repo.write("README.md", "branch\n", in: wt)
+        _ = try await git.commitAll(worktree: wt, message: "b")
+        try await git.removeWorktree(repo: repo.url, path: wt)
+        if target == "main" {
+            try repo.write("README.md", "main\n")
+            try repo.commit("m")
+        } else {
+            try repo.git(["checkout", "-q", "-b", target, "main"])
+            try repo.write("README.md", "other\n")
+            try repo.commit("o")
+            try repo.git(["checkout", "-q", "main"])
+        }
+    }
+
+    @Test func conflictLeavesTargetUnchanged() async throws {
+        for target in ["main", "release"] {
+            let repo = try TempRepo()
+            try await conflictingBranch(repo, target: target)
+            let sha = try repo.git(["rev-parse", target])
+            let status = try repo.git(["status", "--porcelain"])
+            let result = try await git.merge(repo: repo.url, branch: "flow/k", into: target, message: "Merge")
+            #expect(result == .conflict(files: ["README.md"]))
+            #expect(try repo.git(["rev-parse", target]) == sha)
+            #expect(try repo.git(["status", "--porcelain"]) == status)
+            #expect(try repo.git(["worktree", "list"]).split(separator: "\n").count == 1)
+            let mergeHead = Process()
+            mergeHead.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            mergeHead.arguments = ["-C", repo.url.path, "rev-parse", "-q", "--verify", "MERGE_HEAD"]
+            mergeHead.standardOutput = FileHandle.nullDevice
+            try mergeHead.run()
+            mergeHead.waitUntilExit()
+            #expect(mergeHead.terminationStatus != 0)
+        }
+    }
+
+    @Test func mergeOfMissingBranchThrows() async throws {
+        let repo = try TempRepo()
+        do {
+            _ = try await git.merge(repo: repo.url, branch: "nope", into: "main", message: "Merge")
+            Issue.record("expected throw")
+        } catch let error as GitError {
+            guard case .mergeFailed = error else { Issue.record("wrong error \(error)"); return }
+        }
     }
 }
