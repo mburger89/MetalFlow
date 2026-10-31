@@ -263,6 +263,17 @@ public actor RunEngine {
         locks[id] == nil && store.isLocked(id)
     }
 
+    /// The newest known state of a run. A run this engine drives is returned as held. Otherwise the saved state
+    /// replaces the cached one when its revision is higher (another process has been working on it). Nothing is yielded
+    /// on `updates`: the caller applies the result.
+    public func reload(_ id: RunID) -> Run? {
+        if locks[id] != nil { return runs[id] }
+        guard let saved = store.load(id) else { return runs[id] }
+        if let cached = runs[id], saved.revision <= cached.revision { return cached }
+        runs[id] = saved
+        return saved
+    }
+
     // MARK: - State
 
     func persist(_ run: Run) {
