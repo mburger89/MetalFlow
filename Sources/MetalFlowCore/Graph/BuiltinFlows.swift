@@ -7,7 +7,7 @@ public enum BuiltinFlows {
         name: "Fix GitHub issue",
         nodes: [
             Node(id: "issue", title: "Issue", kind: .flowInput(FlowInputConfig(name: "issue", source: .githubIssue)), position: Point(x: 24, y: 60)),
-            Node(id: "repo", title: "Repo", kind: .repo, position: Point(x: 24, y: 300)),
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .exposed(default: nil))), position: Point(x: 24, y: 300)),
             Node(id: "plan", title: "Plan", kind: .prompt(PromptConfig(
                 model: "opus",
                 prompt: "Read this GitHub issue and the code in this repository ({repo}), then write a short numbered plan to fix it. Do not edit files.\n\nIssue:\n{issue}",

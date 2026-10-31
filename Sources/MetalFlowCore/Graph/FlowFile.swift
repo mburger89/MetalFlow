@@ -26,7 +26,28 @@ public enum FlowFile {
         let decoder = JSONDecoder()
         let version = try decoder.decode(VersionOnly.self, from: data).formatVersion
         guard version == currentVersion else { throw LoadError.unsupportedFormatVersion(version) }
-        return try decoder.decode(Wrapper.self, from: data).flow
+        let flow = try decoder.decode(Wrapper.self, from: data).flow
+        return normalised(flow, inFlowsDirectory: url.deletingLastPathComponent().lastPathComponent == directoryName)
+    }
+
+    /// Makes legacy flows independent of a repo: outside a `.flows` folder `.thisRepo` becomes exposed,
+    /// and a flow without a Repo node gets one.
+    private static func normalised(_ input: Flow, inFlowsDirectory: Bool) -> Flow {
+        var flow = input
+        let fallback = RepoConfig(mode: inFlowsDirectory ? .thisRepo : .exposed(default: nil))
+        if !inFlowsDirectory {
+            for i in flow.nodes.indices {
+                if case .repo(let c) = flow.nodes[i].kind, c.mode == .thisRepo { flow.nodes[i].kind = .repo(fallback) }
+            }
+        }
+        if flow.repoNodes.isEmpty {
+            let taken = Set(flow.nodes.map(\.id.rawValue))
+            let id = taken.contains("repo") ? "repo2" : "repo"
+            let position = flow.nodes.isEmpty ? Point(x: 24, y: 24)
+                : Point(x: flow.nodes.map(\.position.x).min()! - 240, y: flow.nodes.map(\.position.y).min()!)
+            flow.nodes.append(Node(id: NodeID(rawValue: id), title: "Repo", kind: .repo(fallback), position: position))
+        }
+        return flow
     }
 
     /// Saves `flow` to `url` as pretty-printed JSON with sorted keys, creating parent directories.

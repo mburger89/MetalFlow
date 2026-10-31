@@ -292,7 +292,7 @@ public enum PaletteKind: CaseIterable, Sendable {
         let prompt = PromptConfig(model: "sonnet", prompt: "", candidates: [], allowedTools: [], maxTurns: nil)
         switch self {
         case .flowInput: return .flowInput(FlowInputConfig(name: "issue", source: .githubIssue))
-        case .repo: return .repo
+        case .repo: return .repo(RepoConfig(mode: .thisRepo))
         case .prompt: return .prompt(prompt)
         case .shell: return .shell(ShellConfig(command: ""))
         case .gate: return .gate(ShellConfig(command: ""))

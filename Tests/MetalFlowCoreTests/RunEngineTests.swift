@@ -189,7 +189,7 @@ import Testing
     @Test func flowWithoutPickCompletes() async throws {
         let h = try Harness()
         let flow = Flow(name: "simple", nodes: [
-            Node(id: "repo", title: "Repo", kind: .repo, position: Point(x: 0, y: 0)),
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 0)),
             Node(id: "plan", title: "Plan", kind: .prompt(PromptConfig(
                 model: "opus", prompt: "Write a short numbered plan for {repo}", candidates: [],
                 allowedTools: [], maxTurns: nil)), position: Point(x: 1, y: 0)),
@@ -208,7 +208,7 @@ import Testing
             Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
                 model: "sonnet", prompt: "Fix this GitHub issue", candidates: ["sonnet", "opus"],
                 allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0)),
-            Node(id: "repo", title: "Repo", kind: .repo, position: Point(x: 0, y: 1)),
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 1)),
             Node(id: "setup", title: "Setup", kind: .shell(ShellConfig(command: "echo SETUPOUT")), position: Point(x: 1, y: 1)),
             Node(id: "gate", title: "Gate", kind: .gate(ShellConfig(command: "echo {setup}; test -f ok.txt")), position: Point(x: 2, y: 0)),
         ], wires: [
