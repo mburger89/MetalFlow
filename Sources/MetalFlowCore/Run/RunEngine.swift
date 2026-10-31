@@ -58,7 +58,7 @@ extension RunEngineError: LocalizedError {
         case .invalidBranchName(let name): return "'\(name)' is not a valid branch name"
         case .notRetryable(let key): return "\(key) cannot be retried: it has not failed, or the run is busy or over"
         case .missingInput(let name): return "'\(name)' needs a value"
-        case .repoMismatch(let expected): return "this flow is bound to \(expected.path); it cannot run on a different repo"
+        case .repoMismatch(let expected): return "this flow always runs on \(expected.path)"
         case .launch(let error): return error.localizedDescription
         }
     }
