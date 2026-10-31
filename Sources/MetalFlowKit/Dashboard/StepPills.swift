@@ -78,9 +78,7 @@ struct StepPillView: Component {
 
     var content: some ElementGroup {
         let (bg, fg) = Self.colors(pill.state)
-        HStack(spacing: 0) {
-            Text(verbatim: pill.label).font(size: 11).foregroundColor(fg)
-        }
+        Text(verbatim: pill.label).font(size: 11).foregroundColor(fg)
             .padding(insets(top: 3, right: 7, bottom: 3, left: 7))
             .background(bg)
             .cornerRadius(4)

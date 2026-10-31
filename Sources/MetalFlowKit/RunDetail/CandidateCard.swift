@@ -21,13 +21,11 @@ struct CandidateCard: Component {
                     .accessibilityIdentifier("\(id).title")
                 Spacer()
                 if recommended {
-                    HStack(spacing: 0) {
-                        Text(verbatim: "JUDGE RECOMMENDS").font(size: 10).foregroundColor(Palette.accent)
-                            .accessibilityIdentifier("\(id).recommended")
-                    }
-                    .padding(insets(top: 2, right: 6, bottom: 2, left: 6))
-                    .background(Palette.accent.opacity(0.16))
-                    .cornerRadius(4)
+                    Text(verbatim: "JUDGE RECOMMENDS").font(size: 10).foregroundColor(Palette.accent)
+                        .accessibilityIdentifier("\(id).recommended")
+                        .padding(insets(top: 2, right: 6, bottom: 2, left: 6))
+                        .background(Palette.accent.opacity(0.16))
+                        .cornerRadius(4)
                 }
             }
             Text(verbatim: lane.model).font(size: 12).foregroundColor(Palette.muted)

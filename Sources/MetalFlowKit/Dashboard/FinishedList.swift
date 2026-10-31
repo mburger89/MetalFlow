@@ -22,7 +22,7 @@ struct FinishedList: Component {
             VStack(alignment: .leading, spacing: 0) {
                 Text("RECENTLY FINISHED").font(size: 11).foregroundColor(Palette.muted)
                     .accessibilityIdentifier("finished")
-                    .padding(lengthInsets(top: 0, right: 0, bottom: 6, left: 0))
+                    .padding(insets(top: 0, right: 0, bottom: 6, left: 0))
                 ForEach(runs, id: \.id) { run in
                     FinishedRow(model: model, run: run)
                 }

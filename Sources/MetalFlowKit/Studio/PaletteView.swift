@@ -10,7 +10,7 @@ struct PaletteView: Component {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             ForEach(PaletteKind.groups, id: \.title) { group in
                 Text(verbatim: group.title).font(size: 11).foregroundColor(Palette.muted)
-                    .padding(lengthInsets(top: 10, right: 4, bottom: 4, left: 4))
+                    .padding(insets(top: 10, right: 4, bottom: 4, left: 4))
                 ForEach(group.items, id: \.idPrefix) { item in
                     Button(item.label) { draft.addNode(item) }
                         .buttonStyle(.bordered)
