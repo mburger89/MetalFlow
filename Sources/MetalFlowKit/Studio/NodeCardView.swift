@@ -79,17 +79,26 @@ extension NodeOverlay {
     }
 }
 
-/// One node on the canvas, drawn at its position under the view transform.
-struct NodeCardView: Component {
+extension NodeCardView {
+    @MainActor static func countBody() { bodyCount += 1 }
+}
+
+/// One node on the canvas, drawn at its position for the zoom but not the pan: the canvas offsets all the cards by the
+/// pan together, and an `.equatable()` card whose node, zoom, selection and overlay are unchanged is not rebuilt for it.
+struct NodeCardView: Component, @MainActor Equatable {
     let node: Node
-    let geometry: CanvasGeometry
+    let zoom: Double
     let selected: Bool
     let overlay: NodeOverlay?
 
+    /// How many times a card's `content` has run, for the test that a pan leaves the cards alone.
+    @MainActor static var bodyCount = 0
+
     var content: some ElementGroup {
-        let z = geometry.zoom
-        let rect = geometry.nodeRect(node)
-        let origin = geometry.toScreen(CanvasPoint(x: rect.x, y: rect.y))
+        let _ = Self.countBody()
+        let z = zoom
+        let rect = CanvasGeometry().nodeRect(node)
+        let origin = (x: Pixels(Float(rect.x * z)), y: Pixels(Float(rect.y * z)))
         VStack(alignment: .leading, spacing: Pixels(Float(4 * z))) {
             Text(verbatim: node.kindLabel).font(size: 10.5 * z).foregroundColor(node.kindColor)
             Text(verbatim: node.title).font(size: 14 * z).foregroundColor(Palette.text)
