@@ -18,11 +18,16 @@ struct CanvasView: Component {
             DotGrid(geometry: g, size: size)
             WireLayer(flow: draft.flow, geometry: g, selection: draft.selection, selectedWire: draft.selectedWire,
                       pending: draft.pendingWire, size: size)
-            ForEach(draft.flow.nodes, id: \.id) { node in
-                NodeCardView(
-                    node: node, geometry: g, selected: draft.selection == node.id,
-                    overlay: run.map { NodeOverlay.make(node: node, run: $0, laneScoped: scoped.contains(node.id)) })
+            // The cards sit at canvas * zoom, so a pan is this one offset and no card is rebuilt for it.
+            ZStack(alignment: .topLeading) {
+                ForEach(draft.flow.nodes, id: \.id) { node in
+                    NodeCardView(
+                        node: node, zoom: g.zoom, selected: draft.selection == node.id,
+                        overlay: run.map { NodeOverlay.make(node: node, run: $0, laneScoped: scoped.contains(node.id)) })
+                        .equatable()
+                }
             }
+            .offset(x: g.pan.x, y: g.pan.y)
             PortLayer(flow: draft.flow, geometry: g, size: size)
         }
         // minWidth / minHeight 0: the layers are as big as the canvas was last, and must not stop it shrinking

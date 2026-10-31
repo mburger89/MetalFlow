@@ -176,6 +176,30 @@ import Testing
         #expect(draft.geometry.pan != before.pan)
     }
 
+    @Test func panDoesNotRebuildNodeCards() async throws {
+        let (model, _, window) = try await fixture()
+        try await showStudio(model, window)
+        let draft = try #require(model.draft)
+        let nodes = draft.flow.nodes.count
+        #expect(nodes > 1)
+        let before = NodeCardView.bodyCount
+        for step in 1...5 {
+            draft.geometry.pan = ScreenPoint(x: draft.geometry.pan.x + 7, y: draft.geometry.pan.y + 3)
+            try await window.runUntilIdle()
+            #expect(NodeCardView.bodyCount - before == 0, "pan step \(step) rebuilt cards: \(NodeCardView.bodyCount - before)")
+        }
+        // A zoom does rebuild them (the text is laid out at the new size, so it stays sharp), once each.
+        let beforeZoom = NodeCardView.bodyCount
+        draft.geometry.zoom(to: draft.geometry.zoom * 1.25, about: ScreenPoint(x: Pixels(100), y: Pixels(100)))
+        try await window.runUntilIdle()
+        #expect(NodeCardView.bodyCount - beforeZoom == nodes)
+        // Selecting a node rebuilds only that card.
+        let beforeSelect = NodeCardView.bodyCount
+        draft.selection = draft.flow.nodes[0].id
+        try await window.runUntilIdle()
+        #expect(NodeCardView.bodyCount - beforeSelect == 1)
+    }
+
     @Test func runOverlayShowsLaneStates() async throws {
         let run = laneRun()
         let (model, _, window) = try await fixture(runs: [run])
