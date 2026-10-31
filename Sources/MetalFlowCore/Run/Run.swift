@@ -76,6 +76,12 @@ public enum NodeState: Codable, Hashable, Sendable {
     case interrupted
     /// Cancelled by the user.
     case cancelled
+
+    /// True for `.failed`, whatever the message.
+    public var isFailed: Bool {
+        if case .failed = self { return true }
+        return false
+    }
 }
 
 /// Runtime record of one node execution.
@@ -235,6 +241,18 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         if run.status == .running { run.status = .needsYou }
         return run
     }
+
+    /// The keys of `nodes` in plan order (index in `flow.nodes`), then by lane.
+    public var orderedNodeKeys: [NodeKey] {
+        let order = flow.nodes.map(\.id)
+        return nodes.keys.sorted {
+            let (i, j) = (order.firstIndex(of: $0.node) ?? Int.max, order.firstIndex(of: $1.node) ?? Int.max)
+            return i != j ? i < j : ($0.lane ?? "") < ($1.lane ?? "")
+        }
+    }
+
+    /// True when any node, in any lane, has failed.
+    public var hasFailedNode: Bool { nodes.values.contains { $0.state.isFailed } }
 
     /// Nodes waiting on the user, ordered by index in `flow.nodes`, then lane.
     public var needsYou: [(NodeKey, NeedsYou)] {

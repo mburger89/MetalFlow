@@ -24,7 +24,8 @@ public enum RunEngineError: Error, Equatable {
     case notBranchable
     /// Nothing is interrupted and nothing is waiting, so there is nothing to resume.
     case nothingToResume
-    /// Another engine (typically another `mflow` process) is working on this run.
+    /// The run is busy: another engine (typically another `mflow` process) is working on it, or this engine
+    /// suspended it and its stopped pass has not wound down yet. Try again in a moment.
     case runBusy(RunID)
     /// The name is not a valid git branch name.
     case invalidBranchName(String)
@@ -47,7 +48,7 @@ extension RunEngineError: LocalizedError {
         case .unknownLane(let lane): return "the run has no lane '\(lane)'"
         case .notBranchable: return "the run is already merged or discarded"
         case .nothingToResume: return "nothing to resume: no node is interrupted or waiting"
-        case .runBusy(let id): return "run \(id.rawValue) is running in another mflow"
+        case .runBusy(let id): return "run \(id.rawValue) is busy: running in another mflow, or still stopping"
         case .invalidBranchName(let name): return "'\(name)' is not a valid branch name"
         case .notRetryable(let key): return "\(key) cannot be retried: it has not failed, or the run is busy or over"
         }
@@ -221,6 +222,14 @@ public actor RunEngine {
         // Nothing is driving the run any more: another process may take it. Lock-free even while the stopped
         // pass winds down, since its writes are ignored.
         locks.removeValue(forKey: id)?.release()
+    }
+
+    /// Ends a run's suspension so `mutate` writes again. Throws `runBusy` while the suspended run's old pass is
+    /// still winding down: its late writes must stay ignored, and a new pass could not start beside it.
+    func clearSuspension(_ id: RunID) throws {
+        guard suspended.contains(id) else { return }
+        guard tasks[id] == nil else { throw RunEngineError.runBusy(id) }
+        suspended.remove(id)
     }
 
     /// Saves a run bypassing `mutate`'s guards.
@@ -443,7 +452,7 @@ public actor RunEngine {
     /// Commits the run worktree and creates the worktree of every candidate lane that does not exist yet.
     /// Safe to repeat after a crash: lanes already recorded are kept, and a lane branch or worktree left behind
     /// by an interrupted attempt is adopted instead of recreated.
-    private func ensureLanes(_ id: RunID, plan: FlowPlan) async throws {
+    func ensureLanes(_ id: RunID, plan: FlowPlan) async throws {
         guard let run = runs[id], let fan = plan.fanOut,
               case .prompt(let config)? = run.flow.node(fan)?.kind else { return }
         guard config.candidates.count <= 26 else { throw RunEngineError.tooManyCandidates(config.candidates.count) }
@@ -459,7 +468,8 @@ public actor RunEngine {
             let path = store.worktreesDirectory.appendingPathComponent(id.rawValue).appendingPathComponent(laneID)
             try await adoptOrAddWorktree(run: run, path: path, branch: branch)
             // Recorded even if the run was cancelled meanwhile, so cleanup can find the worktree.
-            guard var current = runs[id] else { return }
+            // A suspended run is not ours to write: the lock is gone. A later resume adopts the worktree.
+            guard !suspended.contains(id), var current = runs[id] else { return }
             current.lanes.append(Lane(id: laneID, model: model, branch: branch, worktree: path))
             runs[id] = current
             persist(current)

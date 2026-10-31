@@ -19,6 +19,7 @@ extension RunEngine {
         default: throw RunEngineError.notRetryable(node)
         }
         guard let plan = try? run.flow.validate() else { throw RunEngineError.notRetryable(node) }
+        try clearSuspension(id)
 
         var children: [NodeID: [NodeID]] = [:]
         for w in run.flow.wires { children[w.from, default: []].append(w.to) }
@@ -84,7 +85,7 @@ extension RunEngine {
 
     /// Same as the instance method, for callers that have no engine yet.
     public static func flows(in repo: URL) -> [URL] {
-        let directory = repo.appendingPathComponent(".flows", isDirectory: true)
+        let directory = repo.appendingPathComponent(FlowFile.directoryName, isDirectory: true)
         let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         return urls.filter { $0.pathExtension == "flow" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
