@@ -126,6 +126,7 @@ actor FakeEngineClient: EngineClient {
     /// Every `saveFlow` call, and whether `loadFlow` fails.
     nonisolated let files = FileLog()
     nonisolated func loadFlow(_ url: URL) throws -> Flow {
+        files.gate.pass(url)
         if files.failLoad { throw FakeFailure() }
         var flow = files.flows[url] ?? BuiltinFlows.fixGitHubIssue
         if let name = files.names[url] { flow.name = name }
@@ -174,6 +175,32 @@ func makeRun(_ title: String = "run", status: RunStatus = .running, revision: In
         createdAt: createdAt, status: status, nodes: nodes, revision: revision)
 }
 
+/// Lets a test hold `loadFlow` for one file and learn that it has been entered, with no sleeping.
+final class LoadGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var held: URL?
+    private var entered = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func hold(_ url: URL) { condition.lock(); held = url; entered = false; condition.unlock() }
+    func release() { condition.lock(); held = nil; condition.broadcast(); condition.unlock() }
+    func waitForEntry() async {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            condition.lock()
+            if entered { condition.unlock(); c.resume() } else { waiter = c; condition.unlock() }
+        }
+    }
+    func pass(_ url: URL) {
+        condition.lock()
+        defer { condition.unlock() }
+        guard held == url else { return }
+        entered = true
+        waiter?.resume()
+        waiter = nil
+        while held == url { condition.wait() }
+    }
+}
+
 /// What the fake client was asked to save, readable from any context.
 final class FileLog: @unchecked Sendable {
     private let lock = NSLock()
@@ -198,6 +225,7 @@ final class FileLog: @unchecked Sendable {
         get { lock.withLock { _flows } }
         set { lock.withLock { _flows = newValue } }
     }
+    let gate = LoadGate()
     private var _failSave = false
     /// When true, `saveFlow` throws.
     var failSave: Bool {

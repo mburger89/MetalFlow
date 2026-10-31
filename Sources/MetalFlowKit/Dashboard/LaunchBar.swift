@@ -16,7 +16,7 @@ struct LaunchBar: Component {
                     } else {
                         Picker("", selection: Binding(
                             get: { model.launchForm.flow ?? model.catalog[0].id },
-                            set: { model.selectFlow($0) })) {
+                            set: { id in let model = model; Task { await model.selectFlow(id) } })) {
                             ForEach(model.catalog, id: \.id) { entry in
                                 Text(verbatim: Self.title(of: entry)).tag(entry.id)
                             }

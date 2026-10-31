@@ -107,14 +107,14 @@ import Testing
         let (model, _, window) = try await catalogFixture(repos: [repo, other], extra: [
             (known, repoNodeFlow("Known", mode: .exposed(default: "/other"))),
             (unknown, repoNodeFlow("Unknown", mode: .exposed(default: "/nowhere")))])
-        model.selectFlow(known.id)
+        await model.selectFlow(known.id)
         try await window.runUntilIdle()
         #expect(model.launchForm.values["repo"] == "/other")
         try window.click(window.element(identifier: "launch.field.repo"))
         #expect(window.presentedMenu?.items.map(\.title) == ["repo", "other"])
         #expect(window.presentedMenu?.items.first { $0.isOn }?.title == "other")
         try window.dismissMenu()
-        model.selectFlow(unknown.id)
+        await model.selectFlow(unknown.id)
         try await window.runUntilIdle()
         #expect(model.launchForm.values["repo"] == nil, "an unknown default is left to apply at launch")
     }
@@ -125,11 +125,11 @@ import Testing
         let (model, _, window) = try await catalogFixture(extra: [
             (inRepo, repoNodeFlow("Ship", mode: .thisRepo)),
             (fixed, repoNodeFlow("Fixed", mode: .fixed(path: "/somewhere/proj")))])
-        model.selectFlow(inRepo.id)
+        await model.selectFlow(inRepo.id)
         try await window.runUntilIdle()
         #expect(try window.element(identifier: "launch.repo.resolved").value == "repo")
         #expect((try? window.element(identifier: "launch.field.repo")) == nil)
-        model.selectFlow(fixed.id)
+        await model.selectFlow(fixed.id)
         try await window.runUntilIdle()
         #expect(try window.element(identifier: "launch.repo.resolved").value == "proj")
     }
@@ -148,7 +148,7 @@ import Testing
     @Test func launchSendsAFileFlowsLocation() async throws {
         let inRepo = entry("/repo/.flows/Ship.flow", "Ship")
         let (model, client, window) = try await catalogFixture(extra: [(inRepo, repoNodeFlow("Ship", mode: .thisRepo))])
-        model.selectFlow(inRepo.id)
+        await model.selectFlow(inRepo.id)
         try await window.runUntilIdle()
         #expect(model.launchFields.map(\.name) == ["issue"])
         try await type("7", into: "launch.field.issue", in: window)
@@ -161,13 +161,45 @@ import Testing
     @Test func invalidFlowShowsLaunchError() async throws {
         let bad = entry("/lib/flows/Bad.flow", "Bad")
         let (model, _, window) = try await catalogFixture(extra: [(bad, Flow(name: "Bad", nodes: [], wires: []))])
-        model.selectFlow(bad.id)
+        await model.selectFlow(bad.id)
         try await window.runUntilIdle()
         #expect(model.launchFields.isEmpty)
         let error = try #require(model.launchError)
         #expect(try window.element(identifier: "launch.error").value == error)
         #expect(!model.canLaunch)
         #expect(try !window.element(identifier: "launch.go").isEnabled)
+    }
+
+    @Test func switchingFlowsWhileLoadingAppliesOnlyTheLatest() async throws {
+        let a = entry("/lib/flows/A.flow", "A"), b = entry("/lib/flows/B.flow", "B")
+        var onlyText = BuiltinFlows.fixGitHubIssue
+        onlyText.name = "A"
+        let (model, client, _) = try await catalogFixture(extra: [
+            (a, onlyText), (b, repoNodeFlow("B", mode: .fixed(path: "/x/proj")))])
+        client.files.gate.hold(a.file!)
+        let first = Task { await model.selectFlow(a.id) }
+        await client.files.gate.waitForEntry()
+        #expect(model.isLoadingLaunch)
+        #expect(model.launchFields.isEmpty)
+        #expect(!model.canLaunch, "nothing launches while the flow is being read")
+        await model.selectFlow(b.id)
+        #expect(model.launchForm.flow == b.id)
+        client.files.gate.release()
+        await first.value
+        #expect(model.launchForm.flow == b.id)
+        #expect(model.launchFields.map(\.name) == ["issue"], "the late result for A is dropped")
+        #expect(model.launchResolvedRepo == "proj")
+        #expect(!model.isLoadingLaunch)
+    }
+
+    @Test func switchingFlowsDropsTheOldFlowsValues() async throws {
+        let b = entry("/lib/flows/B.flow", "B")
+        let (model, _, window) = try await catalogFixture(extra: [(b, repoNodeFlow("B", mode: .fixed(path: "/x/proj")))])
+        try await type("42", into: "launch.field.issue", in: window)
+        #expect(model.launchForm.values["issue"]?.contains("42") == true)
+        await model.selectFlow(b.id)
+        #expect(model.launchForm.values["repo"] == nil)
+        #expect(model.launchForm.values == ["issue": ""], "only B's fields, with defaults; nothing typed into A")
     }
 
     @Test func addingARepoSelectsItInTheRepoField() async throws {

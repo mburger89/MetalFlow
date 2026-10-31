@@ -103,9 +103,9 @@ extension AppModel {
         }.value
         catalog = found
         if let id = launchForm.flow, found.contains(where: { $0.id == id }) {
-            loadLaunchFields()
+            await loadLaunchFields()
         } else {
-            selectFlow(found.first?.id)
+            await selectFlow(found.first?.id)
         }
     }
 
@@ -113,24 +113,43 @@ extension AppModel {
     public var selectedEntry: FlowEntry? { catalog.first { $0.id == launchForm.flow } }
 
     /// Selects a catalog entry: clears the typed values and fills in the fields' defaults.
-    public func selectFlow(_ id: FlowEntry.ID?) {
+    public func selectFlow(_ id: FlowEntry.ID?) async {
         launchForm.flow = id
         launchForm.values = [:]
-        loadLaunchFields()
+        launchFields = []
+        launchError = nil
+        launchResolvedRepo = nil
+        launchFlow = nil
+        await loadLaunchFields()
     }
 
     /// Loads the selected flow to derive its launch fields. Typed values are kept for fields that remain; new
     /// fields get their defaults, and the repo field the default repo when it is a known one.
-    func loadLaunchFields() {
+    /// The file is read off the main actor; a result for a selection that has since changed is dropped, and
+    /// Launch is disabled until it arrives.
+    func loadLaunchFields() async {
+        launchGeneration += 1
+        let generation = launchGeneration
         launchFields = []
         launchError = nil
         launchResolvedRepo = nil
-        guard let entry = selectedEntry else { return }
+        launchFlow = nil
+        guard let entry = selectedEntry else { isLoadingLaunch = false; return }
+        isLoadingLaunch = true
+        let client = client
+        let loaded = await Task.detached { () -> Result<Flow, Error> in
+            Result { try entry.file.map { try client.loadFlow($0) } ?? BuiltinFlows.fixGitHubIssue }
+        }.value
+        guard generation == launchGeneration else { return }
+        isLoadingLaunch = false
         let flow: Flow
-        do { flow = try entry.file.map { try client.loadFlow($0) } ?? BuiltinFlows.fixGitHubIssue } catch {
+        switch loaded {
+        case .success(let f): flow = f
+        case .failure(let error):
             launchError = error.localizedDescription
             return
         }
+        launchFlow = flow
         do { launchFields = try flow.launchFields(location: entry.location) } catch {
             launchError = flow.message(for: error)
             return
@@ -160,7 +179,7 @@ extension AppModel {
 
     /// Whether the launch bar has a launchable flow and every required field is filled (trimmed).
     public var canLaunch: Bool {
-        !isLaunching && selectedEntry != nil && launchError == nil
+        !isLaunching && !isLoadingLaunch && selectedEntry != nil && launchError == nil
             && launchFields.allSatisfy { !$0.isRequired || !Self.trimmed(launchForm.values[$0.name] ?? "").isEmpty }
     }
 
@@ -188,13 +207,8 @@ extension AppModel {
     /// Launches the selected flow with the typed values, then resets the fields whose text was not changed meanwhile.
     @discardableResult
     public func launchFromForm() async -> RunID? {
-        guard canLaunch, let entry = selectedEntry else { return nil }
+        guard canLaunch, let entry = selectedEntry, let flow = launchFlow else { return nil }
         let typed = launchForm.values
-        let flow: Flow
-        do { flow = try entry.file.map { try client.loadFlow($0) } ?? BuiltinFlows.fixGitHubIssue } catch {
-            notice = Notice(error.localizedDescription)
-            return nil
-        }
         let id = await launchGuarded(flow: flow, location: entry.location, values: typed)
         if id != nil {
             for field in launchFields where field.kind != .repo && launchForm.values[field.name] == typed[field.name] {
