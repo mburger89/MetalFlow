@@ -68,6 +68,10 @@ actor FakeEngineClient: EngineClient {
     var elsewhere: Set<RunID> = []
     func setElsewhere(_ ids: Set<RunID>) { elsewhere = ids }
     func isRunningElsewhere(_ id: RunID) async -> Bool { elsewhere.contains(id) }
+    /// What `reload` returns per run (nil: no newer state known).
+    var reloads: [RunID: Run] = [:]
+    func setReload(_ run: Run) { reloads[run.id] = run }
+    func reload(_ id: RunID) async -> Run? { calls.append("reload"); return reloads[id] }
     private var holdingPicks = false
     private var heldPicks: [CheckedContinuation<Void, Never>] = []
     /// Makes `pick` suspend until `releasePicks()`.

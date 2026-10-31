@@ -188,6 +188,87 @@ import Testing
         #expect(model.runningElsewhere.isEmpty)
     }
 
+    func elsewhereFixture(_ theirs: Run) async throws -> (AppModel, FakeEngineClient, RecordingNotifier) {
+        let client = FakeEngineClient(restored: [theirs], repos: [repo], flowFiles: [flowFile])
+        await client.setElsewhere([theirs.id])
+        let notifier = RecordingNotifier()
+        let model = AppModel(client: client, notifier: notifier)
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        await model.flushNotifications()
+        #expect(model.runningElsewhere == [theirs.id])
+        return (model, client, notifier)
+    }
+
+    @Test func elsewhereClearsWhenLockReleased() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let (model, client, _) = try await elsewhereFixture(theirs)
+        var done = theirs
+        done.revision = 3
+        done.status = .completed
+        await client.setReload(done)
+        await client.setElsewhere([])
+        await model.refreshElsewhere()
+        #expect(model.runningElsewhere.isEmpty)
+        #expect(model.runs[theirs.id]?.status == .completed)
+        #expect(model.statusText(done) != "Running in another mflow")
+    }
+
+    @Test func elsewhereShowsOtherProcessProgress() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let (model, client, _) = try await elsewhereFixture(theirs)
+        var moved = theirs
+        moved.revision = 2
+        moved.nodes[NodeKey(node: "plan")] = NodeRun(state: .succeeded, output: "planned")
+        await client.setReload(moved)
+        await model.refreshElsewhere()
+        #expect(model.runs[theirs.id]?.nodes[NodeKey(node: "plan")]?.state == .succeeded)
+        #expect(model.running.first?.revision == 2)
+        #expect(model.runningElsewhere == [theirs.id], "still locked, so still theirs")
+    }
+
+    @Test func elsewhereStaysWhileLocked() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let (model, client, _) = try await elsewhereFixture(theirs)
+        await model.refreshElsewhere()
+        await model.refreshElsewhere()
+        #expect(model.runningElsewhere == [theirs.id])
+        #expect(model.statusText(theirs) == "Running in another mflow")
+        #expect(await client.calls.filter { $0 == "reload" }.count == 2)
+    }
+
+    @Test func elsewhereDoesNotNotifyTwice() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let (model, client, notifier) = try await elsewhereFixture(theirs)
+        var asks = theirs
+        asks.revision = 1
+        asks.status = .needsYou
+        asks.nodes[NodeKey(node: "pick")] = NodeRun(state: .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))
+        await client.setReload(asks)
+        await model.refreshElsewhere()
+        await model.refreshElsewhere()
+        await model.flushNotifications()
+        #expect(notifier.posts.count == 1)
+    }
+
+    @Test func startPollsElsewhereUntilItEnds() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let client = FakeEngineClient(restored: [theirs], repos: [repo], flowFiles: [flowFile])
+        await client.setElsewhere([theirs.id])
+        let (ticks, tick) = AsyncStream.makeStream(of: Void.self)
+        let model = AppModel(client: client, notifier: NoopNotifier(), pause: { for await _ in ticks { return } })
+        let start = Task { await model.start() }
+        await model.waitUntilReady()
+        #expect(model.runningElsewhere == [theirs.id])
+        await client.setElsewhere([])
+        tick.yield()
+        await waitUntil("the poll to clear the run") { model.runningElsewhere.isEmpty }
+        await client.finish()
+        await start.value
+        tick.finish()
+    }
+
     @Test func quitWithOnlyOtherProcessRunsQuitsNow() async throws {
         let theirs = makeRun("theirs", status: .running)
         let client = FakeEngineClient(restored: [theirs], repos: [repo])
@@ -383,3 +464,4 @@ import Testing
         #expect(model.notice != nil)
     }
 }
+

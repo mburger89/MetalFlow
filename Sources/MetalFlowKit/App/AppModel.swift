@@ -98,7 +98,8 @@ public final class AppModel {
     /// Runs that are over, newest first. Cached.
     public private(set) var finished: [Run] = []
     /// Running runs whose lock another process (an `mflow` command) holds. This app does not drive them: it
-    /// cannot cancel or suspend them and never receives their updates. Cleared for a run once an update arrives.
+    /// cannot cancel or suspend them and receives no updates from them, so `refreshElsewhere()` polls their saved state.
+    /// Cleared for a run once its lock is released or an update from this app's engine arrives.
     public internal(set) var runningElsewhere: Set<RunID> = []
     /// Running runs this app drives: what quitting would stop.
     public var drivenRunning: [Run] { running.filter { !runningElsewhere.contains($0.id) } }
@@ -154,16 +155,19 @@ public final class AppModel {
     let client: EngineClient
     let notifier: Notifier
     private let clock: @MainActor () -> Date
+    private let pause: @Sendable () async -> Void
     /// The model's notion of now (injected in tests).
     public var now: Date { clock() }
 
     private enum Bucket { case needsYou, running, finished }
 
-    /// Creates a model over a client.
-    public init(client: EngineClient, notifier: Notifier, clock: @escaping @MainActor () -> Date = { Date() }) {
+    /// Creates a model over a client. `pause` is the wait between polls of runs another process drives.
+    public init(client: EngineClient, notifier: Notifier, clock: @escaping @MainActor () -> Date = { Date() },
+                pause: @escaping @Sendable () async -> Void = { try? await Task.sleep(for: .seconds(2)) }) {
         self.client = client
         self.notifier = notifier
         self.clock = clock
+        self.pause = pause
         let (stream, continuation) = AsyncStream.makeStream(of: NotifyCommand.self, bufferingPolicy: .unbounded)
         notifyContinuation = continuation
         // The queue runs from creation, not from `start()`, so `flushNotifications()` always returns.
@@ -173,6 +177,25 @@ public final class AppModel {
     deinit { notifyContinuation.finish() }
 
     // MARK: - Updates
+
+    /// One pass over the runs another process drives: shows the progress it saved, and forgets the runs whose lock it
+    /// released.
+    public func refreshElsewhere() async {
+        for id in runningElsewhere.sorted(by: { $0.rawValue < $1.rawValue }) {
+            // A run left running after its process released the lock was cut short; its saved state stands.
+            if let run = await client.reload(id) { apply(run, restoring: false, fromElsewhere: true) }
+            if !(await client.isRunningElsewhere(id)) { runningElsewhere.remove(id) }
+        }
+    }
+
+    /// Re-reads the runs other processes drive every `pause`, while there are any, until cancelled.
+    private func pollElsewhere() async {
+        while !Task.isCancelled {
+            await pause()
+            if Task.isCancelled { return }
+            if !runningElsewhere.isEmpty { await refreshElsewhere() }
+        }
+    }
 
     /// Restores saved runs, then applies engine updates until the stream ends.
     public func start() async {
@@ -191,7 +214,8 @@ public final class AppModel {
         isReady = true
         // Clicks that arrived before launch finished are buffered; only now can they find their run.
         let clicks = Task { await runClicks() }
-        defer { clicks.cancel() }
+        let polling = Task { await pollElsewhere() }
+        defer { clicks.cancel(); polling.cancel() }
         for waiter in readyWaiters { waiter.resume() }
         readyWaiters = []
         for await run in client.updates { apply(run) }
@@ -207,12 +231,13 @@ public final class AppModel {
     /// Takes a snapshot of a run: stale ones (revision not above the stored one) are ignored.
     public func apply(_ run: Run) { apply(run, restoring: false) }
 
-    private func apply(_ run: Run, restoring: Bool) {
+    /// `fromElsewhere`: the snapshot is another process's saved state, so the run stays in `runningElsewhere`.
+    private func apply(_ run: Run, restoring: Bool, fromElsewhere: Bool = false) {
         let old = runs[run.id]
         if let old, run.revision <= old.revision { return }
         runs[run.id] = run
         // An update means this app's engine is driving the run now.
-        if !restoring { runningElsewhere.remove(run.id) }
+        if !restoring && !fromElsewhere { runningElsewhere.remove(run.id) }
 
         if old == nil {
             insertID(run)
