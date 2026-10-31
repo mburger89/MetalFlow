@@ -1,4 +1,5 @@
 import Foundation
+import MetalFlowCore
 import MetalUI
 
 /// The most input lines a diff shows.
@@ -81,5 +82,23 @@ struct DiffView: Component {
         .background(Palette.chrome)
         .cornerRadius(8)
         .border(Palette.line, width: 1)
+    }
+}
+
+/// The open lane diff of `run`, if it is the one open: "Loading diff…" while it loads, then the diff. Shown under
+/// the candidate cards on the run detail and in the Studio's candidates strip.
+struct OpenDiffSection: Component {
+    let model: AppModel
+    let run: RunID
+
+    var content: some ElementGroup {
+        if let key = model.openDiff, key.run == run {
+            if let chunks = model.diffChunks[key] {
+                DiffView(chunks: chunks)
+            } else {
+                Text(verbatim: "Loading diff…").font(size: 12).foregroundColor(Palette.muted)
+                    .accessibilityIdentifier("diff.loading")
+            }
+        }
     }
 }

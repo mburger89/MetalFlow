@@ -134,6 +134,22 @@ import Testing
         for lane in ["a", "b", "c"] { _ = try window.element(identifier: "cand.\(lane)") }
     }
 
+    @Test func viewDiffInTheCandidatesStripShowsTheDiff() async throws {
+        let run = laneRun()
+        let (model, client, window) = try await fixture(runs: [run])
+        await client.setDiff("@@ -1 +1 @@\n+added\n")
+        try await showStudio(model, window)
+        model.studioRun = run.id
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "diff.hunk.0")) == nil)
+        try await press("cand.a.diff", in: window)
+        await waitUntil("the diff to load") { model.diffChunks[DiffKey(run: run.id, lane: "a")] != nil }
+        try await window.runUntilIdle()
+        _ = try window.element(identifier: "diff.hunk.0")
+        try await press("cand.a.diff", in: window)
+        #expect((try? window.element(identifier: "diff.hunk.0")) == nil, "Hide diff closes it")
+    }
+
     @Test func studioRunPickerListsOnlyMatchingRuns() async throws {
         let newest = laneRun()
         var older = makeRun("older", status: .completed, createdAt: Date(timeIntervalSince1970: 500))

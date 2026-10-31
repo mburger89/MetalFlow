@@ -25,7 +25,9 @@ struct CanvasView: Component {
             }
             PortLayer(flow: draft.flow, geometry: g, size: size)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // minWidth / minHeight 0: the layers are as big as the canvas was last, and must not stop it shrinking
+        // (the candidates strip appearing takes space from it).
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(Hsla.rgb(0x101215)))
         .clipped()
         .overlay(alignment: .topLeading) {

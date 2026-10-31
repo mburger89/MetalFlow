@@ -282,10 +282,10 @@ import Testing
         try window.click(window.element(identifier: "cand.a.diff"))
         await client.waitForDiffStart()
         try await window.runUntilIdle()
-        #expect(try window.element(identifier: "detail.diff.loading").value == "Loading diff…")
+        #expect(try window.element(identifier: "diff.loading").value == "Loading diff…")
         await client.releaseDiffs()
         try await window.runUntilIdle()
-        #expect((try? window.element(identifier: "detail.diff.loading")) == nil)
+        #expect((try? window.element(identifier: "diff.loading")) == nil)
     }
 
     @Test func reopeningWhileALoadRunsCallsTheClientOnce() async throws {

@@ -123,10 +123,13 @@ struct CandidatesStrip: Component {
                 Text(verbatim: run.title).font(size: 12).foregroundColor(Palette.muted)
             }
             ScrollView(.vertical) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: Pixels(260)))], spacing: Spacing.sm) {
-                    ForEach(run.lanes, id: \.id) { lane in
-                        CandidateCard(model: model, run: run, lane: lane)
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: Pixels(260)))], spacing: Spacing.sm) {
+                        ForEach(run.lanes, id: \.id) { lane in
+                            CandidateCard(model: model, run: run, lane: lane)
+                        }
                     }
+                    OpenDiffSection(model: model, run: run.id)
                 }
             }
         }

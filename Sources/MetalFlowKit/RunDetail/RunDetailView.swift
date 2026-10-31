@@ -64,14 +64,7 @@ struct DetailBody: Component {
                         }
                     }
                 }
-                if let key = model.openDiff, key.run == runID {
-                    if let chunks = model.diffChunks[key] {
-                        DiffView(chunks: chunks)
-                    } else {
-                        Text(verbatim: "Loading diff…").font(size: 12).foregroundColor(Palette.muted)
-                            .accessibilityIdentifier("detail.diff.loading")
-                    }
-                }
+                OpenDiffSection(model: model, run: runID)
             }
             .padding(insets(top: 18, right: 20, bottom: 20, left: 20))
             .frame(maxWidth: .infinity, alignment: .leading)
