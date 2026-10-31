@@ -14,9 +14,9 @@ let model = makeModel(notifier: notifier)
 model.activateApp = { NSApp.activate() }
 let app = try App()
 installCommands(on: app, model: model)
-installQuitHandling(on: app, model: model)
-try app.openWindow(title: "MetalFlow", size: metalFlowWindowSize, minSize: metalFlowMinimumSize) {
+let window = try app.openWindow(title: "MetalFlow", size: metalFlowWindowSize, minSize: metalFlowMinimumSize) {
     rootView(model: model)
 }
+installQuitHandling(on: app, window: window, model: model)
 Task { await notifier.requestAuthorization() }
 app.run()

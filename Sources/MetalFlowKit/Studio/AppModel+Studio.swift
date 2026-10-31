@@ -83,6 +83,8 @@ extension AppModel {
         case open(URL)
         /// Start a new, empty flow.
         case newFlow
+        /// Quit the app, or close its window (the same thing: it is the only one).
+        case quit
     }
 
     /// The user's answer to the unsaved-edits alert.
@@ -100,24 +102,42 @@ extension AppModel {
         await resolvePending(.open(url), choice)
     }
 
-    /// Resolves `action`, which was pending behind the unsaved-edits alert.
+    /// Resolves `action`, which was pending behind the unsaved-edits alert. For a quit: Save or Discard go on to the
+    /// running-runs step; Cancel, and a Save that fails, cancel the quit.
     public func resolvePending(_ action: PendingAction, _ choice: PendingOpenChoice) async {
         pendingAction = nil
         switch choice {
         case .cancel:
-            return
+            abandon(action)
         case .discard:
             perform(action)
         case .save:
-            if !draftIsValid { notice = Notice("Fix the flow's errors before saving it."); return }
-            if await saveDraft() { perform(action) }
+            if !draftIsValid {
+                notice = Notice("Fix the flow's errors before saving it.")
+                abandon(action)
+                return
+            }
+            if await saveDraft() { perform(action) } else { abandon(action) }
         }
+    }
+
+    /// Cancels the alert without choosing: the user stays on the draft. A pending quit is refused.
+    public func cancelPending() {
+        guard let action = pendingAction else { return }
+        pendingAction = nil
+        abandon(action)
+    }
+
+    private func abandon(_ action: PendingAction) {
+        if action == .quit { replyToTerminate(false) }
     }
 
     private func perform(_ action: PendingAction) {
         switch action {
         case .open(let url): openWithoutAsking(url)
         case .newFlow: newFlowWithoutAsking()
+        case .quit:
+            if continueQuit() == .now { replyToTerminate(true) }
         }
     }
 

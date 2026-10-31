@@ -9,7 +9,7 @@ import Testing
 func appWindow(model: AppModel, size: Size<Pixels> = metalFlowWindowSize) throws -> TestWindow {
     let window = try TestWindow(size: size, colorScheme: .dark) { rootView(model: model) }
     installCommands(on: window.testApp.app, model: model)
-    installQuitHandling(on: window.testApp.app, model: model)
+    installQuitHandling(on: window.testApp.app, window: window.window, model: model)
     return settled(window)
 }
 

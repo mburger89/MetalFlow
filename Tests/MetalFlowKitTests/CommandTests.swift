@@ -293,4 +293,125 @@ import Testing
         #expect(model.draft === draft)
         #expect(window.presentedAlert != nil)
     }
+
+    // MARK: Quit and close with unsaved work
+
+    private func dirtyFixture(runs: [Run] = []) async throws -> (AppModel, FakeEngineClient, TestWindow, FlowDraft) {
+        let (model, client, window) = try await fixture(runs: runs)
+        model.screen = .studio
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        try await window.runUntilIdle()
+        return (model, client, window, draft)
+    }
+
+    @Test func quitWithDirtyDraftAsks() async throws {
+        let (model, _, window, draft) = try await dirtyFixture()
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        #expect(model.pendingAction == .quit)
+        let alert = try #require(window.presentedAlert)
+        #expect(alert.buttons.map(\.title) == ["Save", "Discard", "Cancel"])
+        try window.respondToAlert(button: "Cancel")
+        try await window.runUntilIdle()
+        #expect(platform.terminateReplies == [false])
+        #expect(model.pendingAction == nil)
+        #expect(draft.isDirty, "cancel keeps the edits")
+    }
+
+    @Test func quitWithDirtyDraftSaveThenQuits() async throws {
+        let (model, client, window, _) = try await dirtyFixture()
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        try await window.runUntilIdle()
+        await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
+        #expect(client.files.saved.count == 1)
+        #expect(platform.terminateReplies == [true])
+        #expect(!model.quitPending)
+    }
+
+    @Test func quitWithDirtyDraftDiscardQuitsWithoutSaving() async throws {
+        let (_, client, window, _) = try await dirtyFixture()
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Discard")
+        await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
+        #expect(client.files.saved.isEmpty)
+        #expect(platform.terminateReplies == [true])
+    }
+
+    @Test func quitSaveFailureCancelsTheQuit() async throws {
+        let (model, client, window, draft) = try await dirtyFixture()
+        client.files.failSave = true
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        try await window.runUntilIdle()
+        await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
+        #expect(platform.terminateReplies == [false])
+        #expect(model.notice != nil)
+        #expect(draft.isDirty)
+    }
+
+    @Test func dirtyDraftAndRunningRunsAsksBothInOrder() async throws {
+        let (model, client, window, _) = try await dirtyFixture(runs: [makeRun("a", status: .running)])
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        #expect(window.presentedAlert?.buttons.map(\.title) == ["Save", "Discard", "Cancel"], "the draft comes first")
+        try window.respondToAlert(button: "Discard")
+        try await window.runUntilIdle()
+        await waitUntil("the running-runs alert") { model.quitPending }
+        try await window.runUntilIdle()
+        #expect(platform.terminateReplies.isEmpty, "not answered yet")
+        #expect(window.presentedAlert?.buttons.map(\.title) == ["Quit", "Cancel"])
+        try window.respondToAlert(button: "Quit")
+        try await window.runUntilIdle()
+        await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
+        #expect(platform.terminateReplies == [true])
+        #expect(await client.calls.filter { $0 == "suspend" }.count == 1)
+    }
+
+    @Test func closingTheWindowWithRunningRunAsksAndSuspends() async throws {
+        let (model, client, window) = try await fixture(runs: [makeRun("a", status: .running)])
+        #expect(window.requestClose() == false, "held while the alert is up")
+        try await window.runUntilIdle()
+        #expect(model.quitPending)
+        #expect(window.presentedAlert?.buttons.map(\.title) == ["Quit", "Cancel"])
+        try window.respondToAlert(button: "Quit")
+        try await window.runUntilIdle()
+        await waitUntil("the window to close") { window.platformWindow.isClosed }
+        #expect(await client.calls.filter { $0 == "suspend" }.count == 1)
+        #expect(window.testApp.platform.terminateReplies.isEmpty, "answered the close, not a terminate")
+    }
+
+    @Test func cancellingAClosedRequestKeepsTheWindow() async throws {
+        let (_, client, window) = try await fixture(runs: [makeRun("a", status: .running)])
+        #expect(window.requestClose() == false)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Cancel")
+        try await window.runUntilIdle()
+        #expect(!window.platformWindow.isClosed)
+        #expect(!window.window.isCloseRequestPending)
+        #expect(await client.calls.filter { $0 == "suspend" }.isEmpty)
+    }
+
+    @Test func closingACleanIdleWindowClosesAtOnce() async throws {
+        let (_, _, window) = try await fixture()
+        #expect(window.requestClose() == true)
+    }
+
+    @Test func closingWithDirtyDraftAsks() async throws {
+        let (model, _, window, _) = try await dirtyFixture()
+        #expect(window.requestClose() == false)
+        try await window.runUntilIdle()
+        #expect(model.pendingAction == .quit)
+        try window.respondToAlert(button: "Discard")
+        await waitUntil("the window to close") { window.platformWindow.isClosed }
+    }
 }

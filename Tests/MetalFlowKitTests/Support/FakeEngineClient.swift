@@ -64,6 +64,10 @@ actor FakeEngineClient: EngineClient {
     func retry(_ id: RunID, node: NodeKey) async throws { try record("retry(\(node))") }
     func cancel(_ id: RunID) async { calls.append("cancel") }
     func suspend(_ id: RunID) async { calls.append("suspend") }
+    /// The runs the fake reports as driven by another process.
+    var elsewhere: Set<RunID> = []
+    func setElsewhere(_ ids: Set<RunID>) { elsewhere = ids }
+    func isRunningElsewhere(_ id: RunID) async -> Bool { elsewhere.contains(id) }
     private var holdingPicks = false
     private var heldPicks: [CheckedContinuation<Void, Never>] = []
     /// Makes `pick` suspend until `releasePicks()`.

@@ -19,6 +19,8 @@ public protocol EngineClient: Sendable {
     func cancel(_ id: RunID) async
     /// Stops a running run so that it can be resumed later (used when quitting).
     func suspend(_ id: RunID) async
+    /// Whether another process (typically an `mflow` command) holds the run's lock, so this app does not drive it.
+    func isRunningElsewhere(_ id: RunID) async -> Bool
     /// Merges a candidate lane into the base branch.
     func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult
     /// Throws a run away.
@@ -97,6 +99,7 @@ public struct LiveEngineClient: EngineClient {
     public func retry(_ id: RunID, node: NodeKey) async throws { try await engine.value.retry(id, node: node) }
     public func cancel(_ id: RunID) async { await engine.value.cancel(id) }
     public func suspend(_ id: RunID) async { await engine.value.suspend(id) }
+    public func isRunningElsewhere(_ id: RunID) async -> Bool { await engine.value.isRunningElsewhere(id) }
     public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult { try await engine.value.pick(id, lane: lane) }
     public func discard(_ id: RunID) async throws { try await engine.value.discard(id) }
     public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws {

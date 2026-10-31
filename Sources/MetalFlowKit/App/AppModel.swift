@@ -97,6 +97,11 @@ public final class AppModel {
     public private(set) var running: [Run] = []
     /// Runs that are over, newest first. Cached.
     public private(set) var finished: [Run] = []
+    /// Running runs whose lock another process (an `mflow` command) holds. This app does not drive them: it
+    /// cannot cancel or suspend them and never receives their updates. Cleared for a run once an update arrives.
+    public internal(set) var runningElsewhere: Set<RunID> = []
+    /// Running runs this app drives: what quitting would stop.
+    public var drivenRunning: [Run] { running.filter { !runningElsewhere.contains($0.id) } }
 
     /// The launch bar's selections and text.
     public var launchForm = LaunchForm()
@@ -178,6 +183,7 @@ public final class AppModel {
         } catch {
             notice = Notice(error.localizedDescription)
         }
+        for run in running where await client.isRunningElsewhere(run.id) { runningElsewhere.insert(run.id) }
         if !needsYou.isEmpty { enqueue(.badge(needsYou.count)) }
         for run in needsYou { postedBodies[run.id] = Self.notificationBody(for: run) }
         isReady = true
@@ -202,6 +208,8 @@ public final class AppModel {
         let old = runs[run.id]
         if let old, run.revision <= old.revision { return }
         runs[run.id] = run
+        // An update means this app's engine is driving the run now.
+        if !restoring { runningElsewhere.remove(run.id) }
 
         if old == nil {
             insertID(run)

@@ -18,9 +18,19 @@ public func quitDecision(runningCount: Int) -> QuitDecision {
 }
 
 extension AppModel {
-    /// The answer to ⌘Q: quit now, or hold the quit until the alert is answered.
+    /// The answer to ⌘Q and to the window's close button (one window, so closing it is quitting). Unsaved
+    /// Studio edits are asked about first (Save / Discard / Cancel), then running runs.
     public func requestTerminate() -> CloseRequestReply {
-        switch quitDecision(runningCount: running.count) {
+        if draft?.isDirty == true {
+            pendingAction = .quit
+            return .later
+        }
+        return continueQuit()
+    }
+
+    /// The running-runs step of quitting: `.now`, or hold the quit behind the "runs are still running" alert.
+    func continueQuit() -> CloseRequestReply {
+        switch quitDecision(runningCount: drivenRunning.count) {
         case .now: return .now
         case .ask(let message): quitMessage = message; quitPending = true; return .later
         }
@@ -28,7 +38,7 @@ extension AppModel {
 
     /// Quit: suspends every running run (stopped, resumable on the next launch), then lets the app end.
     public func confirmQuit() async {
-        let ids = running.map(\.id)
+        let ids = drivenRunning.map(\.id)
         isQuitting = true
         quitPending = false
         for id in ids { await client.suspend(id) }
@@ -65,9 +75,17 @@ public func installCommands(on app: App, model: AppModel) {
     }
 }
 
-/// Asks before ⌘Q ends the app while runs are running.
+/// Asks before ⌘Q or closing the window ends the app: about unsaved edits, then about running runs.
+/// Both go through `AppModel.requestTerminate`; the answer goes to whichever request is pending.
 @MainActor
-public func installQuitHandling(on app: App, model: AppModel) {
-    model.replyToTerminate = { [weak app] in app?.replyToTerminateRequest($0) }
+public func installQuitHandling(on app: App, window: Window, model: AppModel) {
+    model.replyToTerminate = { [weak app, weak window] answer in
+        if let window, window.isCloseRequestPending {
+            window.replyToCloseRequest(answer)
+        } else {
+            app?.replyToTerminateRequest(answer)
+        }
+    }
     app.onTerminateRequest = { model.requestTerminate() }
+    window.onCloseRequest = { model.requestTerminate() }
 }

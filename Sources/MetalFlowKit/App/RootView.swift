@@ -18,11 +18,11 @@ public struct RootView: Component {
         .task { await model.start() }
         .alert("Save changes to this flow?", isPresented: Binding(
             get: { model.pendingAction != nil },
-            set: { if !$0 { model.pendingAction = nil } })) {
+            set: { _ in })) {
             let target = model.pendingAction
             Button("Save") { if let target { Task { await model.resolvePending(target, .save) } } }
             Button("Discard", role: .destructive) { if let target { Task { await model.resolvePending(target, .discard) } } }
-            Button("Cancel", role: .cancel) { model.pendingAction = nil }
+            Button("Cancel", role: .cancel) { model.cancelPending() }
         } message: {
             Text("The open flow has unsaved edits.")
         }
