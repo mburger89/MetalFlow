@@ -45,8 +45,8 @@ struct TopBar: Component {
         HStack(spacing: Spacing.lg) {
             Text("MetalFlow").font(size: 15).foregroundColor(Palette.text)
             Picker("View", selection: Binding(get: { model.screen }, set: { model.screen = $0 })) {
-                Text("Dashboard").tag(Screen.dashboard)
-                Text("Flow Studio").tag(Screen.studio)
+                Text("Dashboard").accessibilityIdentifier("nav.dashboard").tag(Screen.dashboard)
+                Text("Flow Studio").accessibilityIdentifier("nav.studio").tag(Screen.studio)
             }
             .pickerStyle(.segmented)
             .frame(width: Pixels(240))

@@ -12,10 +12,7 @@ import MetalUITesting
         _ = try window.element(identifier: "dashboard")
         #expect((try? window.element(identifier: "studio")) == nil)
 
-        let nav = try window.element(identifier: "nav")
-        // The picker is one element; its segments split it in half, so click the right half.
-        let frame = nav.frame
-        window.click(at: Point(x: frame.origin.x + frame.size.width * 0.75, y: frame.origin.y + frame.size.height / 2))
+        try window.click(window.element(identifier: "nav.studio"))
         try await window.runUntilIdle()
         _ = try window.element(identifier: "studio")
     }
