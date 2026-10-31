@@ -193,6 +193,20 @@ extension AppModel {
         }
     }
 
+    /// The repo folder name shown read-only for a This repo or Fixed draft; nil for Exposed.
+    public var studioResolvedRepo: String? {
+        guard let draft else { return nil }
+        for node in draft.flow.nodes {
+            guard case .repo(let config) = node.kind else { continue }
+            switch (config.mode, draft.location) {
+            case (.thisRepo, .repo(let root, _)): return root.lastPathComponent
+            case (.fixed(let path), _): return URL(fileURLWithPath: path).lastPathComponent
+            default: break
+            }
+        }
+        return nil
+    }
+
     /// What the Studio row shows for `field`: the typed text, else its default (a repo field: the selected repo).
     public func studioValue(_ field: LaunchField) -> String {
         if let typed = studioValues[field.name] { return typed }

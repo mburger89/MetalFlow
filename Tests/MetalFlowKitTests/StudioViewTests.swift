@@ -429,6 +429,32 @@ import Testing
         #expect(model.isLaunching == false)
     }
 
+    func setRepoMode(_ draft: FlowDraft, _ mode: RepoMode) {
+        draft.edit("repo mode") { flow in
+            for i in flow.nodes.indices where flow.nodes[i].id == "repo" { flow.nodes[i].kind = .repo(RepoConfig(mode: mode)) }
+        }
+    }
+
+    @Test func studioShowsResolvedRepoForFixed() async throws {
+        let (model, _, window) = try await fixture()
+        try await showStudio(model, window)
+        let draft = try #require(model.draft)
+        #expect((try? window.element(identifier: "studio.repo.resolved")) == nil, "Exposed shows the repo field instead")
+        setRepoMode(draft, .fixed(path: "/somewhere/proj"))
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.repo.resolved").value == "proj")
+    }
+
+    @Test func studioShowsResolvedRepoForThisRepo() async throws {
+        let (model, _, window) = try await fixture()
+        model.open(flow: URL(fileURLWithPath: "/work/alpha/.flows/x.flow"))
+        try await window.runUntilIdle()
+        let draft = try #require(model.draft)
+        setRepoMode(draft, .thisRepo)
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.repo.resolved").value == "alpha")
+    }
+
     @Test func studioLaunchRowFollowsTheFlowsFields() async throws {
         let (model, client, window) = try await fixture()
         try await showStudio(model, window)

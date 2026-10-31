@@ -101,6 +101,13 @@ struct StudioToolbar: Component {
             ForEach(launch.fields, id: \.name) { field in
                 studioControl(field)
             }
+            if let resolved = model.studioResolvedRepo {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Repo").font(size: 12).foregroundColor(Palette.muted)
+                    Text(verbatim: resolved).foregroundColor(Palette.text)
+                        .accessibilityIdentifier("studio.repo.resolved")
+                }
+            }
             Button("▶ Launch") { Task { await model.launchFromStudio() } }
                 .buttonStyle(.glassProminent)
                 .accessibilityIdentifier("studio.launch")
