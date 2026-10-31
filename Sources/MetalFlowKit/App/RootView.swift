@@ -16,6 +16,16 @@ public struct RootView: Component {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
         .task { await model.start() }
+        // One folder dialog for every "Add repo": a cancel calls nothing, only writes the binding false.
+        .fileImporter(isPresented: Binding(
+            get: { model.addRepoRequest != nil },
+            set: { shown in if !shown { model.addRepoDialogEnded() } }),
+            allowedContentTypes: [.folder]) { result in
+            let folder = try? result.get()
+            let purpose = model.takeAddRepoPurpose()
+            guard let purpose else { return }
+            Task { await model.finishAddRepo(folder, purpose: purpose) }
+        }
         // Escape presses the `.cancel` button below. A dismissal that presses no button lands in `set`, which hears it
         // before any button action: `alertDismissed` looks after the buttons have run.
         .alert("Save changes to this flow?", isPresented: Binding(

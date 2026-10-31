@@ -11,8 +11,8 @@ struct KindMismatch: Error {}
 @Suite struct FlowEditingTests {
     let repo = URL(fileURLWithPath: "/repo")
 
-    func fixture(runs: [Run] = [], repos: [URL]? = nil) async throws -> (AppModel, FakeEngineClient, TestWindow) {
-        let client = FakeEngineClient(restored: runs, repos: repos ?? [repo])
+    func fixture(runs: [Run] = [], repos: [URL]? = nil, gitRepos: Set<String> = []) async throws -> (AppModel, FakeEngineClient, TestWindow) {
+        let client = FakeEngineClient(restored: runs, repos: repos ?? [repo], gitRepoPaths: gitRepos)
         let model = AppModel(client: client, notifier: NoopNotifier())
         let window = try appWindow(model: model, size: metalFlowWindowSize)
         try await window.runUntilIdle()
@@ -717,6 +717,70 @@ struct KindMismatch: Error {}
         #expect(shown.mode == .thisRepo, "the draft shows what the file holds")
         #expect(draft.isDirty == false)
         #expect(draft.lastSavedFlow == draft.flow)
+    }
+
+    @Test func saveDestinationAddSavesIntoNewRepo() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window) = try await fixture(gitRepos: [dir.standardizedFileURL.path])
+        let draft = try #require(model.draft)
+        let saving = try await startSave(model, window)
+        try await press("save.dest.add", in: window)
+        #expect(model.isSavePanelVisible, "the save waits for the folder")
+        #expect(model.addRepoRequest == .saveDestination)
+        try window.respondToFileDialog(choosing: [dir.path])
+        #expect(await saving.value)
+        let expected = dir.standardizedFileURL.appendingPathComponent(".flows/fix-github-issue.flow")
+        #expect(client.files.saved.first?.url == expected)
+        #expect(draft.location == .of(file: expected))
+        #expect(model.repos.map(\.path).contains(dir.standardizedFileURL.path))
+        #expect(!model.isSavePanelVisible)
+    }
+
+    @Test func saveDestinationAddCancelCancelsTheSave() async throws {
+        let (model, client, window) = try await fixture()
+        let saving = try await startSave(model, window)
+        try await press("save.dest.add", in: window)
+        try window.cancelFileDialog()
+        #expect(await saving.value == false)
+        #expect(!model.isSavePanelVisible)
+        #expect(client.files.saved.isEmpty)
+    }
+
+    @Test func inspectorChooseFolderSetsFixedPath() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.standardizedFileURL.path
+        let (model, _, window) = try await fixture(gitRepos: [path])
+        let draft = try #require(model.draft)
+        try await press("node.repo", in: window)
+        try window.click(window.element(identifier: "inspector.repo.mode"))
+        try window.chooseMenuItem("Fixed")
+        try await window.runUntilIdle()
+        let steps = draft.undoStack.count
+        try await press("inspector.repo.add", in: window)
+        #expect(model.addRepoRequest == .repoNode("repo"))
+        try window.respondToFileDialog(choosing: [dir.path])
+        await waitUntil("the path") {
+            if case .repo(let c)? = draft.flow.node("repo")?.kind { return c.mode == .fixed(path: path) }
+            return false
+        }
+        #expect(draft.undoStack.count == steps + 1)
+        #expect(model.repos.map(\.path).contains(path))
+        draft.undo()
+        guard case .repo(let c)? = draft.flow.node("repo")?.kind else { throw KindMismatch() }
+        #expect(c.mode == .fixed(path: "/repo"))
+    }
+
+    @Test func studioAddSelectsNewRepo() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.standardizedFileURL.path
+        let (model, _, window) = try await fixture(gitRepos: [path])
+        try await press("studio.field.repo.add", in: window)
+        #expect(model.addRepoRequest == .launchField)
+        try window.respondToFileDialog(choosing: [dir.path])
+        await waitUntil("the field") { model.studioValues["repo"] == path }
     }
 
     @Test func saveCancelKeepsDraftUnsaved() async throws {

@@ -22,6 +22,9 @@ struct SavePanel: Component {
                         .buttonStyle(.bordered)
                         .accessibilityIdentifier("save.dest.\(repo.lastPathComponent)")
                 }
+                Button("Add repo\u{2026}") { model.requestAddRepo(.saveDestination) }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("save.dest.add")
                 Button("Cancel") { model.chooseSaveDestination(nil) }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("save.cancel")

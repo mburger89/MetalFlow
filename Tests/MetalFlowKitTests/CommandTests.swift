@@ -421,6 +421,26 @@ import Testing
         #expect(model.pendingAction == nil)
     }
 
+    @Test func saveDestinationAddCancelCancelsQuit() async throws {
+        let (model, client, window, draft) = try await dirtyFixture()
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        try window.click(window.element(identifier: "save.dest.add"))
+        try await window.runUntilIdle()
+        #expect(platform.terminateReplies.isEmpty, "still waiting for the folder")
+        try window.cancelFileDialog()
+        await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
+        try await window.runUntilIdle()
+        #expect(platform.terminateReplies == [false])
+        #expect(client.files.saved.isEmpty)
+        #expect(draft.isDirty && draft.location == .unsaved)
+        #expect(!model.isSavePanelVisible)
+    }
+
     @Test func quitWithDirtyDraftDiscardQuitsWithoutSaving() async throws {
         let (_, client, window, _) = try await dirtyFixture()
         let platform = window.testApp.platform

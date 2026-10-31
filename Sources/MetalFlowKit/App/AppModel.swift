@@ -66,6 +66,10 @@ public final class AppModel {
     public var studioValues: [String: String] = [:]
     /// True while the save-destination panel is showing.
     public internal(set) var isSavePanelVisible = false
+    /// Non-nil while the folder dialog is up.
+    public internal(set) var addRepoRequest: AddRepoPurpose?
+    /// The purpose of a dialog that has just ended, until its result (or its cancel) is handled.
+    var addRepoClaim: AddRepoPurpose?
     /// The save waiting for the destination panel's answer.
     var saveDestinationWaiter: CheckedContinuation<SaveDestination?, Never>?
     /// The run shown in detail, if any.

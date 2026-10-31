@@ -49,7 +49,7 @@ struct StudioBody: Component {
                     }
                 }
                 .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-                InspectorView(draft: draft, repos: model.repos)
+                InspectorView(model: model, draft: draft, repos: model.repos)
                     .frame(minWidth: 240, idealWidth: 280, maxWidth: 420, maxHeight: .infinity)
             }
             .splitViewAutosaveName("studio.panes")
@@ -135,12 +135,19 @@ struct StudioToolbar: Component {
                 .frame(width: Pixels(140))
                 .accessibilityIdentifier("studio.field.repo")
             }
+            studioAddButton
         } else {
             TextField(field.name, text: binding)
                 .onSubmit { Task { await model.launchFromStudio() } }
                 .frame(width: Pixels(160))
                 .accessibilityIdentifier("studio.field.\(field.name)")
         }
+    }
+
+    private var studioAddButton: some Element {
+        Button("Add\u{2026}") { model.requestAddRepo(.launchField) }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("studio.field.repo.add")
     }
 
     static func fileText(_ draft: FlowDraft) -> String {

@@ -48,6 +48,7 @@ extension FlowDraft {
 
 /// The selected node's or wire's settings.
 struct InspectorView: Component {
+    let model: AppModel
     let draft: FlowDraft
     /// The known repos the Repo node's path picker offers.
     var repos: [URL] = []
@@ -55,7 +56,7 @@ struct InspectorView: Component {
     var content: some ElementGroup {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if let id = draft.selection, let node = draft.flow.node(id) {
-                NodeInspector(draft: draft, node: node, repos: repos)
+                NodeInspector(model: model, draft: draft, node: node, repos: repos)
             } else if let wire = draft.selectedWire {
                 Text(verbatim: "Wire").font(size: 11).foregroundColor(Palette.muted)
                 Text(verbatim: "\(wire.from.rawValue) → \(wire.to.rawValue) as {\(wire.input)}")
@@ -84,6 +85,7 @@ struct InspectorView: Component {
 
 /// The fields of one node.
 struct NodeInspector: Component {
+    let model: AppModel
     let draft: FlowDraft
     let node: Node
     var repos: [URL] = []
@@ -104,7 +106,7 @@ struct NodeInspector: Component {
                     .accessibilityIdentifier("inspector.id")
                 switch node.kind {
                 case .flowInput: FlowInputFields(draft: draft, id: id)
-                case .repo: RepoFields(draft: draft, id: id, repos: repos)
+                case .repo: RepoFields(model: model, draft: draft, id: id, repos: repos)
                 case .prompt, .judge: PromptFields(draft: draft, id: id)
                 case .shell, .gate:
                     label("Command")
@@ -246,6 +248,7 @@ struct InputRow: Component {
 
 /// Mode and path of the Repo node.
 struct RepoFields: Component {
+    let model: AppModel
     let draft: FlowDraft
     let id: NodeID
     let repos: [URL]
@@ -309,6 +312,9 @@ struct RepoFields: Component {
                 set: { value in Self.setPath(draft, id, value, coalescing: true) }))
                 .font(family: "Menlo", size: 12)
                 .accessibilityIdentifier("inspector.repo.pathField")
+            Button("Choose folder\u{2026}") { model.requestAddRepo(.repoNode(id)) }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("inspector.repo.add")
         } else {
             Text(verbatim: "The repo this flow file lives in.").font(size: 12).foregroundColor(Palette.muted)
         }

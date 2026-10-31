@@ -7,8 +7,6 @@ public struct LaunchForm: Sendable, Equatable {
     public var flow: FlowEntry.ID?
     /// Typed values, keyed by launch field name.
     public var values: [String: String] = [:]
-    /// The "Add repo..." field's text.
-    public var newRepoPath = ""
     /// Creates an empty form.
     public init() {}
 }
@@ -182,10 +180,7 @@ extension AppModel {
             && launchFields.allSatisfy { !$0.isRequired || !Self.trimmed(launchForm.values[$0.name] ?? "").isEmpty }
     }
 
-    /// Whether the "Add repo..." field holds a path.
-    public var canAddRepo: Bool { !Self.trimmed(launchForm.newRepoPath).isEmpty }
-
-    /// Adds the repo at `path` if it is a git repo top level, and selects it. Otherwise sets a notice.
+    /// Adds the repo at `path` if it is a git repo top level, and makes it the default for new drafts. Otherwise sets a notice.
     @discardableResult
     public func addRepo(path: String) async -> Bool {
         let trimmed = Self.trimmed(path)
@@ -198,8 +193,6 @@ extension AppModel {
         if !addedRepos.contains(url) { addedRepos.append(url) }
         await refreshRepos()
         selectRepo(url)
-        if launchFields.contains(where: { $0.kind == .repo }) { launchForm.values["repo"] = url.path }
-        if launchForm.newRepoPath == path { launchForm.newRepoPath = "" }
         return true
     }
 

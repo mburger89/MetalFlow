@@ -202,11 +202,65 @@ import Testing
         #expect(model.launchForm.values == ["issue": ""], "only B's fields, with defaults; nothing typed into A")
     }
 
-    @Test func addingARepoSelectsItInTheRepoField() async throws {
-        let (model, _, _) = try await catalogFixture(gitRepos: ["/other"])
-        #expect(await model.addRepo(path: "/other"))
-        #expect(model.launchForm.values["repo"] == "/other")
-        #expect(model.repos.map(\.path) == ["/repo", "/other"])
+    func folder() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("mf-add-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    @Test func addRepoOpensFolderDialog() async throws {
+        let (model, _, window) = try await fixture()
+        try await press("launch.addrepo", in: window)
+        let dialog = try #require(window.presentedFileDialog)
+        #expect(dialog.canChooseDirectories && !dialog.canChooseFiles)
+        #expect(dialog.allowedTypes.map(\.identifier) == ["public.folder"])
+        #expect(model.addRepoRequest == .dashboard)
+    }
+
+    @Test func addRepoAddsChosenFolder() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.standardizedFileURL.path
+        let (model, _, window) = try await fixture(gitRepos: [path])
+        try await press("launch.addrepo", in: window)
+        try window.respondToFileDialog(choosing: [dir.path])
+        await waitUntil("the repo") { model.repos.map(\.path).contains(path) }
+        try await window.runUntilIdle()
+        #expect(model.addRepoRequest == nil)
+        #expect(model.notice == nil)
+        #expect(window.presentedFileDialog == nil)
+    }
+
+    @Test func addRepoRejectsNonRepoFolder() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, _, window) = try await fixture()
+        try await press("launch.addrepo", in: window)
+        try window.respondToFileDialog(choosing: [dir.path])
+        await waitUntil("the notice") { model.notice != nil }
+        #expect(model.repos.map(\.path) == ["/repo"])
+    }
+
+    @Test func addRepoCancelAddsNothing() async throws {
+        let (model, _, window) = try await fixture()
+        try await press("launch.addrepo", in: window)
+        try window.cancelFileDialog()
+        try await window.runUntilIdle()
+        #expect(model.addRepoRequest == nil)
+        #expect(model.repos.map(\.path) == ["/repo"])
+        #expect(model.notice == nil)
+    }
+
+    @Test func launchFieldAddSelectsNewRepo() async throws {
+        let dir = try folder()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.standardizedFileURL.path
+        let (model, _, window) = try await catalogFixture(gitRepos: [path])
+        try await press("launch.field.repo.add", in: window)
+        #expect(model.addRepoRequest == .launchField)
+        try window.respondToFileDialog(choosing: [dir.path])
+        await waitUntil("the field") { model.launchForm.values["repo"] == path }
+        #expect(model.repos.map(\.path).contains(path))
     }
 
     @Test func addRepoValidatesThePath() async throws {
@@ -292,16 +346,6 @@ import Testing
         model.launchForm.values["issue"] = "44"
         _ = await model.launchFromForm()
         #expect(model.launchForm.values["issue"] == "", "an unchanged field is cleared")
-    }
-
-    @Test func repoPathTextTypedDuringValidationSurvives() async throws {
-        let (model, _, _) = try await fixture(gitRepos: ["/other"])
-        model.launchForm.newRepoPath = "/other"
-        #expect(await model.addRepo(path: model.launchForm.newRepoPath))
-        #expect(model.launchForm.newRepoPath == "")
-        model.launchForm.newRepoPath = "/x"
-        #expect(await model.addRepo(path: "/other"))
-        #expect(model.launchForm.newRepoPath == "/x", "text that is not the validated path stays")
     }
 
     @Test func retryAndResumeCallTheClient() async throws {
