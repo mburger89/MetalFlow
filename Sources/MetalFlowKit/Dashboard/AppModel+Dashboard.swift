@@ -141,15 +141,16 @@ extension AppModel {
             notice = Notice(error.localizedDescription)
             return nil
         }
-        let id = await launchGuarded(flow: flow, repo: repo, typed: typed)
+        let id = await launchGuarded(flow: flow, location: FlowLocation.of(file: file), repo: repo, typed: typed)
         if id != nil, launchForm.issue == typed { launchForm.issue = "" }
         return id
     }
 
     /// The one launch path: marks the launch in flight and sends the trimmed issue text.
-    func launchGuarded(flow: Flow, repo: URL, typed: String) async -> RunID? {
+    func launchGuarded(flow: Flow, location: FlowLocation, repo: URL, typed: String) async -> RunID? {
         isLaunching = true
         defer { isLaunching = false }
-        return await launch(flow: flow, repo: repo, input: Self.trimmed(typed))
+        let field = (try? flow.launchFields(location: location))?.first { $0.kind != .repo }?.name ?? "issue"
+        return await launch(flow: flow, location: location, values: [field: Self.trimmed(typed), "repo": repo.path])
     }
 }

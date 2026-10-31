@@ -13,7 +13,7 @@ import Testing
 
     /// Launches a run and holds it in its first node, so the first engine keeps the lock and the saved state.
     private func heldRun(_ h: Harness) async throws -> RunID {
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         for await run in h.engine.updates where run.id == id && run.nodes[NodeKey(node: "plan")]?.state == .running { break }
         return id
     }

@@ -15,7 +15,7 @@ import Testing
         let (hold, holdCont) = AsyncStream<Void>.makeStream()
         defer { holdCont.finish() }
         let h = try Harness(planHold: hold)
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         for await run in h.engine.updates where run.id == id && run.nodes[NodeKey(node: "plan")]?.state == .running { break }
 
         let other = secondEngine(h)
@@ -45,7 +45,7 @@ import Testing
 
     @Test func invalidBranchNamesAreRejected() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         for name in ["-bad", "a b", "x..y", "", "@{-1}", "end/"] {
             await #expect(throws: RunEngineError.invalidBranchName(name)) {
@@ -59,11 +59,12 @@ import Testing
     @Test func placeholderValuesCannotInjectShellCommands() async throws {
         let h = try Harness()
         let flow = Flow(name: "quote", nodes: [
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .exposed(default: nil))), position: Point(x: 0, y: 2)),
             Node(id: "issue", title: "Issue", kind: .flowInput(FlowInputConfig(name: "issue", source: .text)), position: Point(x: 0, y: 0)),
             Node(id: "show", title: "Show", kind: .shell(ShellConfig(command: "echo {issue}")), position: Point(x: 1, y: 0)),
         ], wires: [Wire(from: "issue", to: "show", input: "issue")])
         let text = "$(touch pwned) it's `touch pwned2`"
-        let id = try await h.engine.launch(flow: flow, repo: h.repo.url, input: text)
+        let id = try await h.engine.launch(flow: flow, location: .builtin, values: ["issue": text, "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.status == .completed)
         #expect(run.nodes[NodeKey(node: "show")]?.output?.contains(text) == true)
@@ -78,7 +79,7 @@ import Testing
 
     @Test func restoreFinishesCleanupOfDiscardedRun() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         var run = await h.settled(id)
         await h.engine.waitForPass(id)
         let directory = h.store.worktreesDirectory.appendingPathComponent(id.rawValue)

@@ -19,7 +19,7 @@ import Testing
 
     /// Runs a full flow to the pick, then returns the settled run so tests can rewrite its saved state.
     private func completedRun(_ h: Harness) async throws -> Run {
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         await h.engine.waitForPass(id)
         return run

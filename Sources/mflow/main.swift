@@ -45,7 +45,9 @@ func run() async -> Int32 {
             do { flow = try FlowFile.load(from: flowURL) } catch {
                 throw CommandFailure(message: "cannot load flow \(flowURL.path): \(error.localizedDescription)")
             }
-            let id = try await engine.launch(flow: flow, repo: repo, input: args.positionals[0])
+            let id = try await engine.launch(flow: flow, location: FlowLocation.of(file: flowURL), values: [
+                (try? flow.launchFields(location: FlowLocation.of(file: flowURL)))?.first { $0.kind != .repo }?.name ?? "issue": args.positionals[0],
+                "repo": repo.path])
             print(id.rawValue)
             return await follow(engine: engine, id: id, seed: nil)
 

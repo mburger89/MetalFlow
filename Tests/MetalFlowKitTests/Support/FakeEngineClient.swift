@@ -52,9 +52,13 @@ actor FakeEngineClient: EngineClient {
         held = []
     }
 
-    func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
+    /// The location and values of every `launch` received.
+    var launches: [(location: FlowLocation, values: [String: String])] = []
+    func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID {
         if holding { await withCheckedContinuation { held.append($0) } }
-        try record("launch(\(flow.name), \(repo.path), \(input))")
+        launches.append((location, values))
+        let input = values.filter { $0.key != "repo" }.values.first ?? ""
+        try record("launch(\(flow.name), \(values["repo"] ?? ""), \(input))")
         return RunID()
     }
     func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {

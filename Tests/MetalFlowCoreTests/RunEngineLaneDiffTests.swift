@@ -7,7 +7,7 @@ import Testing
 
     @Test func laneDiffShowsLaneChanges() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         let diff = await h.engine.laneDiff(id, lane: "a")
         #expect(diff.contains("+ok"))
@@ -16,7 +16,7 @@ import Testing
 
     @Test func laneDiffOfUnknownLaneIsEmpty() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         #expect(await h.engine.laneDiff(id, lane: "zzz") == "")
         #expect(await h.engine.laneDiff(RunID(), lane: "a") == "")

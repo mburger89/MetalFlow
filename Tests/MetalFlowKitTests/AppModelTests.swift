@@ -150,7 +150,7 @@ import MetalFlowCore
         await m.discard(id)
         #expect(m.notice?.text == "engine said no")
         m.notice = nil
-        #expect(await m.launch(flow: BuiltinFlows.fixGitHubIssue, repo: URL(fileURLWithPath: "/r"), input: "1") == nil)
+        #expect(await m.launch(flow: BuiltinFlows.fixGitHubIssue, location: .builtin, values: ["issue": "1", "repo": "/r"]) == nil)
         #expect(m.notice?.kind == .error)
         m.notice = nil
         await m.pick(id, lane: "a")

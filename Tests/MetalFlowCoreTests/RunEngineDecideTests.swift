@@ -10,7 +10,7 @@ import Testing
                        events: [.started(sessionID: "sb"), .finished(AgentResult(
                         sessionID: "sb", text: denied.isEmpty ? "hmm\nQUESTION: Keep the API?" : "need tools",
                         isError: false, deniedTools: denied, costUSD: 0, turns: 1))])
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         return id
     }
@@ -23,7 +23,7 @@ import Testing
     }
 
     func picked(_ h: Harness) async throws -> RunID {
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         return id
     }
@@ -60,7 +60,7 @@ import Testing
         let h = try Harness()
         h.agent.script({ $0.prompt.contains("short numbered plan") }, events: [.started(sessionID: "s"), .finished(AgentResult(
             sessionID: "s", text: "PLAN: change the thing", isError: false, deniedTools: ["Bash", "Write"], costUSD: 0, turns: 1))])
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         let plan = run.nodes[NodeKey(node: "plan")]
         #expect(plan?.state == .succeeded)
@@ -71,7 +71,7 @@ import Testing
 
     @Test func revisionIncreasesOnEveryUpdate() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         var revisions: [Int] = []
         for await run in h.engine.updates where run.id == id {
             revisions.append(run.revision)
@@ -201,7 +201,7 @@ import Testing
         let (hold, cont) = AsyncStream<Void>.makeStream()
         defer { cont.finish() }
         let h = try Harness(planHold: hold)
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         await #expect(throws: RunEngineError.notDiscardable) { try await h.engine.discard(id) }
         await h.engine.cancel(id)
         try await h.engine.discard(id)
@@ -212,7 +212,7 @@ import Testing
         let (hold, cont) = AsyncStream<Void>.makeStream()
         defer { cont.finish() }
         let h = try Harness(planHold: hold)
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         for await run in h.engine.updates where run.id == id && run.nodes[NodeKey(node: "plan")]?.state == .running { break }
         await h.engine.cancel(id)
         try await h.engine.discard(id)
@@ -236,7 +236,7 @@ import Testing
                        events: [.started(sessionID: "sb"), .finished(AgentResult(
                         sessionID: "sb", text: "QUESTION: Keep the API?", isError: false, deniedTools: [], costUSD: 0, turns: 1))])
         resumeScript(h)
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let key = NodeKey(node: "implement", lane: "b")
         await waitUntil("the lane to ask its question") { await h.engine.run(id)?.nodes[key]?.state == .needsYou(.question("Keep the API?")) }
         try await h.engine.answer(id, node: key, reply: "Yes")

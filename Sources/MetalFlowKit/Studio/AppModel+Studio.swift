@@ -184,7 +184,8 @@ extension AppModel {
     public func launchFromStudio() async -> RunID? {
         guard let draft, draftIsValid, !isLaunching, !Self.trimmed(studioIssue).isEmpty else { return nil }
         let typed = studioIssue
-        let id = await launchGuarded(flow: draft.flow, repo: draft.repo, typed: typed)
+        let id = await launchGuarded(
+            flow: draft.flow, location: draft.url.map { FlowLocation.of(file: $0) } ?? .unsaved, repo: draft.repo, typed: typed)
         if id != nil, studioIssue == typed { studioIssue = "" }
         return id
     }

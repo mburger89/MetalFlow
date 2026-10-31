@@ -7,7 +7,7 @@ import Testing
     typealias Harness = RunEngineTests.Harness
 
     private func startPlan(_ h: Harness) async throws -> RunID {
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         for await run in h.engine.updates where run.id == id && run.nodes[NodeKey(node: "plan")]?.state == .running { break }
         return id
     }
@@ -51,7 +51,7 @@ import Testing
 
     @Test func suspendOnSettledRunIsNoOp() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         await h.engine.waitForPass(id)
         await h.engine.suspend(id)
@@ -122,7 +122,7 @@ import Testing
 
     @Test func ensureLanesDoesNotWriteWhileSuspended() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let settled = await h.settled(id)
         await h.engine.waitForPass(id)
         await h.engine.setDirect(id) { $0.lanes = [] }

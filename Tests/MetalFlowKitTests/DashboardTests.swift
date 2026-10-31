@@ -43,6 +43,9 @@ import Testing
         try await press("launch.go", in: window)
 
         #expect(await client.calls.contains("launch(Fix GitHub issue, /repo, 42)"))
+        let launched = await client.launches
+        #expect(launched.first?.location == FlowLocation.of(file: flowFile))
+        #expect(launched.first?.values == ["issue": "42", "repo": "/repo"])
         #expect(model.launchForm.issue == "", "launching clears the issue field")
     }
 

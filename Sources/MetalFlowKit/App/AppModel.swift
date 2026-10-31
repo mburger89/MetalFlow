@@ -398,8 +398,8 @@ public final class AppModel {
 
     /// Starts a run. Returns its id, or nil with a notice.
     @discardableResult
-    public func launch(flow: Flow, repo: URL, input: String) async -> RunID? {
-        do { return try await client.launch(flow: flow, repo: repo, input: input) } catch { fail(error); return nil }
+    public func launch(flow: Flow, location: FlowLocation, values: [String: String]) async -> RunID? {
+        do { return try await client.launch(flow: flow, location: location, values: values) } catch { fail(error); return nil }
     }
 
     /// Answers a node's question. Returns false (with a notice) when the engine refuses.

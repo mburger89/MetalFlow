@@ -8,7 +8,7 @@ public protocol EngineClient: Sendable {
     /// Loads persisted runs.
     func restore() async throws -> [Run]
     /// Starts a run of `flow` in `repo`.
-    func launch(flow: Flow, repo: URL, input: String) async throws -> RunID
+    func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID
     /// Answers a node that asked a question, optionally allowing more tools.
     func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws
     /// Resumes a run that was cut short.
@@ -93,8 +93,8 @@ public struct LiveEngineClient: EngineClient {
     }
 
     public func restore() async throws -> [Run] { try await engine.value.restore() }
-    public func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
-        try await engine.value.launch(flow: flow, repo: repo, input: input)
+    public func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID {
+        try await engine.value.launch(flow: flow, location: location, values: values)
     }
     public func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
         try await engine.value.answer(id, node: node, reply: reply, allowTools: allowTools)
