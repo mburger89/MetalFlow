@@ -35,6 +35,9 @@ extension AppModel {
         for await id in notifier.clicks {
             let run = RunID(rawValue: id)
             guard runs[run] != nil else { continue }
+            // The user wants this run: nothing they had half-started may cover it or pull them away later.
+            hideOpenFlow()
+            cancelPending()
             screen = .dashboard
             open(run: run)
             activateApp()
@@ -79,13 +82,9 @@ extension AppModel {
     /// interrupted node; a failed node only names the reason when the run itself failed (or nothing else applies).
     public static func notificationBody(for run: Run) -> String {
         func title(_ key: NodeKey) -> String { run.flow.node(key.node)?.title ?? key.node.rawValue }
-        let order = run.flow.nodes.map(\.id)
-        let keys = run.nodes.keys.sorted {
-            let (i, j) = (order.firstIndex(of: $0.node) ?? Int.max, order.firstIndex(of: $1.node) ?? Int.max)
-            return i != j ? i < j : ($0.lane ?? "") < ($1.lane ?? "")
-        }
+        let keys = run.orderedNodeKeys
         func state(where match: (NodeState) -> Bool) -> NodeKey? { keys.first { run.nodes[$0].map { match($0.state) } ?? false } }
-        let failedKey = state { if case .failed = $0 { true } else { false } }
+        let failedKey = state { $0.isFailed }
         if case .failed = run.status, let key = failedKey { return "\(title(key)) failed — retry when ready" }
         if let (key, reason) = run.needsYou.first {
             switch reason {

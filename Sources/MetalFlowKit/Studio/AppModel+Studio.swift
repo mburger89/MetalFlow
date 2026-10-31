@@ -3,12 +3,18 @@ import MetalFlowCore
 
 extension AppModel {
     /// The run the Studio overlays on the canvas, if one is selected and still known.
-    public var studioShownRun: Run? { studioRun.flatMap { runs[$0] } }
+    public var studioShownRun: Run? {
+        guard let run = studioRun.flatMap({ runs[$0] }), run.status != .discarded else { return nil }
+        return run
+    }
 
-    /// Runs of the draft's flow in the draft's repo, newest first.
+    /// Runs of the draft's flow in the draft's repo, newest first. Discarded runs have no worktrees left, so
+    /// nothing can be shown or branched from them.
     public var studioRuns: [Run] {
         guard let draft else { return [] }
-        return order.compactMap { runs[$0] }.filter { $0.flow.name == draft.flow.name && $0.repo == draft.repo }
+        return order.compactMap { runs[$0] }.filter {
+            $0.flow.name == draft.flow.name && $0.repo == draft.repo && $0.status != .discarded
+        }
     }
 
     /// The text a unsaved flow's file name is made of: lowercase letters and digits joined by dashes.
@@ -95,11 +101,6 @@ extension AppModel {
         case discard
         /// Stay on the draft.
         case cancel
-    }
-
-    /// Resolves a pending open of `url`: Save saves first (and stays put, with a notice, if that fails).
-    public func resolvePendingOpen(_ url: URL, _ choice: PendingOpenChoice) async {
-        await resolvePending(.open(url), choice)
     }
 
     /// Resolves `action`, which was pending behind the unsaved-edits alert. For a quit: Save or Discard go on to the
@@ -192,8 +193,21 @@ extension AppModel {
 
     func newFlowWithoutAsking() {
         guard let repo = launchForm.repo else { return }
-        draft = FlowDraft(flow: Flow(name: "Untitled flow", nodes: [], wires: []), url: nil, repo: repo)
+        draft = FlowDraft(flow: Flow(name: untitledName(in: repo), nodes: [], wires: []), url: nil, repo: repo)
         screen = .studio
+    }
+
+    /// "Untitled flow", or "Untitled flow 2", "Untitled flow 3"... when the repo's flows already use the name, so
+    /// the run overlay (which matches runs by flow name) never mixes up two new flows.
+    func untitledName(in repo: URL) -> String {
+        let taken = Set(client.flows(in: repo).compactMap { try? client.loadFlow($0).name })
+        var name = "Untitled flow"
+        var n = 2
+        while taken.contains(name) {
+            name = "Untitled flow \(n)"
+            n += 1
+        }
+        return name
     }
 
     /// File > Open Flow...: shows the repo / flow panel.

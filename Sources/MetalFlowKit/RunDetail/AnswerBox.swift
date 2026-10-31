@@ -20,16 +20,12 @@ struct AnswerBox: Component {
             Button("Send") { send() }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("\(id).send")
-                .disabled((model.answerDrafts[draftKey] ?? "").trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(AppModel.trimmed(model.answerDrafts[draftKey] ?? "").isEmpty)
         }
     }
 
     private func send() {
-        let draftKey = AppModel.draftKey(runID, key)
-        let reply = (model.answerDrafts[draftKey] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !reply.isEmpty else { return }
-        model.answerDrafts[draftKey] = nil
         let (model, runID, key) = (model, runID, key)
-        Task { await model.answer(runID, node: key, reply: reply) }
+        Task { await model.sendAnswer(run: runID, node: key) }
     }
 }

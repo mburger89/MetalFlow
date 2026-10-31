@@ -10,7 +10,8 @@ struct ActivityFeed: Component {
         VStack(alignment: .leading, spacing: 6) {
             Text("ACTIVITY").font(size: 11).foregroundColor(Palette.muted).accessibilityIdentifier("activity")
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
+                // Lazy: up to 200 rows, rebuilt on every update, but only the visible ones are made.
+                LazyVStack(alignment: .leading, spacing: Pixels(0)) {
                     ForEach(model.activity, id: \.id) { item in
                         ActivityRow(item: item, now: model.now)
                     }

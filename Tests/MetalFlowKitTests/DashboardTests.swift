@@ -116,7 +116,7 @@ import Testing
         await client.holdLaunches()
         model.launchForm.issue = "42"
         let task = Task { await model.launchFromForm() }
-        await Task.yield()
+        await waitUntil("the launch to be in flight") { model.isLaunching }
         #expect(model.isLaunching)
         #expect(!model.canLaunch)
         model.launchForm.issue = "43"
@@ -160,6 +160,76 @@ import Testing
         try await window.runUntilIdle()
         try await press("answer.\(ask.id.rawValue).plan.send", in: window)
         #expect(await client.calls.contains("answer(plan, Use A.swift, [])"))
+    }
+
+    @Test func runLockedByAnotherProcessIsLabelledAndHasNoCancel() async throws {
+        let mine = makeRun("mine", status: .running), theirs = makeRun("theirs", status: .running)
+        let client = FakeEngineClient(restored: [mine, theirs], repos: [repo], flowFiles: [flowFile])
+        await client.setElsewhere([theirs.id])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        try await window.runUntilIdle()
+        #expect(model.runningElsewhere == [theirs.id])
+        #expect(model.drivenRunning.map(\.id) == [mine.id])
+        _ = try window.element(identifier: "run.\(mine.id.rawValue).cancel")
+        #expect((try? window.element(identifier: "run.\(theirs.id.rawValue).cancel")) == nil)
+        #expect(try window.element(identifier: "run.\(theirs.id.rawValue).elsewhere").value == "Running in another mflow")
+        // Only the run this app drives is stopped by quitting.
+        #expect(model.requestTerminate() == .later)
+        #expect(model.quitMessage == "1 run is still running. Quitting stops it — you can resume later.")
+        // An update from this app's own engine means it drives the run now.
+        var taken = theirs
+        taken.revision = 1
+        model.apply(taken)
+        #expect(model.runningElsewhere.isEmpty)
+    }
+
+    @Test func quitWithOnlyOtherProcessRunsQuitsNow() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let client = FakeEngineClient(restored: [theirs], repos: [repo])
+        await client.setElsewhere([theirs.id])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        #expect(model.requestTerminate() == .now)
+    }
+
+    @Test func failedAnswerKeepsTheReply() async throws {
+        let ask = makeRun("ask", status: .needsYou, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .needsYou(.question("Which file?")))])
+        let (model, client, window) = try await fixture([ask])
+        await client.setFailure(FakeFailure())
+        try window.click(window.element(identifier: "answer.\(ask.id.rawValue).plan.field"))
+        window.typeText("Use A.swift")
+        try await window.runUntilIdle()
+        try await press("answer.\(ask.id.rawValue).plan.send", in: window)
+        #expect(await client.calls.contains("answer(plan, Use A.swift, [])"))
+        #expect(model.answerDrafts[AppModel.draftKey(ask.id, NodeKey(node: "plan"))] == "Use A.swift", "kept for another try")
+        #expect(model.notice?.text == "engine said no")
+        // A successful answer clears it.
+        await client.setFailure(nil)
+        try await press("answer.\(ask.id.rawValue).plan.send", in: window)
+        #expect(model.answerDrafts[AppModel.draftKey(ask.id, NodeKey(node: "plan"))] == nil)
+    }
+
+    @Test func newlineOnlyReplyCannotBeSent() async throws {
+        let ask = makeRun("ask", status: .needsYou, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .needsYou(.question("Which file?")))])
+        let (model, _, window) = try await fixture([ask])
+        model.answerDrafts[AppModel.draftKey(ask.id, NodeKey(node: "plan"))] = " \n "
+        try await window.runUntilIdle()
+        #expect(try !window.element(identifier: "answer.\(ask.id.rawValue).plan.send").isEnabled)
+    }
+
+    @Test func allowOnTheDashboardSendsTheSameReplyAsTheDetail() async throws {
+        let run = makeRun("denied", status: .needsYou, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .needsYou(.deniedTools(["Edit"])))])
+        let (_, client, window) = try await fixture([run])
+        try await press("needs.\(run.id.rawValue).plan.primary", in: window)
+        #expect(await client.calls.contains("answer(plan, Continue., [\"Edit\"])"))
     }
 
     @Test func runningCardShowsStepPillsAndLastLog() async throws {
@@ -246,6 +316,15 @@ import Testing
         model.apply(run)
         try await window.runUntilIdle()
         #expect(try window.elements { $0.identifier == "activity.item" }.count == 1)
+    }
+
+    @Test func activityFeedBuildsOnlyTheVisibleRows() async throws {
+        let (model, _, window) = try await fixture()
+        for i in 0..<150 { model.apply(makeRun("run \(i)", status: .running, createdAt: Date(timeIntervalSince1970: Double(i)))) }
+        try await window.runUntilIdle()
+        #expect(model.activity.count == 150)
+        let rows = try window.elements { $0.identifier == "activity.item" }.count
+        #expect(rows > 0 && rows < 60, "\(rows) rows built for 150 items")
     }
 
     @Test func workingChipIDsAreUniqueAcrossRepos() async throws {

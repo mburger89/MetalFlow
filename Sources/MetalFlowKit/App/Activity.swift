@@ -51,11 +51,7 @@ func deriveActivity(old: Run?, new: Run, now: Date) -> [ActivityItem] {
     }
     if old == nil { add("started", .info) }
 
-    let order = new.flow.nodes.map(\.id)
-    let keys = new.nodes.keys.sorted {
-        let (i, j) = (order.firstIndex(of: $0.node) ?? Int.max, order.firstIndex(of: $1.node) ?? Int.max)
-        return i != j ? i < j : ($0.lane ?? "") < ($1.lane ?? "")
-    }
+    let keys = new.orderedNodeKeys
     var gateFailed = false
     for key in keys {
         guard let node = new.nodes[key] else { continue }
@@ -96,7 +92,7 @@ func deriveActivity(old: Run?, new: Run, now: Date) -> [ActivityItem] {
             if case .gate? = new.flow.node(key.node)?.kind { return true }
             return false
         }
-        let failed = gates.values.filter { if case .failed = $0.state { return true } else { return false } }.count
+        let failed = gates.values.filter { $0.state.isFailed }.count
         add("gate failed on \(failed) of \(gates.count) candidate\(gates.count == 1 ? "" : "s")", .bad)
     }
 

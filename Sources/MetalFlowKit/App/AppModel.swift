@@ -76,8 +76,8 @@ public final class AppModel {
     public var notice: Notice?
     /// What the user asked for while the draft has unsaved edits; the Save / Discard / Cancel alert is up.
     public internal(set) var pendingAction: PendingAction?
-    /// The flow the user asked to open while the draft has unsaved edits, if that is what is pending.
-    public var pendingOpen: URL? {
+    /// The flow the user asked to open while the draft has unsaved edits, if that is what is pending (tests).
+    var pendingOpen: URL? {
         if case .open(let url) = pendingAction { return url }
         return nil
     }
@@ -195,8 +195,9 @@ public final class AppModel {
         for await run in client.updates { apply(run) }
     }
 
-    /// Returns once `start()` has restored the saved runs and scanned the first repo.
-    public func waitUntilReady() async {
+    /// Returns once `start()` has restored the saved runs and scanned the first repo. Tests only: it never returns
+    /// if `start()` is never called.
+    func waitUntilReady() async {
         if isReady { return }
         await withCheckedContinuation { readyWaiters.append($0) }
     }
@@ -246,7 +247,7 @@ public final class AppModel {
         case .running: .running
         case .failed:
             // A failed node can be retried, so such a run waits for the user instead of being history.
-            run.nodes.values.contains { if case .failed = $0.state { true } else { false } } ? .needsYou : .finished
+            run.hasFailedNode ? .needsYou : .finished
         case .merged, .discarded, .cancelled, .completed: .finished
         }
     }
@@ -332,9 +333,29 @@ public final class AppModel {
         do { return try await client.launch(flow: flow, repo: repo, input: input) } catch { fail(error); return nil }
     }
 
-    /// Answers a node's question.
-    public func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String] = []) async {
+    /// Answers a node's question. Returns false (with a notice) when the engine refuses.
+    @discardableResult
+    public func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String] = []) async -> Bool {
         await perform { try await self.client.answer(id, node: node, reply: reply, allowTools: allowTools) }
+    }
+
+    /// Allows the tools a node was denied and lets it carry on. The one reply both screens send.
+    @discardableResult
+    public func allowAndContinue(run id: RunID, node: NodeKey, tools: [String]) async -> Bool {
+        await answer(id, node: node, reply: "Continue.", allowTools: tools)
+    }
+
+    /// Sends the reply drafted for a node's question. The draft is cleared only once the engine accepts it, and
+    /// only if the user has not typed something else meanwhile. Does nothing for an empty reply.
+    @discardableResult
+    public func sendAnswer(run id: RunID, node: NodeKey) async -> Bool {
+        let key = Self.draftKey(id, node)
+        let typed = answerDrafts[key] ?? ""
+        let reply = Self.trimmed(typed)
+        guard !reply.isEmpty else { return false }
+        guard await answer(id, node: node, reply: reply) else { return false }
+        if answerDrafts[key] == typed { answerDrafts[key] = nil }
+        return true
     }
 
     /// Resumes a cut-short run.

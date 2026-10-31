@@ -61,7 +61,44 @@ import Testing
         }
         #expect(model.draft?.repo == repo)
         #expect(model.draft?.url == nil)
-        #expect(try window.element(identifier: "studio.name").value == "Fix GitHub issue")
+        #expect(model.draft?.flow.name == "Fix GitHub issue")
+        _ = try window.element(identifier: "studio.name")
+    }
+
+    @Test func toolbarNameIsAnEditableUndoableField() async throws {
+        let (model, _, window) = try await fixture()
+        try await showStudio(model, window)
+        let draft = try #require(model.draft)
+        let field = try window.element(identifier: "studio.name")
+        window.click(at: ScreenPoint(x: field.frame.origin.x + field.frame.size.width - 4,
+                                     y: field.frame.origin.y + field.frame.size.height / 2))
+        window.typeText("!")
+        try await window.runUntilIdle()
+        #expect(draft.flow.name == "Fix GitHub issue!")
+        window.typeText("?")
+        try await window.runUntilIdle()
+        #expect(draft.flow.name == "Fix GitHub issue!?")
+        #expect(draft.isDirty)
+        draft.undo()
+        #expect(draft.flow.name == "Fix GitHub issue", "one typing session is one undo step")
+    }
+
+    @Test func untitledFlowsGetUniqueNamesWithinTheRepo() async throws {
+        let a = URL(fileURLWithPath: "/repo/.flows/a.flow"), b = URL(fileURLWithPath: "/repo/.flows/b.flow")
+        let client = FakeEngineClient(repos: [repo], flowFiles: [a, b])
+        client.files.names = [a: "Untitled flow", b: "Untitled flow 2"]
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        model.newFlow()
+        #expect(model.draft?.flow.name == "Untitled flow 3")
+        client.files.names = [a: "Other"]
+        model.newFlow()
+        #expect(model.draft?.flow.name == "Untitled flow")
+        client.files.names = [b: "Untitled flow"]
+        model.newFlow()
+        #expect(model.draft?.flow.name == "Untitled flow 2")
     }
 
     @Test func emptyStudioWithoutRepo() async throws {
@@ -169,6 +206,25 @@ import Testing
         try window.chooseMenuItem("Showing #7 lanes")
         try await window.runUntilIdle()
         #expect(model.studioRun == newest.id)
+    }
+
+    @Test func pickerAndOverlayLeaveOutDiscardedRuns() async throws {
+        let live = laneRun()
+        var gone = makeRun("gone", status: .discarded, createdAt: Date(timeIntervalSince1970: 900))
+        gone.status = .discarded
+        let (model, _, window) = try await fixture(runs: [live, gone])
+        try await showStudio(model, window)
+        #expect(model.studioRuns.map(\.title) == ["#7 lanes"])
+        // A run discarded while it is overlaid drops the overlay.
+        model.studioRun = live.id
+        #expect(model.studioShownRun != nil)
+        var discarded = live
+        discarded.status = .discarded
+        discarded.revision = 5
+        model.apply(discarded)
+        #expect(model.studioShownRun == nil)
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "cand.a")) == nil)
     }
 
     @Test func overlayLaneScopingComesFromTheRunNotTheDraft() async throws {

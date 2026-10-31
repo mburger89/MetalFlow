@@ -134,7 +134,7 @@ import Testing
         #expect(run.nodes[NodeKey(node: "plan")]?.state == .cancelled)
         await h.engine.waitForPass(id)
         #expect(await h.engine.tasks[id] == nil)
-        while h.agent.cancelledCount == 0 { await Task.yield() }
+        await waitUntil("the cancelled session") { h.agent.cancelledCount > 0 }
         #expect(h.agent.cancelledCount == 1)
         #expect(await h.engine.run(id)?.nodes.values.contains { $0.state == .running } == false)
     }
@@ -236,7 +236,7 @@ import Testing
         }
         let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
         func started() -> Int { h.agent.requests.filter { $0.prompt.contains("Fix this GitHub issue") }.count }
-        while started() < 1 { await Task.yield() }
+        await waitUntil("the first lane to start") { started() >= 1 }
         for _ in 0..<200 { await Task.yield() }
         #expect(started() == 1)
         releases.forEach { $0.finish() }

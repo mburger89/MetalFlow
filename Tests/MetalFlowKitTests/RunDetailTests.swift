@@ -112,7 +112,7 @@ import Testing
         let (model, client, _) = try await fixture(run)
         await client.holdPicks()
         let first = Task { await model.pick(run.id, lane: "a") }
-        while model.pickingRun == nil { await Task.yield() }
+        await waitUntil("the pick to be in flight") { model.pickingRun != nil }
         // The second call must return at once with the first still held. The fake holds only the first call,
         // so a broken guard shows up as a recorded pick-start(b) instead of a hang.
         let second = Task { await model.pick(run.id, lane: "b") }
@@ -132,7 +132,7 @@ import Testing
         _ = try window.element(identifier: "cand.a.result")
         await client.holdPicks()
         let again = Task { await model.pick(model.selectedRun!, lane: "a") }
-        while model.pickingRun == nil { await Task.yield() }
+        await waitUntil("the pick to be in flight") { model.pickingRun != nil }
         try await window.runUntilIdle()
         #expect((try? window.element(identifier: "cand.a.result")) == nil, "cleared while the new attempt runs")
         await client.releasePicks()
@@ -146,7 +146,7 @@ import Testing
         let (model, client, window) = try await fixture(run)
         await client.holdPicks()
         let task = Task { await model.pick(run.id, lane: "a") }
-        await Task.yield()
+        await waitUntil("the pick to be in flight") { model.pickingRun != nil }
         try await window.runUntilIdle()
         for lane in ["a", "b", "c"] {
             #expect(try !window.element(identifier: "cand.\(lane).pick").isEnabled)
@@ -201,6 +201,35 @@ import Testing
         #expect(model.selectedRun == nil)
         #expect(model.workingOn.contains(.run(run.id)))
         _ = try window.element(identifier: "dashboard")
+    }
+
+    @Test func runningRunOffersCancelNotDiscard() async throws {
+        let run = makeRun("busy", status: .running, nodes: [NodeKey(node: "plan"): NodeRun(state: .running)])
+        let (_, client, window) = try await fixture(run)
+        #expect((try? window.element(identifier: "detail.discard")) == nil)
+        try await press("detail.cancel", in: window)
+        #expect(await client.calls.contains("cancel"))
+    }
+
+    @Test func settledRunOffersDiscardNotCancel() async throws {
+        let (_, _, window) = try await fixture(pickRun())
+        _ = try window.element(identifier: "detail.discard")
+        #expect((try? window.element(identifier: "detail.cancel")) == nil)
+    }
+
+    @Test func runLockedElsewhereHasNeitherCancelNorDiscard() async throws {
+        let run = makeRun("theirs", status: .running)
+        let client = FakeEngineClient(restored: [run], repos: [URL(fileURLWithPath: "/repo")])
+        await client.setElsewhere([run.id])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        model.open(run: run.id)
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "detail.cancel")) == nil)
+        #expect((try? window.element(identifier: "detail.discard")) == nil)
+        #expect(try window.element(identifier: "detail.status").value == "Running in another mflow")
     }
 
     @Test func deniedToolsAllowContinues() async throws {

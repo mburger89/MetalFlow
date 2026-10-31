@@ -106,6 +106,27 @@ import Testing
         #expect(activations == 1)
     }
 
+    @Test func clickDismissesOpenFlowOverlayAndPendingSwitch() async throws {
+        let (model, _, notifier, window) = try await fixture()
+        let id = RunID()
+        model.apply(makeRun("clicked", status: .running, id: id))
+        model.screen = .studio
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        model.showOpenFlow()
+        model.open(flow: URL(fileURLWithPath: "/repo/.flows/other.flow"))
+        #expect(model.pendingAction != nil)
+        notifier.click(id.rawValue)
+        await waitUntil("the click to open the run") { model.selectedRun == id }
+        try await window.runUntilIdle()
+        #expect(!model.isOpenFlowVisible, "the overlay would hide the run the user clicked")
+        #expect(model.pendingAction == nil, "answering the alert later must not pull the user away")
+        #expect(model.screen == .dashboard)
+        #expect(draft.isDirty, "the edits are untouched")
+        #expect((try? window.element(identifier: "openFlow.panel")) == nil)
+        #expect(window.presentedAlert == nil)
+    }
+
     @Test func postNeverActivates() async throws {
         let (model, _, notifier, _) = try await fixture()
         var activations = 0

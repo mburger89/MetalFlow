@@ -47,9 +47,15 @@ struct RunCard: Component {
                 Button("Open") { model.open(run: id) }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("run.\(id.rawValue).open")
-                Button("Cancel") { Task { await model.cancel(id) } }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("run.\(id.rawValue).cancel")
+                if model.runningElsewhere.contains(id) {
+                    // Another process holds the run's lock: cancelling from here would do nothing.
+                    Text(verbatim: "Running in another mflow").font(size: 12).foregroundColor(Palette.muted)
+                        .accessibilityIdentifier("run.\(id.rawValue).elsewhere")
+                } else {
+                    Button("Cancel") { Task { await model.cancel(id) } }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("run.\(id.rawValue).cancel")
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

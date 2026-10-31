@@ -38,12 +38,21 @@ struct DetailBody: Component {
                         .accessibilityIdentifier("detail.back")
                     Text(verbatim: run.title).font(size: 16).foregroundColor(Palette.text)
                         .accessibilityIdentifier("detail.title")
-                    Text(verbatim: WorkingChip.statusText(run)).font(size: 12).foregroundColor(Palette.muted)
+                    Text(verbatim: model.statusText(run)).font(size: 12).foregroundColor(Palette.muted)
                         .accessibilityIdentifier("detail.status")
                     Spacer()
-                    Button("Discard") { model.confirmingDiscard = runID }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("detail.discard")
+                    if run.status == .running {
+                        // A running run cannot be discarded; cancel it first. One another process drives is not ours.
+                        if !model.runningElsewhere.contains(runID) {
+                            Button("Cancel") { Task { await model.cancel(runID) } }
+                                .buttonStyle(.bordered)
+                                .accessibilityIdentifier("detail.cancel")
+                        }
+                    } else {
+                        Button("Discard") { model.confirmingDiscard = runID }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("detail.discard")
+                    }
                 }
                 StepsSection(model: model, run: run)
                 if let judge = judgeOutput {
@@ -168,7 +177,7 @@ struct StepRow: Component {
         }
         if case .needsYou(.deniedTools(let tools)) = row.state {
             Button("Allow & continue") {
-                Task { await model.answer(runID, node: key, reply: "Continue.", allowTools: tools) }
+                Task { await model.allowAndContinue(run: runID, node: key, tools: tools) }
             }
             .buttonStyle(.bordered)
             .accessibilityIdentifier("\(id).allow")

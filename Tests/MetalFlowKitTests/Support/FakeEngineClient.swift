@@ -102,7 +102,9 @@ actor FakeEngineClient: EngineClient {
     nonisolated let files = FileLog()
     nonisolated func loadFlow(_ url: URL) throws -> Flow {
         if files.failLoad { throw FakeFailure() }
-        return BuiltinFlows.fixGitHubIssue
+        var flow = BuiltinFlows.fixGitHubIssue
+        if let name = files.names[url] { flow.name = name }
+        return flow
     }
     nonisolated func saveFlow(_ flow: Flow, to url: URL) throws {
         if files.failSave { throw FakeFailure() }
@@ -186,6 +188,12 @@ final class FileLog: @unchecked Sendable {
     var failLoad: Bool {
         get { lock.withLock { _failLoad } }
         set { lock.withLock { _failLoad = newValue } }
+    }
+    private var _names: [URL: String] = [:]
+    /// The flow name `loadFlow` returns for a file (the built-in's name for the others).
+    var names: [URL: String] {
+        get { lock.withLock { _names } }
+        set { lock.withLock { _names = newValue } }
     }
     private var _failSave = false
     /// When true, `saveFlow` throws.

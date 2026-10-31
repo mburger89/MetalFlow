@@ -72,7 +72,10 @@ struct StudioToolbar: Component {
     var content: some ElementGroup {
         let valid = model.draftIsValid
         HStack(spacing: Spacing.md) {
-            Text(verbatim: draft.flow.name).font(size: 14).foregroundColor(Palette.text)
+            TextField("Flow name", text: Binding(
+                get: { draft.flow.name },
+                set: { value in draft.edit("name") { $0.name = value } }))
+                .frame(width: Pixels(240))
                 .accessibilityIdentifier("studio.name")
             Text(verbatim: Self.fileText(draft)).font(size: 12).foregroundColor(Palette.muted)
                 .accessibilityIdentifier("studio.file")

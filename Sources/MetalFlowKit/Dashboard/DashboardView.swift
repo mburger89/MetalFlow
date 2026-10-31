@@ -91,7 +91,7 @@ struct WorkingChip: Component {
                 "working.flow.\(url.path)"
             )
         case .run(let id):
-            ("RUN", model.runs[id]?.title ?? "Run", model.runs[id].map(Self.statusText) ?? "", "working.run.\(id.rawValue)")
+            ("RUN", model.runs[id]?.title ?? "Run", model.runs[id].map { model.statusText($0) } ?? "", "working.run.\(id.rawValue)")
         }
     }
 

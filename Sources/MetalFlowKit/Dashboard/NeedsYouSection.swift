@@ -77,7 +77,7 @@ struct NeedsCard: Component {
         case .question:
             Spacer().frame(width: 0)
         case .deniedTools(let tools):
-            Button("Allow") { Task { await model.answer(run.id, node: key, reply: "continue", allowTools: tools) } }
+            Button("Allow") { Task { await model.allowAndContinue(run: run.id, node: key, tools: tools) } }
                 .buttonStyle(.bordered).accessibilityIdentifier("\(item.id).primary")
         case .interrupted:
             Button("Resume") { Task { await model.resume(run.id) } }

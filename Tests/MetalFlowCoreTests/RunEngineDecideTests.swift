@@ -238,7 +238,7 @@ import Testing
         resumeScript(h)
         let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
         let key = NodeKey(node: "implement", lane: "b")
-        while await h.engine.run(id)?.nodes[key]?.state != .needsYou(.question("Keep the API?")) { await Task.yield() }
+        await waitUntil("the lane to ask its question") { await h.engine.run(id)?.nodes[key]?.state == .needsYou(.question("Keep the API?")) }
         try await h.engine.answer(id, node: key, reply: "Yes")
         cont.yield()
         let run = await h.settled(id)

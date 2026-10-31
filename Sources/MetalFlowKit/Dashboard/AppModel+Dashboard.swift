@@ -48,12 +48,7 @@ extension AppModel {
     public var needsItems: [NeedsItem] {
         var items: [NeedsItem] = []
         for run in needsYou {
-            let order = run.flow.nodes.map(\.id)
-            let keys = run.nodes.keys.sorted {
-                let (i, j) = (order.firstIndex(of: $0.node) ?? Int.max, order.firstIndex(of: $1.node) ?? Int.max)
-                return i != j ? i < j : ($0.lane ?? "") < ($1.lane ?? "")
-            }
-            for key in keys {
+            for key in run.orderedNodeKeys {
                 guard let node = run.nodes[key] else { continue }
                 let kind: NeedsItem.Kind?
                 switch node.state {
@@ -68,6 +63,11 @@ extension AppModel {
             }
         }
         return items
+    }
+
+    /// The one-word state of a run for chips and headers; a running run another process drives says so.
+    public func statusText(_ run: Run) -> String {
+        run.status == .running && runningElsewhere.contains(run.id) ? "Running in another mflow" : WorkingChip.statusText(run)
     }
 
     /// The text with surrounding whitespace and newlines removed: the one trim used by buttons and actions.
