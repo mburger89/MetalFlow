@@ -511,6 +511,28 @@ import Testing
         #expect(window.presentedAlert == nil)
     }
 
+    @Test func escapeOnDirtySwitchAlertCancels() async throws {
+        // The window draws its alerts, so Escape reaches the alert as a key press.
+        let client = FakeEngineClient(repos: [repo])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model, options: .init(presentsAlertsNatively: false))
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        model.screen = .studio
+        try await window.runUntilIdle()
+        let (draft, a, b) = try openDirty(model)
+        model.open(flow: b)
+        try await window.runUntilIdle()
+        #expect(model.pendingOpen == b)
+        #expect(try window.elements(role: .alert).count == 1)
+        window.typeKey(.escape)
+        try await window.runUntilIdle()
+        #expect(try window.elements(role: .alert).isEmpty)
+        #expect(model.pendingAction == nil)
+        #expect(client.files.saved.isEmpty)
+        #expect(model.draft === draft && draft.url == a && draft.isDirty, "the draft is kept")
+    }
+
     // MARK: Fix round 1
 
     func typeAtEnd(_ window: TestWindow, _ id: String, _ text: String) throws {

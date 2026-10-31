@@ -130,6 +130,13 @@ extension AppModel {
         abandon(action)
     }
 
+    /// An unsaved-edits or quit alert went away. When no button answered it (it was dismissed some other way), it
+    /// counts as Cancel, so no request is left unanswered.
+    func alertDismissed() {
+        cancelPending()
+        if quitPending { cancelQuit() }
+    }
+
     private func abandon(_ action: PendingAction) {
         if action == .quit { replyToTerminate(false) }
     }

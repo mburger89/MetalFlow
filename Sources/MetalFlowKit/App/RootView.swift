@@ -16,20 +16,27 @@ public struct RootView: Component {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
         .task { await model.start() }
+        // Escape presses the `.cancel` button below. A dismissal that presses no button lands in `set`, which hears it
+        // before any button action: `alertDismissed` looks after the buttons have run.
         .alert("Save changes to this flow?", isPresented: Binding(
             get: { model.pendingAction != nil },
-            set: { _ in })) {
+            set: { shown in if !shown { Task { model.alertDismissed() } } })) {
             let target = model.pendingAction
-            Button("Save") { if let target { Task { await model.resolvePending(target, .save) } } }
-            Button("Discard", role: .destructive) { if let target { Task { await model.resolvePending(target, .discard) } } }
+            // Save and Discard take the pending action at once, so the dismissal check sees it answered.
+            Button("Save") {
+                if let target { model.pendingAction = nil; Task { await model.resolvePending(target, .save) } }
+            }
+            Button("Discard", role: .destructive) {
+                if let target { model.pendingAction = nil; Task { await model.resolvePending(target, .discard) } }
+            }
             Button("Cancel", role: .cancel) { model.cancelPending() }
         } message: {
             Text("The open flow has unsaved edits.")
         }
         .alert("Quit MetalFlow?", isPresented: Binding(
             get: { model.quitPending },
-            set: { _ in })) {
-            Button("Quit", role: .destructive) { Task { await model.confirmQuit() } }
+            set: { shown in if !shown { Task { model.alertDismissed() } } })) {
+            Button("Quit", role: .destructive) { model.quitPending = false; Task { await model.confirmQuit() } }
             Button("Cancel", role: .cancel) { model.cancelQuit() }
         } message: {
             Text(verbatim: model.quitMessage)
