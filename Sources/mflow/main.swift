@@ -42,8 +42,9 @@ func run() async -> Int32 {
             try requirePositionals(args, min: 0, max: 1, name: command)
             let store = RunStore(root: storeRoot())
             let cwdRepo: URL?
+            var cwdError: Error?
             if args.repo != nil { cwdRepo = try await resolveRepo(args.repo, runner: runner) } else {
-                cwdRepo = try? await resolveRepo(nil, runner: runner)
+                do { cwdRepo = try await resolveRepo(nil, runner: runner) } catch { cwdRepo = nil; cwdError = error }
             }
             let flow: Flow
             let location: FlowLocation
@@ -77,6 +78,10 @@ func run() async -> Int32 {
             // An exposed repo is filled from --repo or the current directory; a bound flow only checks an explicit --repo.
             if fields.contains(where: { $0.kind == .repo }) {
                 if let cwdRepo, values["repo"] == nil { values["repo"] = cwdRepo.path }
+                // Nothing names the repo and the current directory is not one: say why, not just that a value is missing.
+                if let cwdError, values["repo"] == nil, fields.first(where: { $0.kind == .repo })?.defaultValue == nil {
+                    throw cwdError
+                }
             } else if args.repo != nil, let cwdRepo {
                 values["repo"] = cwdRepo.path
             }
