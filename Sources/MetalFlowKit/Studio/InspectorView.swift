@@ -1,4 +1,5 @@
 import MetalFlowCore
+import Foundation
 import MetalUI
 
 /// The models a prompt, judge or candidate can use.
@@ -48,11 +49,13 @@ extension FlowDraft {
 /// The selected node's or wire's settings.
 struct InspectorView: Component {
     let draft: FlowDraft
+    /// The known repos the Repo node's path picker offers.
+    var repos: [URL] = []
 
     var content: some ElementGroup {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if let id = draft.selection, let node = draft.flow.node(id) {
-                NodeInspector(draft: draft, node: node)
+                NodeInspector(draft: draft, node: node, repos: repos)
             } else if let wire = draft.selectedWire {
                 Text(verbatim: "Wire").font(size: 11).foregroundColor(Palette.muted)
                 Text(verbatim: "\(wire.from.rawValue) → \(wire.to.rawValue) as {\(wire.input)}")
@@ -84,6 +87,7 @@ struct InspectorView: Component {
 struct NodeInspector: Component {
     let draft: FlowDraft
     let node: Node
+    var repos: [URL] = []
 
     var content: some ElementGroup {
         let id = node.id
@@ -101,8 +105,7 @@ struct NodeInspector: Component {
                     .accessibilityIdentifier("inspector.id")
                 switch node.kind {
                 case .flowInput: FlowInputFields(draft: draft, id: id)
-                case .repo:
-                    Text(verbatim: "The run's worktree.").font(size: 12).foregroundColor(Palette.muted)
+                case .repo: RepoFields(draft: draft, id: id, repos: repos)
                 case .prompt, .judge: PromptFields(draft: draft, id: id)
                 case .shell, .gate:
                     label("Command")
@@ -115,6 +118,7 @@ struct NodeInspector: Component {
                     Text(verbatim: "Waits for you to pick a candidate.").font(size: 12).foregroundColor(Palette.muted)
                 }
                 IncomingWires(draft: draft, id: id)
+                if node.acceptsInputs { InputBindings(draft: draft, id: id) }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
@@ -129,6 +133,197 @@ struct NodeInspector: Component {
 
     func label(_ text: String) -> some Element {
         Text(verbatim: text).font(size: 11).foregroundColor(Palette.muted)
+    }
+}
+
+extension Node {
+    /// Whether the node has placeholders to bind: prompt, judge, shell and gate.
+    var acceptsInputs: Bool {
+        switch kind {
+        case .prompt, .judge, .shell, .gate: true
+        default: false
+        }
+    }
+}
+
+/// Where a node input's value comes from.
+enum InputMode: Hashable {
+    case wire, value, exposed
+
+    init(_ binding: InputBinding?) {
+        switch binding {
+        case nil: self = .wire
+        case .fixed?: self = .value
+        case .exposed?: self = .exposed
+        }
+    }
+}
+
+extension FlowDraft {
+    /// Switches how `name` of node `id` gets its value, as one undo step. Value and Exposed drop any wire into
+    /// that input; Wire drops the binding.
+    func setInputMode(_ id: NodeID, _ name: String, _ mode: InputMode) {
+        apply("inputMode.\(id.rawValue).\(name)", coalescing: false) { flow in
+            guard let i = flow.nodes.firstIndex(where: { $0.id == id }) else { return }
+            switch (mode, flow.nodes[i].inputs[name]) {
+            case (.wire, _): flow.nodes[i].inputs[name] = nil
+            case (.value, .fixed?), (.exposed, .exposed?): return
+            case (.value, _):
+                flow.wires.removeAll { $0.to == id && $0.input == name }
+                flow.nodes[i].inputs[name] = .fixed("")
+            case (.exposed, _):
+                flow.wires.removeAll { $0.to == id && $0.input == name }
+                flow.nodes[i].inputs[name] = .exposed(default: nil)
+            }
+        }
+    }
+}
+
+/// One row per placeholder of a node's prompt or command: Wire, Value or Exposed.
+struct InputBindings: Component {
+    let draft: FlowDraft
+    let id: NodeID
+
+    var content: some ElementGroup {
+        let names = draft.flow.inputNames(of: id)
+        let draft = draft, id = id
+        if !names.isEmpty {
+            Text(verbatim: "Inputs").font(size: 11).foregroundColor(Palette.muted)
+            ForEach(names, id: \.self) { name in
+                InputRow(draft: draft, id: id, name: name)
+            }
+        }
+    }
+}
+
+/// The mode picker and the mode's field for one input.
+struct InputRow: Component {
+    let draft: FlowDraft
+    let id: NodeID
+    let name: String
+
+    var content: some ElementGroup {
+        let draft = draft, id = id, name = name
+        let binding = draft.flow.node(id)?.inputs[name]
+        let source = draft.flow.inputs(of: id).first { $0.input == name }
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(verbatim: "{\(name)}").font(Theme.mono(12)).foregroundColor(Palette.body)
+            Picker("", selection: Binding(
+                get: { InputMode(draft.flow.node(id)?.inputs[name]) },
+                set: { draft.setInputMode(id, name, $0) })) {
+                Text("Wire").accessibilityIdentifier("inspector.input.\(name).mode.wire").tag(InputMode.wire)
+                Text("Value").accessibilityIdentifier("inspector.input.\(name).mode.value").tag(InputMode.value)
+                Text("Exposed").accessibilityIdentifier("inspector.input.\(name).mode.exposed").tag(InputMode.exposed)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("inspector.input.\(name)")
+            switch binding {
+            case nil:
+                if let source {
+                    Text(verbatim: draft.flow.node(source.from)?.title ?? source.from.rawValue)
+                        .font(size: 12).foregroundColor(Palette.text)
+                        .accessibilityIdentifier("inspector.input.\(name).source")
+                } else {
+                    Text(verbatim: "not wired").font(size: 12).foregroundColor(Palette.bad)
+                        .accessibilityIdentifier("inspector.input.\(name).source")
+                }
+            case .fixed?:
+                TextField("Value", text: Binding(
+                    get: { if case .fixed(let v)? = draft.flow.node(id)?.inputs[name] { v } else { "" } },
+                    set: { value in draft.editNode(id, "input.\(name)") { $0.inputs[name] = .fixed(value) } }))
+                    .accessibilityIdentifier("inspector.input.\(name).value")
+            case .exposed?:
+                TextField("no default (required)", text: Binding(
+                    get: { if case .exposed(let d)? = draft.flow.node(id)?.inputs[name] { d ?? "" } else { "" } },
+                    set: { value in
+                        draft.editNode(id, "input.\(name)") { $0.inputs[name] = .exposed(default: value.isEmpty ? nil : value) }
+                    }))
+                    .accessibilityIdentifier("inspector.input.\(name).default")
+            }
+        }
+    }
+}
+
+/// Mode and path of the Repo node.
+struct RepoFields: Component {
+    let draft: FlowDraft
+    let id: NodeID
+    let repos: [URL]
+
+    enum Choice: Hashable { case thisRepo, fixed, exposed }
+
+    static func mode(_ draft: FlowDraft, _ id: NodeID) -> RepoMode {
+        if case .repo(let c)? = draft.flow.node(id)?.kind { return c.mode }
+        return .exposed(default: nil)
+    }
+
+    static func path(_ mode: RepoMode) -> String? {
+        switch mode {
+        case .thisRepo: nil
+        case .fixed(let p): p
+        case .exposed(let d): d
+        }
+    }
+
+    var content: some ElementGroup {
+        let draft = draft, id = id, repos = repos
+        let mode = Self.mode(draft, id)
+        Text(verbatim: "Mode").font(size: 11).foregroundColor(Palette.muted)
+        Picker("", selection: Binding(
+            get: {
+                switch Self.mode(draft, id) {
+                case .thisRepo: Choice.thisRepo
+                case .fixed: Choice.fixed
+                case .exposed: Choice.exposed
+                }
+            },
+            set: { choice in
+                let carried = Self.path(Self.mode(draft, id))
+                let next: RepoMode = switch choice {
+                case .thisRepo: .thisRepo
+                case .fixed: .fixed(path: carried ?? repos.first?.path ?? "")
+                case .exposed: .exposed(default: carried)
+                }
+                draft.editNode(id, "repoMode", coalescing: false) { $0.kind = .repo(RepoConfig(mode: next)) }
+            })) {
+            Text(verbatim: "This repo").tag(Choice.thisRepo)
+            Text(verbatim: "Fixed").tag(Choice.fixed)
+            Text(verbatim: "Exposed").tag(Choice.exposed)
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("inspector.repo.mode")
+        if mode != .thisRepo {
+            Text(verbatim: { if case .fixed = mode { "Path" } else { "Default path" } }())
+                .font(size: 11).foregroundColor(Palette.muted)
+            if !repos.isEmpty {
+                Picker("", selection: Binding(
+                    get: { Self.path(Self.mode(draft, id)) ?? "" },
+                    set: { value in Self.setPath(draft, id, value, coalescing: false) })) {
+                    ForEach(repos, id: \.path) { url in Text(verbatim: url.lastPathComponent).tag(url.path) }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("inspector.repo.path")
+            }
+            TextField("/path/to/repo", text: Binding(
+                get: { Self.path(Self.mode(draft, id)) ?? "" },
+                set: { value in Self.setPath(draft, id, value, coalescing: true) }))
+                .font(family: "Menlo", size: 12)
+                .accessibilityIdentifier("inspector.repo.pathField")
+        } else {
+            Text(verbatim: "The repo this flow file lives in.").font(size: 12).foregroundColor(Palette.muted)
+        }
+    }
+
+    static func setPath(_ draft: FlowDraft, _ id: NodeID, _ value: String, coalescing: Bool) {
+        draft.editNode(id, "repoPath", coalescing: coalescing) { node in
+            guard case .repo(var c) = node.kind else { return }
+            switch c.mode {
+            case .thisRepo: return
+            case .fixed: c.mode = .fixed(path: value)
+            case .exposed: c.mode = .exposed(default: value.isEmpty ? nil : value)
+            }
+            node.kind = .repo(c)
+        }
     }
 }
 
@@ -153,7 +348,36 @@ struct FlowInputFields: Component {
         }
         .pickerStyle(.menu)
         .accessibilityIdentifier("inspector.inputSource")
+        Text(verbatim: "Value").font(size: 11).foregroundColor(Palette.muted)
+        Picker("", selection: Binding(
+            get: { if case .fixed? = Self.config(draft, id)?.binding { Mode.fixed } else { Mode.exposed } },
+            set: { mode in
+                draft.editNode(id, "inputBinding", coalescing: false) {
+                    Self.update(&$0) { $0.binding = mode == .fixed ? .fixed("") : .exposed(default: nil) }
+                }
+            })) {
+            Text("Fixed").accessibilityIdentifier("inspector.flowInput.mode.fixed").tag(Mode.fixed)
+            Text("Exposed").accessibilityIdentifier("inspector.flowInput.mode.exposed").tag(Mode.exposed)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("inspector.flowInput.mode")
+        switch Self.config(draft, id)?.binding {
+        case .fixed(let v)?:
+            TextField("Value", text: Binding(
+                get: { if case .fixed(let v)? = Self.config(draft, id)?.binding { v } else { "" } },
+                set: { value in draft.editNode(id, "inputValue") { Self.update(&$0) { $0.binding = .fixed(value) } } }))
+                .accessibilityIdentifier("inspector.flowInput.value")
+        default:
+            TextField("no default (required)", text: Binding(
+                get: { if case .exposed(let d)? = Self.config(draft, id)?.binding { d ?? "" } else { "" } },
+                set: { value in
+                    draft.editNode(id, "inputValue") { Self.update(&$0) { $0.binding = .exposed(default: value.isEmpty ? nil : value) } }
+                }))
+                .accessibilityIdentifier("inspector.flowInput.value")
+        }
     }
+
+    enum Mode: Hashable { case fixed, exposed }
 
     static func config(_ draft: FlowDraft, _ id: NodeID) -> FlowInputConfig? {
         if case .flowInput(let c) = draft.flow.node(id)?.kind { return c }

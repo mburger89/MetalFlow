@@ -29,8 +29,8 @@ struct StudioBody: Component {
         VStack(spacing: 0) {
             StudioToolbar(model: model, draft: draft)
             Divider()
-            if case .failure(let error) = draft.validation {
-                Text(verbatim: error.errorDescription ?? "\(error)").font(size: 12).foregroundColor(Palette.bad)
+            if let problem = Self.problem(draft) {
+                Text(verbatim: problem).font(size: 12).foregroundColor(Palette.bad)
                     .accessibilityIdentifier("studio.validation")
                     .lineLimit(2)
                     .padding(insets(top: 6, right: 14, bottom: 6, left: 14))
@@ -56,12 +56,21 @@ struct StudioBody: Component {
                     }
                 }
                 .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-                InspectorView(draft: draft)
+                InspectorView(draft: draft, repos: model.repos)
                     .frame(minWidth: 240, idealWidth: 280, maxWidth: 420, maxHeight: .infinity)
             }
             .splitViewAutosaveName("studio.panes")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+extension StudioBody {
+    /// Why the flow cannot run: it does not validate, or it validates but cannot be launched from where it is.
+    static func problem(_ draft: FlowDraft) -> String? {
+        if case .failure(let error) = draft.validation { return error.errorDescription ?? "\(error)" }
+        do { _ = try draft.flow.launchFields(location: draft.location) } catch { return draft.flow.message(for: error) }
+        return nil
     }
 }
 

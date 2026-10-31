@@ -48,6 +48,19 @@ extension Node {
     }
 }
 
+extension Node {
+    /// Whether the node has a value the user fills in at launch.
+    var hasExposedInput: Bool {
+        if inputs.values.contains(where: { if case .exposed = $0 { true } else { false } }) { return true }
+        switch kind {
+        case .flowInput(let c): if case .exposed = c.binding { return true }
+        case .repo(let c): if case .exposed = c.mode { return true }
+        default: break
+        }
+        return false
+    }
+}
+
 extension NodeOverlay {
     /// The nodes whose state is per lane: those of the run's own flow, or, if that flow does not validate,
     /// those with lane-keyed states in the run.
@@ -111,6 +124,11 @@ struct NodeCardView: Component, @MainActor Equatable {
                 .lineLimit(1)
             Text(verbatim: node.summary).font(size: 12 * z).foregroundColor(Palette.body).lineLimit(2)
             Spacer()
+            if node.hasExposedInput {
+                Text(verbatim: "\u{21E2} launch").font(size: 10 * z).foregroundColor(Palette.accent)
+                    .accessibilityIdentifier("node.\(node.id.rawValue).exposed")
+                    .lineLimit(1)
+            }
             if let overlay {
                 Text(verbatim: overlay.text).font(size: 12 * z).foregroundColor(overlay.color)
                     .accessibilityIdentifier("node.\(node.id.rawValue).status")

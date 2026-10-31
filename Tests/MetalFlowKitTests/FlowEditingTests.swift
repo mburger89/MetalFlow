@@ -9,10 +9,11 @@ import Testing
 @Suite struct FlowEditingTests {
     let repo = URL(fileURLWithPath: "/repo")
 
-    func fixture(runs: [Run] = [], repos: [URL]? = nil) async throws -> (AppModel, FakeEngineClient, TestWindow) {
+    /// `tall` gives the window room for the whole inspector, so the Inputs rows below the editors are on screen.
+    func fixture(runs: [Run] = [], repos: [URL]? = nil, tall: Bool = false) async throws -> (AppModel, FakeEngineClient, TestWindow) {
         let client = FakeEngineClient(restored: runs, repos: repos ?? [repo])
         let model = AppModel(client: client, notifier: NoopNotifier())
-        let window = try appWindow(model: model)
+        let window = try appWindow(model: model, size: tall ? Size(width: Pixels(1440), height: Pixels(2000)) : metalFlowWindowSize)
         try await window.runUntilIdle()
         await model.waitUntilReady()
         model.screen = .studio
@@ -809,5 +810,163 @@ import Testing
         #expect(model.draft?.location == .builtin)
         #expect(model.screen == .studio)
         #expect(!model.isOpenFlowVisible)
+    }
+
+    // MARK: Input bindings and the Repo node
+
+    /// Gives the plan prompt a third placeholder, `{topic}`, that nothing wires.
+    func planWithTopic(_ draft: FlowDraft) {
+        draft.edit("test.topic") { flow in
+            guard let i = flow.nodes.firstIndex(where: { $0.id == "plan" }), case .prompt(var c) = flow.nodes[i].kind else { return }
+            c.prompt += "\n{topic}"
+            flow.nodes[i].kind = .prompt(c)
+        }
+    }
+
+    func planWires(_ draft: FlowDraft, _ input: String) -> [Wire] {
+        draft.flow.wires.filter { $0.to == "plan" && $0.input == input }
+    }
+
+    @Test func inspectorListsInputs() async throws {
+        let (model, _, window) = try await fixture(tall: true)
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        try await press("node.plan", in: window)
+        for name in ["issue", "repo", "topic"] {
+            _ = try window.element(identifier: "inspector.input.\(name)")
+            _ = try window.element(identifier: "inspector.input.\(name).mode.wire")
+            _ = try window.element(identifier: "inspector.input.\(name).mode.value")
+            _ = try window.element(identifier: "inspector.input.\(name).mode.exposed")
+        }
+        #expect(try window.element(identifier: "inspector.input.issue.source").value == "Issue")
+        #expect(try window.element(identifier: "inspector.input.topic.source").value == "not wired")
+        // A pick node has no inputs section.
+        try await press("node.pick", in: window)
+        #expect((try? window.element(identifier: "inspector.input.recommendation")) == nil)
+    }
+
+    @Test func switchToValueRemovesWire() async throws {
+        let (model, _, window) = try await fixture(tall: true)
+        let draft = try #require(model.draft)
+        try await press("node.plan", in: window)
+        #expect(planWires(draft, "issue").count == 1)
+        try await press("inspector.input.issue.mode.value", in: window)
+        #expect(planWires(draft, "issue").isEmpty)
+        #expect(try node(draft, "plan").inputs["issue"] == .fixed(""))
+        try typeAtEnd(window, "inspector.input.issue.value", "abc")
+        try await window.runUntilIdle()
+        #expect(try node(draft, "plan").inputs["issue"] == .fixed("abc"))
+        try await press("inspector.input.issue.mode.wire", in: window)
+        #expect(try node(draft, "plan").inputs["issue"] == nil)
+    }
+
+    @Test func switchToExposedSetsBinding() async throws {
+        let (model, _, window) = try await fixture(tall: true)
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        try await press("node.plan", in: window)
+        try await press("inspector.input.topic.mode.exposed", in: window)
+        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: nil))
+        try typeAtEnd(window, "inspector.input.topic.default", "x")
+        try await window.runUntilIdle()
+        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: "x"))
+        // Exposed over a wire removes the wire.
+        try await press("inspector.input.issue.mode.exposed", in: window)
+        #expect(planWires(draft, "issue").isEmpty)
+        #expect(try node(draft, "plan").inputs["issue"] == .exposed(default: nil))
+    }
+
+    @Test func wireOntoBoundInputClearsBinding() async throws {
+        let (model, _, _) = try await fixture()
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        draft.edit("test.bind") { flow in
+            if let i = flow.nodes.firstIndex(where: { $0.id == "plan" }) { flow.nodes[i].inputs["topic"] = .fixed("x") }
+        }
+        let steps = draft.undoStack.count
+        draft.connect(from: "issue", to: "plan", input: "topic")
+        #expect(try node(draft, "plan").inputs["topic"] == nil)
+        #expect(planWires(draft, "topic").count == 1)
+        #expect(draft.undoStack.count == steps + 1)
+        draft.undo()
+        #expect(try node(draft, "plan").inputs["topic"] == .fixed("x"))
+        #expect(planWires(draft, "topic").isEmpty)
+    }
+
+    @Test func bindingSwitchIsOneUndoStep() async throws {
+        let (model, _, window) = try await fixture(tall: true)
+        let draft = try #require(model.draft)
+        try await press("node.plan", in: window)
+        let before = draft.flow
+        let steps = draft.undoStack.count
+        try await press("inspector.input.issue.mode.value", in: window)
+        #expect(draft.undoStack.count == steps + 1)
+        draft.undo()
+        #expect(draft.flow == before)
+    }
+
+    @Test func repoModePickerSetsMode() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.repo", in: window)
+        try window.click(window.element(identifier: "inspector.repo.mode"))
+        let menu = try #require(window.presentedMenu)
+        #expect(menu.items.map(\.title) == ["This repo", "Fixed", "Exposed"])
+        #expect(menu.items.first { $0.isOn }?.title == "Exposed")
+        try window.chooseMenuItem("Fixed")
+        try await window.runUntilIdle()
+        guard case .repo(let fixed) = try node(draft, "repo").kind else { return }
+        #expect(fixed.mode == .fixed(path: "/repo"))
+        try window.click(window.element(identifier: "inspector.repo.path"))
+        #expect(window.presentedMenu?.items.map(\.title) == ["repo"])
+        try window.chooseMenuItem("repo")
+        try await window.runUntilIdle()
+        try typeAtEnd(window, "inspector.repo.pathField", "2")
+        try await window.runUntilIdle()
+        guard case .repo(let typed) = try node(draft, "repo").kind else { return }
+        #expect(typed.mode == .fixed(path: "/repo2"))
+        try window.click(window.element(identifier: "inspector.repo.mode"))
+        try window.chooseMenuItem("This repo")
+        try await window.runUntilIdle()
+        guard case .repo(let here) = try node(draft, "repo").kind else { return }
+        #expect(here.mode == .thisRepo)
+        #expect((try? window.element(identifier: "inspector.repo.path")) == nil)
+    }
+
+    @Test func flowInputValueRow() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.issue", in: window)
+        _ = try window.element(identifier: "inspector.flowInput.mode")
+        try await press("inspector.flowInput.mode.fixed", in: window)
+        guard case .flowInput(let c) = try node(draft, "issue").kind else { return }
+        #expect(c.binding == .fixed(""))
+        try typeAtEnd(window, "inspector.flowInput.value", "7")
+        try await window.runUntilIdle()
+        guard case .flowInput(let d) = try node(draft, "issue").kind else { return }
+        #expect(d.binding == .fixed("7"))
+    }
+
+    @Test func exposedTagShowsOnCard() async throws {
+        let (model, _, window) = try await fixture(tall: true)
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "node.plan.exposed")) == nil)
+        try await press("node.plan", in: window)
+        try await press("inspector.input.topic.mode.exposed", in: window)
+        #expect(try window.element(identifier: "node.plan.exposed").value == "\u{21E2} launch")
+        try await press("inspector.input.topic.mode.wire", in: window)
+        #expect((try? window.element(identifier: "node.plan.exposed")) == nil)
+    }
+
+    @Test func launchErrorShowsInBanner() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        #expect((try? window.element(identifier: "studio.validation")) == nil)
+        draft.addNode(.repo)
+        try await window.runUntilIdle()
+        #expect(draft.plan != nil)
+        #expect(try window.element(identifier: "studio.validation").value == "A flow can have only one Repo node")
     }
 }

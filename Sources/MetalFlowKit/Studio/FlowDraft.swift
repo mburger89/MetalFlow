@@ -191,7 +191,11 @@ public final class FlowDraft {
         }
         let wire = Wire(from: from, to: to, input: name)
         guard !flow.wires.contains(wire) else { return }
-        apply("connect \(from.rawValue) \(to.rawValue)", coalescing: false) { $0.wires.append(wire) }
+        apply("connect \(from.rawValue) \(to.rawValue)", coalescing: false) { flow in
+            flow.wires.append(wire)
+            // A wire takes over the input: a binding on the same name would make it bound twice.
+            if let i = flow.nodes.firstIndex(where: { $0.id == to }) { flow.nodes[i].inputs[name] = nil }
+        }
     }
 
     // MARK: Moving
