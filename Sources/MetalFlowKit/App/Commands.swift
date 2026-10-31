@@ -80,11 +80,10 @@ public func installCommands(on app: App, model: AppModel) {
 @MainActor
 public func installQuitHandling(on app: App, window: Window, model: AppModel) {
     model.replyToTerminate = { [weak app, weak window] answer in
-        if let window, window.isCloseRequestPending {
-            window.replyToCloseRequest(answer)
-        } else {
-            app?.replyToTerminateRequest(answer)
-        }
+        // A close and a ⌘Q can both be pending behind the one alert; each reply does nothing when its request
+        // is not pending, so answering both answers each exactly once.
+        window?.replyToCloseRequest(answer)
+        app?.replyToTerminateRequest(answer)
     }
     app.onTerminateRequest = { model.requestTerminate() }
     window.onCloseRequest = { model.requestTerminate() }

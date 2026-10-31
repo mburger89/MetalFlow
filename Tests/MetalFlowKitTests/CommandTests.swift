@@ -425,4 +425,43 @@ import Testing
         try window.respondToAlert(button: "Discard")
         await waitUntil("the window to close") { window.platformWindow.isClosed }
     }
+
+    // MARK: A close and a quit pending together
+
+    @Test func closeThenQuitThenCancelAnswersBoth() async throws {
+        let (model, _, window) = try await fixture(runs: [makeRun("a", status: .running)])
+        let platform = window.testApp.platform
+        #expect(window.requestClose() == false)
+        try await window.runUntilIdle()
+        _ = platform.simulateTerminateRequest()
+        try window.respondToAlert(button: "Cancel")
+        try await window.runUntilIdle()
+        #expect(!window.window.isCloseRequestPending, "the close is answered")
+        #expect(platform.terminateReplies == [false], "the quit is answered too")
+        #expect(!window.platformWindow.isClosed)
+        #expect(!model.quitPending)
+    }
+
+    @Test func closeThenQuitThenQuitAnswersBoth() async throws {
+        let (_, client, window) = try await fixture(runs: [makeRun("a", status: .running)])
+        let platform = window.testApp.platform
+        #expect(window.requestClose() == false)
+        try await window.runUntilIdle()
+        _ = platform.simulateTerminateRequest()
+        try window.respondToAlert(button: "Quit")
+        await waitUntil("the quit reply") { platform.terminateReplies.count == 1 && window.platformWindow.isClosed }
+        #expect(platform.terminateReplies == [true])
+        #expect(!window.window.isCloseRequestPending)
+        #expect(await client.calls.filter { $0 == "suspend" }.count == 1)
+    }
+
+    @Test func plainQuitGetsExactlyOneReply() async throws {
+        let (_, _, window) = try await fixture(runs: [makeRun("a", status: .running)])
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Cancel")
+        try await window.runUntilIdle()
+        #expect(platform.terminateReplies == [false])
+    }
 }
