@@ -477,7 +477,7 @@ import Testing
         model.open(flow: b)
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
-        try await window.runUntilIdle()
+        await waitUntil("the save and the switch") { model.draft?.url == b }
         #expect(client.files.saved.map(\.url) == [a])
         #expect(client.files.saved.first?.flow == edited)
         #expect(model.draft?.url == b)
@@ -619,7 +619,7 @@ import Testing
         model.open(flow: b)
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
-        try await window.runUntilIdle()
+        await waitUntil("the save failure notice") { model.notice != nil }
         #expect(model.draft === draft && draft.url == a && draft.isDirty)
         #expect(model.notice?.text == "engine said no")
         #expect(model.pendingOpen == nil)

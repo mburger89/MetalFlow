@@ -154,7 +154,8 @@ import Testing
         let on486 = try menuItem(window, "File", "Save")
         #expect(on486.isEnabled)
         try window.testApp.performMenuBarItem("File", "Save")
-        try await window.runUntilIdle()
+        // The new file name is chosen off the main actor.
+        await waitUntil("the save") { !client.files.saved.isEmpty }
         #expect(client.files.saved.count == 1)
     }
 
@@ -389,7 +390,6 @@ import Testing
         #expect(platform.simulateTerminateRequest() == .later)
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
-        try await window.runUntilIdle()
         await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
         #expect(client.files.saved.count == 1)
         #expect(platform.terminateReplies == [true])
@@ -428,13 +428,11 @@ import Testing
         try await window.runUntilIdle()
         #expect(window.presentedAlert?.buttons.map(\.title) == ["Save", "Discard", "Cancel"], "the draft comes first")
         try window.respondToAlert(button: "Discard")
-        try await window.runUntilIdle()
         await waitUntil("the running-runs alert") { model.quitPending }
         try await window.runUntilIdle()
         #expect(platform.terminateReplies.isEmpty, "not answered yet")
         #expect(window.presentedAlert?.buttons.map(\.title) == ["Quit", "Cancel"])
         try window.respondToAlert(button: "Quit")
-        try await window.runUntilIdle()
         await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
         #expect(platform.terminateReplies == [true])
         #expect(await client.calls.filter { $0 == "suspend" }.count == 1)
@@ -443,11 +441,11 @@ import Testing
     @Test func closingTheWindowWithRunningRunAsksAndSuspends() async throws {
         let (model, client, window) = try await fixture(runs: [makeRun("a", status: .running)])
         #expect(window.requestClose() == false, "held while the alert is up")
+        await waitUntil("the running-runs alert") { model.quitPending }
         try await window.runUntilIdle()
         #expect(model.quitPending)
         #expect(window.presentedAlert?.buttons.map(\.title) == ["Quit", "Cancel"])
         try window.respondToAlert(button: "Quit")
-        try await window.runUntilIdle()
         await waitUntil("the window to close") { window.platformWindow.isClosed }
         #expect(await client.calls.filter { $0 == "suspend" }.count == 1)
         #expect(window.testApp.platform.terminateReplies.isEmpty, "answered the close, not a terminate")

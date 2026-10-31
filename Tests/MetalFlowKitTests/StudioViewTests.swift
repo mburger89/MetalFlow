@@ -366,6 +366,7 @@ import Testing
         #expect(model.draft?.isDirty == false)
         // Saving again writes the same file.
         try await press("studio.save", in: window)
+        await waitUntil("the second save") { client.files.saved.count == 2 }
         #expect(client.files.saved.map(\.url) == [expected, expected])
     }
 
