@@ -288,7 +288,7 @@ import Testing
         let (model, _, window) = try await fixture(runs: [run], repos: [repo, other])
         try await showStudio(model, window)
         model.studioRun = run.id
-        await model.selectRepo(other)
+        model.selectRepo(other)
         #expect(model.studioRun == nil, "retargeting the draft to another repo")
         model.studioRun = run.id
         model.draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, url: nil, repo: other)

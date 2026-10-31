@@ -26,6 +26,10 @@ actor FakeEngineClient: EngineClient {
         self.flowFiles = flowFiles
         self.gitRepoPaths = gitRepoPaths
         (updates, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .unbounded)
+        // The built-in plus each flow file, so tests that only name files still see them in the catalog.
+        catalog.entries = [FlowEntry(id: "builtin:\(BuiltinFlows.fixGitHubIssue.name)", name: BuiltinFlows.fixGitHubIssue.name,
+                                     location: .builtin, file: nil)]
+            + flowFiles.map { FlowEntry(id: $0.path, name: $0.deletingPathExtension().lastPathComponent, location: .of(file: $0), file: $0) }
     }
 
     /// Pushes a snapshot onto `updates`.
@@ -113,9 +117,7 @@ actor FakeEngineClient: EngineClient {
         try record("branch(\(lane), \(name))")
     }
     nonisolated func knownRepos() -> [URL] { repos }
-    /// Holds `flows(in:)` (called off the main actor) until released.
-    nonisolated let scanGate = ScanGate()
-    nonisolated func flows(in repo: URL) -> [URL] { scanGate.pass(); return flowFiles }
+    nonisolated func flows(in repo: URL) -> [URL] { flowFiles }
     /// What `flowCatalog()` returns, and `libraryDirectory`.
     nonisolated let catalog = CatalogBox()
     nonisolated func flowCatalog() -> [FlowEntry] { catalog.entries }
@@ -125,7 +127,7 @@ actor FakeEngineClient: EngineClient {
     nonisolated let files = FileLog()
     nonisolated func loadFlow(_ url: URL) throws -> Flow {
         if files.failLoad { throw FakeFailure() }
-        var flow = BuiltinFlows.fixGitHubIssue
+        var flow = files.flows[url] ?? BuiltinFlows.fixGitHubIssue
         if let name = files.names[url] { flow.name = name }
         return flow
     }
@@ -172,34 +174,6 @@ func makeRun(_ title: String = "run", status: RunStatus = .running, revision: In
         createdAt: createdAt, status: status, nodes: nodes, revision: revision)
 }
 
-/// Lets a test hold the flow scan and learn that it has been entered, with no sleeping.
-final class ScanGate: @unchecked Sendable {
-    private let condition = NSCondition()
-    private var held = false
-    private var entered = false
-    private var waiter: CheckedContinuation<Void, Never>?
-
-    /// Makes the next scans block.
-    func hold() { condition.lock(); held = true; entered = false; condition.unlock() }
-    /// Unblocks scans.
-    func release() { condition.lock(); held = false; condition.broadcast(); condition.unlock() }
-    /// Returns once a scan is blocked in the gate.
-    func waitForEntry() async {
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            condition.lock()
-            if entered { condition.unlock(); c.resume() } else { waiter = c; condition.unlock() }
-        }
-    }
-    func pass() {
-        condition.lock()
-        entered = true
-        waiter?.resume()
-        waiter = nil
-        while held { condition.wait() }
-        condition.unlock()
-    }
-}
-
 /// What the fake client was asked to save, readable from any context.
 final class FileLog: @unchecked Sendable {
     private let lock = NSLock()
@@ -217,6 +191,12 @@ final class FileLog: @unchecked Sendable {
     var names: [URL: String] {
         get { lock.withLock { _names } }
         set { lock.withLock { _names = newValue } }
+    }
+    private var _flows: [URL: Flow] = [:]
+    /// The flow `loadFlow` returns for a file (the built-in for the others).
+    var flows: [URL: Flow] {
+        get { lock.withLock { _flows } }
+        set { lock.withLock { _flows = newValue } }
     }
     private var _failSave = false
     /// When true, `saveFlow` throws.

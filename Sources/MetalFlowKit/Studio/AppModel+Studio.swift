@@ -28,17 +28,17 @@ extension AppModel {
 
     /// Opens the Studio with the built-in flow when it has nothing open and a repo is selected.
     func ensureDraft() {
-        guard screen == .studio, draft == nil, let repo = launchForm.repo else { return }
+        guard screen == .studio, draft == nil, let repo = selectedRepo else { return }
         draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, url: nil, repo: repo)
     }
 
     /// The known repo that contains `url`, falling back to the selected repo, then to the folder above `.flows`.
     func repo(containing url: URL) -> URL {
         let path = url.standardizedFileURL.path
-        let known = (repos + [launchForm.repo].compactMap { $0 })
+        let known = (repos + [selectedRepo].compactMap { $0 })
             .filter { path.hasPrefix($0.standardizedFileURL.path + "/") }
             .max { $0.path.count < $1.path.count }
-        return known ?? launchForm.repo ?? url.deletingLastPathComponent().deletingLastPathComponent()
+        return known ?? selectedRepo ?? url.deletingLastPathComponent().deletingLastPathComponent()
     }
 
     /// Loads a flow file into the Studio. A load error becomes a notice and leaves the screen alone.
@@ -59,7 +59,7 @@ extension AppModel {
 
     /// Keeps a pristine, untitled draft pointed at the selected repo.
     func retargetPristineDraft() {
-        if let draft, draft.url == nil, !draft.isDirty, let repo = launchForm.repo { draft.repo = repo }
+        if let draft, draft.url == nil, !draft.isDirty, let repo = selectedRepo { draft.repo = repo }
         ensureDraft()
     }
 
@@ -154,7 +154,7 @@ extension AppModel {
         }
         draft.didSave(to: target)
         if !workingOn.contains(.flow(target)) { workingOn.append(.flow(target)) }
-        if launchForm.repo == draft.repo { await selectRepo(draft.repo) }
+        await refreshCatalog()
         return true
     }
 
@@ -164,7 +164,8 @@ extension AppModel {
         guard let draft, draftIsValid, !isLaunching, !Self.trimmed(studioIssue).isEmpty else { return nil }
         let typed = studioIssue
         let id = await launchGuarded(
-            flow: draft.flow, location: draft.url.map { FlowLocation.of(file: $0) } ?? .unsaved, repo: draft.repo, typed: typed)
+            flow: draft.flow, location: draft.url.map { FlowLocation.of(file: $0) } ?? .unsaved,
+            values: ["issue": typed, "repo": draft.repo.path])
         if id != nil, studioIssue == typed { studioIssue = "" }
         return id
     }
@@ -173,7 +174,7 @@ extension AppModel {
 extension AppModel {
     /// File > New Flow: an empty "Untitled flow" in the selected repo. With unsaved edits it asks first.
     public func newFlow() async {
-        guard launchForm.repo != nil else {
+        guard selectedRepo != nil else {
             notice = Notice("Add a repo on the dashboard first.")
             return
         }
@@ -186,10 +187,10 @@ extension AppModel {
     }
 
     func newFlowWithoutAsking() async {
-        guard let repo = launchForm.repo else { return }
+        guard let repo = selectedRepo else { return }
         let name = await untitledName(in: repo)
         // The scan took a moment: drop the result if the repo changed meanwhile.
-        guard launchForm.repo == repo else { return }
+        guard selectedRepo == repo else { return }
         draft = FlowDraft(flow: Flow(name: name, nodes: [], wires: []), url: nil, repo: repo)
         screen = .studio
     }

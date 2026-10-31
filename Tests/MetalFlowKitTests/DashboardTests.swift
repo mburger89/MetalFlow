@@ -25,28 +25,156 @@ import Testing
         try await window.runUntilIdle()
     }
 
-    @Test func launchBarLaunchesWithSelections() async throws {
-        let (model, client, window) = try await fixture()
-        #expect(model.launchForm.repo == repo)
-        #expect(model.launchForm.flow == flowFile)
-        _ = try window.element(identifier: "launch.flow")
-        _ = try window.element(identifier: "launch.repo")
-        #expect(!model.canLaunch, "Launch waits for an issue")
-        #expect(try !window.element(identifier: "launch.go").isEnabled, "the rendered button is disabled")
+    let builtinID = "builtin:Fix GitHub issue"
 
-        try window.click(window.element(identifier: "launch.issue"))
-        window.typeText("42")
+    /// A fixture whose catalog and flow files are scripted: built-in first, then `extra` entries (loaded from `flows`).
+    func catalogFixture(repos: [URL]? = nil, extra: [(FlowEntry, Flow)] = [], gitRepos: Set<String> = []) async throws
+        -> (AppModel, FakeEngineClient, TestWindow) {
+        let client = FakeEngineClient(repos: repos ?? [repo], gitRepoPaths: gitRepos)
+        client.catalog.entries += extra.map(\.0)
+        for (entry, flow) in extra { if let file = entry.file { client.files.flows[file] = flow } }
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model)
         try await window.runUntilIdle()
-        #expect(model.launchForm.issue == "42")
-        #expect(try window.element(identifier: "launch.issue").value == "42")
-        #expect(try window.element(identifier: "launch.go").isEnabled)
-        try await press("launch.go", in: window)
+        await model.waitUntilReady()
+        try await window.runUntilIdle()
+        return (model, client, window)
+    }
 
-        #expect(await client.calls.contains("launch(Fix GitHub issue, /repo, 42)"))
+    func repoNodeFlow(_ name: String, mode: RepoMode) -> Flow {
+        var flow = BuiltinFlows.fixGitHubIssue
+        flow.name = name
+        for i in flow.nodes.indices {
+            if case .repo = flow.nodes[i].kind { flow.nodes[i].kind = .repo(RepoConfig(mode: mode)) }
+        }
+        return flow
+    }
+
+    func entry(_ file: String, _ name: String) -> FlowEntry {
+        let url = URL(fileURLWithPath: file)
+        return FlowEntry(id: url.path, name: name, location: .of(file: url), file: url)
+    }
+
+    func type(_ text: String, into id: String, in window: TestWindow) async throws {
+        try window.click(window.element(identifier: id))
+        window.typeText(text)
+        try await window.runUntilIdle()
+    }
+
+    @Test func launchBarListsCatalog() async throws {
+        let lib = entry("/lib/flows/Triage.flow", "Triage")
+        let inRepo = entry("/repo/.flows/Ship.flow", "Ship")
+        let (model, _, window) = try await catalogFixture(extra: [
+            (lib, repoNodeFlow("Triage", mode: .exposed(default: nil))),
+            (inRepo, repoNodeFlow("Ship", mode: .thisRepo))])
+        try window.click(window.element(identifier: "launch.flow"))
+        let menu = try #require(window.presentedMenu)
+        #expect(menu.items.map(\.title) == ["Fix GitHub issue \u{2014} Built-in", "Triage \u{2014} Library", "Ship \u{2014} repo"])
+        try window.chooseMenuItem("Triage \u{2014} Library")
+        try await window.runUntilIdle()
+        #expect(model.launchForm.flow == lib.id)
+        try window.click(window.element(identifier: "launch.flow"))
+        #expect(window.presentedMenu?.items.first { $0.isOn }?.title == "Triage \u{2014} Library")
+        try window.dismissMenu()
+    }
+
+    @Test func builtinShowsIssueAndRepoFields() async throws {
+        let (model, _, window) = try await catalogFixture()
+        #expect(model.launchForm.flow == builtinID)
+        #expect(model.launchFields.map(\.name) == ["issue", "repo"])
+        _ = try window.element(identifier: "launch.field.issue")
+        _ = try window.element(identifier: "launch.field.repo")
+        #expect((try? window.element(identifier: "launch.repo.resolved")) == nil)
+        #expect((try? window.element(identifier: "launch.error")) == nil)
+    }
+
+    @Test func launchDisabledUntilRequiredFilled() async throws {
+        let (model, _, window) = try await catalogFixture()
+        #expect(!model.canLaunch)
+        #expect(try !window.element(identifier: "launch.go").isEnabled)
+        try await type("   ", into: "launch.field.issue", in: window)
+        #expect(!model.canLaunch, "whitespace does not count")
+        try await type("42", into: "launch.field.issue", in: window)
+        #expect(model.launchForm.values["issue"]?.contains("42") == true)
+        #expect(model.canLaunch)
+        #expect(try window.element(identifier: "launch.go").isEnabled)
+    }
+
+    @Test func launchFormPrefillsRepoDefault() async throws {
+        let other = URL(fileURLWithPath: "/other")
+        let known = entry("/lib/flows/Known.flow", "Known")
+        let unknown = entry("/lib/flows/Unknown.flow", "Unknown")
+        let (model, _, window) = try await catalogFixture(repos: [repo, other], extra: [
+            (known, repoNodeFlow("Known", mode: .exposed(default: "/other"))),
+            (unknown, repoNodeFlow("Unknown", mode: .exposed(default: "/nowhere")))])
+        model.selectFlow(known.id)
+        try await window.runUntilIdle()
+        #expect(model.launchForm.values["repo"] == "/other")
+        try window.click(window.element(identifier: "launch.field.repo"))
+        #expect(window.presentedMenu?.items.map(\.title) == ["repo", "other"])
+        #expect(window.presentedMenu?.items.first { $0.isOn }?.title == "other")
+        try window.dismissMenu()
+        model.selectFlow(unknown.id)
+        try await window.runUntilIdle()
+        #expect(model.launchForm.values["repo"] == nil, "an unknown default is left to apply at launch")
+    }
+
+    @Test func thisRepoFlowShowsResolvedRepo() async throws {
+        let inRepo = entry("/repo/.flows/Ship.flow", "Ship")
+        let fixed = entry("/lib/flows/Fixed.flow", "Fixed")
+        let (model, _, window) = try await catalogFixture(extra: [
+            (inRepo, repoNodeFlow("Ship", mode: .thisRepo)),
+            (fixed, repoNodeFlow("Fixed", mode: .fixed(path: "/somewhere/proj")))])
+        model.selectFlow(inRepo.id)
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "launch.repo.resolved").value == "repo")
+        #expect((try? window.element(identifier: "launch.field.repo")) == nil)
+        model.selectFlow(fixed.id)
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "launch.repo.resolved").value == "proj")
+    }
+
+    @Test func launchPassesValuesAndLocation() async throws {
+        let (model, client, window) = try await catalogFixture()
+        try await type("42", into: "launch.field.issue", in: window)
+        try await press("launch.go", in: window)
         let launched = await client.launches
-        #expect(launched.first?.location == FlowLocation.of(file: flowFile))
+        #expect(launched.count == 1)
+        #expect(launched.first?.location == .builtin)
         #expect(launched.first?.values == ["issue": "42", "repo": "/repo"])
-        #expect(model.launchForm.issue == "", "launching clears the issue field")
+        #expect(model.launchForm.values["issue"] == "", "launching clears the typed field")
+    }
+
+    @Test func launchSendsAFileFlowsLocation() async throws {
+        let inRepo = entry("/repo/.flows/Ship.flow", "Ship")
+        let (model, client, window) = try await catalogFixture(extra: [(inRepo, repoNodeFlow("Ship", mode: .thisRepo))])
+        model.selectFlow(inRepo.id)
+        try await window.runUntilIdle()
+        #expect(model.launchFields.map(\.name) == ["issue"])
+        try await type("7", into: "launch.field.issue", in: window)
+        try await press("launch.go", in: window)
+        let launched = await client.launches
+        #expect(launched.first?.location == .of(file: inRepo.file!))
+        #expect(launched.first?.values == ["issue": "7"])
+    }
+
+    @Test func invalidFlowShowsLaunchError() async throws {
+        let bad = entry("/lib/flows/Bad.flow", "Bad")
+        let (model, _, window) = try await catalogFixture(extra: [(bad, Flow(name: "Bad", nodes: [], wires: []))])
+        model.selectFlow(bad.id)
+        try await window.runUntilIdle()
+        #expect(model.launchFields.isEmpty)
+        let error = try #require(model.launchError)
+        #expect(try window.element(identifier: "launch.error").value == error)
+        #expect(!model.canLaunch)
+        #expect(try !window.element(identifier: "launch.go").isEnabled)
+    }
+
+    @Test func addingARepoSelectsItInTheRepoField() async throws {
+        let (model, _, _) = try await catalogFixture(gitRepos: ["/other"])
+        #expect(await model.addRepo(path: "/other"))
+        #expect(model.launchForm.values["repo"] == "/other")
+        #expect(model.repos.map(\.path) == ["/repo", "/other"])
     }
 
     @Test func addRepoValidatesThePath() async throws {
@@ -55,7 +183,7 @@ import Testing
         #expect(model.notice != nil)
         #expect(await model.addRepo(path: "/other"))
         #expect(model.repos.map(\.path) == ["/repo", "/other"])
-        #expect(model.launchForm.repo?.path == "/other")
+        #expect(model.selectedRepo?.path == "/other")
     }
 
     @Test func needsYouCardsAppearPerKind() async throws {
@@ -107,7 +235,7 @@ import Testing
 
     @Test func doubleSubmitLaunchesOnce() async throws {
         let (model, client, _) = try await fixture()
-        model.launchForm.issue = "42"
+        model.launchForm.values["issue"] = "42"
         async let a = model.launchFromForm()
         async let b = model.launchFromForm()
         _ = await (a, b)
@@ -118,20 +246,20 @@ import Testing
     @Test func textTypedDuringALaunchSurvives() async throws {
         let (model, client, _) = try await fixture()
         await client.holdLaunches()
-        model.launchForm.issue = "42"
+        model.launchForm.values["issue"] = "42"
         let task = Task { await model.launchFromForm() }
         await waitUntil("the launch to be in flight") { model.isLaunching }
         #expect(model.isLaunching)
         #expect(!model.canLaunch)
-        model.launchForm.issue = "43"
+        model.launchForm.values["issue"] = "43"
         await client.releaseLaunches()
         _ = await task.value
-        #expect(model.launchForm.issue == "43")
+        #expect(model.launchForm.values["issue"] == "43")
         #expect(!model.isLaunching)
 
-        model.launchForm.issue = "44"
+        model.launchForm.values["issue"] = "44"
         _ = await model.launchFromForm()
-        #expect(model.launchForm.issue == "", "an unchanged field is cleared")
+        #expect(model.launchForm.values["issue"] == "", "an unchanged field is cleared")
     }
 
     @Test func repoPathTextTypedDuringValidationSurvives() async throws {
@@ -531,28 +659,13 @@ import Testing
         #expect(try window.element(identifier: "finished.\(run.id.rawValue).age").value == "2h")
     }
 
-    @Test func changingRepoClearsTheFlowUntilTheScanReturns() async throws {
-        let (model, client, _) = try await fixture(gitRepos: ["/other"])
-        model.launchForm.issue = "42"
-        try #require(model.canLaunch)
-        client.scanGate.hold()
-        let task = Task { await model.selectRepo(URL(fileURLWithPath: "/other")) }
-        await client.scanGate.waitForEntry()
-        #expect(model.launchForm.flow == nil)
-        #expect(model.repoFlows.isEmpty)
-        #expect(!model.canLaunch)
-        client.scanGate.release()
-        await task.value
-        #expect(model.canLaunch)
-    }
-
     @Test func isLaunchingResetsAfterALaunchThrows() async throws {
         let (model, client, _) = try await fixture()
         await client.setFailure(FakeFailure())
-        model.launchForm.issue = "42"
+        model.launchForm.values["issue"] = "42"
         #expect(await model.launchFromForm() == nil)
         #expect(!model.isLaunching)
-        #expect(model.launchForm.issue == "42", "a failed launch keeps the text")
+        #expect(model.launchForm.values["issue"] == "42", "a failed launch keeps the text")
         #expect(model.notice != nil)
     }
 }

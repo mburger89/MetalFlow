@@ -1,59 +1,50 @@
 import Foundation
+import MetalFlowCore
 import MetalUI
 
-/// Flow, issue and repo pickers with the Launch button, plus an "Add repo..." path field.
+/// The flow picker, one control per launch field and the Launch button, plus an "Add repo..." path field.
 struct LaunchBar: Component {
     let model: AppModel
     @FocusState var issueFocused: Bool
 
     var content: some ElementGroup {
-        let form = model.launchForm
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(alignment: .bottom, spacing: Spacing.md) {
                 labelled("Flow") {
-                    if model.repoFlows.isEmpty {
-                        Text("No flows in this repo").foregroundColor(Palette.muted)
-                            .accessibilityIdentifier("launch.flow")
+                    if model.catalog.isEmpty {
+                        Text("No flows").foregroundColor(Palette.muted).accessibilityIdentifier("launch.flow")
                     } else {
-                        Picker("Flow", selection: Binding(
-                            get: { model.launchForm.flow ?? model.repoFlows[0] },
+                        Picker("", selection: Binding(
+                            get: { model.launchForm.flow ?? model.catalog[0].id },
                             set: { model.selectFlow($0) })) {
-                            ForEach(model.repoFlows, id: \.self) { url in
-                                Text(verbatim: url.deletingPathExtension().lastPathComponent).tag(url)
+                            ForEach(model.catalog, id: \.id) { entry in
+                                Text(verbatim: Self.title(of: entry)).tag(entry.id)
                             }
                         }
+                        .pickerStyle(.menu)
                         .accessibilityIdentifier("launch.flow")
                     }
                 }
                 .frame(maxWidth: .infinity)
-                labelled("Issue") {
-                    TextField("#68 or issue URL", text: Binding(
-                        get: { model.launchForm.issue }, set: { model.launchForm.issue = $0 }))
-                        .onSubmit { launch() }
-                        .focused($issueFocused)
-                        .accessibilityIdentifier("launch.issue")
+                ForEach(Array(model.launchFields.enumerated()), id: \.element.name) { index, field in
+                    labelled(field.name) { control(for: field, isFirstText: index == model.launchFields.firstIndex { $0.kind != .repo }) }
+                        .frame(maxWidth: .infinity)
+                        .frame(minWidth: Pixels(field.kind == .repo ? 140 : 200))
                 }
-                .frame(maxWidth: .infinity)
-                .frame(minWidth: Pixels(260))
-                labelled("Repo") {
-                    if model.repos.isEmpty {
-                        Text("No repos yet").foregroundColor(Palette.muted).accessibilityIdentifier("launch.repo")
-                    } else {
-                        Picker("Repo", selection: Binding(
-                            get: { model.launchForm.repo ?? model.repos[0] },
-                            set: { url in let model = model; Task { await model.selectRepo(url) } })) {
-                            ForEach(model.repos, id: \.self) { url in
-                                Text(verbatim: url.lastPathComponent).tag(url)
-                            }
-                        }
-                        .accessibilityIdentifier("launch.repo")
+                if let resolved = model.launchResolvedRepo {
+                    labelled("Repo") {
+                        Text(verbatim: resolved).foregroundColor(Palette.text)
+                            .accessibilityIdentifier("launch.repo.resolved")
                     }
                 }
-                .frame(maxWidth: .infinity)
                 Button("Launch run") { launch() }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("launch.go")
                     .disabled(!model.canLaunch)
+            }
+            if let error = model.launchError {
+                Text(verbatim: error).font(size: 12).foregroundColor(Palette.bad)
+                    .accessibilityIdentifier("launch.error")
             }
             HStack(spacing: Spacing.sm) {
                 TextField("Add repo... (path to a git repo)", text: Binding(
@@ -77,6 +68,48 @@ struct LaunchBar: Component {
         .background(Color(Hsla.rgb(0x171a1f)))
         .cornerRadius(14)
         .border(Color(Hsla.rgb(0x2f343c)), width: 1)
+    }
+
+    /// "name — Library", "name — <repo folder>" or "name — Built-in".
+    static func title(of entry: FlowEntry) -> String {
+        switch entry.location {
+        case .builtin: "\(entry.name) \u{2014} Built-in"
+        case .library: "\(entry.name) \u{2014} Library"
+        case .repo(let root, _): "\(entry.name) \u{2014} \(root.lastPathComponent)"
+        case .unsaved: entry.name
+        }
+    }
+
+    @ElementBuilder
+    private func control(for field: LaunchField, isFirstText: Bool) -> some ElementGroup {
+        if field.kind == .repo {
+            if model.repos.isEmpty {
+                Text("No repos yet").foregroundColor(Palette.muted).accessibilityIdentifier("launch.field.repo")
+            } else {
+                Picker("", selection: Binding(
+                    get: { model.launchForm.values["repo"] ?? "" },
+                    set: { model.launchForm.values["repo"] = $0 })) {
+                    ForEach(model.repos, id: \.path) { url in
+                        Text(verbatim: url.lastPathComponent).tag(url.path)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("launch.field.repo")
+            }
+        } else if isFirstText {
+            TextField(field.name, text: textBinding(field))
+                .onSubmit { launch() }
+                .focused($issueFocused)
+                .accessibilityIdentifier("launch.field.\(field.name)")
+        } else {
+            TextField(field.name, text: textBinding(field))
+                .onSubmit { launch() }
+                .accessibilityIdentifier("launch.field.\(field.name)")
+        }
+    }
+
+    private func textBinding(_ field: LaunchField) -> Binding<String> {
+        Binding(get: { model.launchForm.values[field.name] ?? "" }, set: { model.launchForm.values[field.name] = $0 })
     }
 
     @ElementBuilder

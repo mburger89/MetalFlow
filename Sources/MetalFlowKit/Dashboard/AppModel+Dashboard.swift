@@ -3,12 +3,10 @@ import MetalFlowCore
 
 /// What the launch bar has selected and typed.
 public struct LaunchForm: Sendable, Equatable {
-    /// The chosen repository.
-    public var repo: URL?
-    /// The chosen `.flow` file.
-    public var flow: URL?
-    /// The issue number or URL.
-    public var issue = ""
+    /// The chosen catalog entry.
+    public var flow: FlowEntry.ID?
+    /// Typed values, keyed by launch field name.
+    public var values: [String: String] = [:]
     /// The "Add repo..." field's text.
     public var newRepoPath = ""
     /// Creates an empty form.
@@ -73,42 +71,97 @@ extension AppModel {
     /// The text with surrounding whitespace and newlines removed: the one trim used by buttons and actions.
     public static func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// Re-reads the known repos, merges the added ones, and keeps the selection valid.
+    /// Re-reads the known repos, merges the added ones, keeps the selection valid and refreshes the catalog.
     public func refreshRepos() async {
         var merged = client.knownRepos()
         for url in addedRepos where !merged.contains(url) { merged.append(url) }
         repos = merged
-        if launchForm.repo == nil || !merged.contains(launchForm.repo!) { await selectRepo(merged.first) }
+        if selectedRepo == nil || !merged.contains(selectedRepo!) { selectRepo(merged.first) }
+        await refreshCatalog()
     }
 
-    /// Selects a repo and loads its flows (scanned off the main actor), choosing the first. A result for a
-    /// repo that is no longer selected is dropped.
-    public func selectRepo(_ url: URL?) async {
-        if launchForm.repo != url {
-            // The old repo's flows do not belong to the new one: nothing launches until its scan returns.
-            repoFlows = []
-            launchForm.flow = nil
-        }
-        launchForm.repo = url
+    /// Selects the repo new drafts default to.
+    public func selectRepo(_ url: URL?) {
+        selectedRepo = url
         retargetPristineDraft()
-        guard let url else {
-            repoFlows = []
-            launchForm.flow = nil
+    }
+
+    /// Re-reads the catalog (off the main actor) and keeps the selected flow, or selects the first entry. Repos
+    /// added by path but not yet known to the client are scanned too.
+    public func refreshCatalog() async {
+        let client = client
+        let added = addedRepos
+        let found = await Task.detached { () -> [FlowEntry] in
+            var entries = client.flowCatalog()
+            let known = Set(client.knownRepos())
+            let extra = added.filter { !known.contains($0) }
+            if !extra.isEmpty {
+                let have = Set(entries.map(\.id))
+                entries += FlowCatalog.entries(library: client.libraryDirectory, repos: extra).filter { !have.contains($0.id) }
+            }
+            return entries
+        }.value
+        catalog = found
+        if let id = launchForm.flow, found.contains(where: { $0.id == id }) {
+            loadLaunchFields()
+        } else {
+            selectFlow(found.first?.id)
+        }
+    }
+
+    /// The catalog entry the launch form has selected.
+    public var selectedEntry: FlowEntry? { catalog.first { $0.id == launchForm.flow } }
+
+    /// Selects a catalog entry: clears the typed values and fills in the fields' defaults.
+    public func selectFlow(_ id: FlowEntry.ID?) {
+        launchForm.flow = id
+        launchForm.values = [:]
+        loadLaunchFields()
+    }
+
+    /// Loads the selected flow to derive its launch fields. Typed values are kept for fields that remain; new
+    /// fields get their defaults, and the repo field the default repo when it is a known one.
+    func loadLaunchFields() {
+        launchFields = []
+        launchError = nil
+        launchResolvedRepo = nil
+        guard let entry = selectedEntry else { return }
+        let flow: Flow
+        do { flow = try entry.file.map { try client.loadFlow($0) } ?? BuiltinFlows.fixGitHubIssue } catch {
+            launchError = error.localizedDescription
             return
         }
-        let client = client
-        let found = await Task.detached { client.flows(in: url) }.value
-        guard launchForm.repo == url else { return }
-        repoFlows = found
-        if launchForm.flow == nil || !found.contains(launchForm.flow!) { launchForm.flow = found.first }
+        do { launchFields = try flow.launchFields(location: entry.location) } catch {
+            launchError = flow.message(for: error)
+            return
+        }
+        let names = Set(launchFields.map(\.name))
+        launchForm.values = launchForm.values.filter { names.contains($0.key) }
+        for field in launchFields where launchForm.values[field.name] == nil {
+            switch field.kind {
+            case .text, .githubIssue: launchForm.values[field.name] = field.defaultValue ?? ""
+            case .repo:
+                if let def = field.defaultValue {
+                    if let known = repos.first(where: { $0.standardizedFileURL.path == def }) { launchForm.values["repo"] = known.path }
+                } else if let selectedRepo {
+                    launchForm.values["repo"] = selectedRepo.path
+                }
+            }
+        }
+        for node in flow.nodes {
+            guard case .repo(let config) = node.kind else { continue }
+            switch (config.mode, entry.location) {
+            case (.thisRepo, .repo(let root, _)): launchResolvedRepo = root.lastPathComponent
+            case (.fixed(let path), _): launchResolvedRepo = URL(fileURLWithPath: path).lastPathComponent
+            default: break
+            }
+        }
     }
 
-    /// Selects a flow file.
-    public func selectFlow(_ url: URL?) { launchForm.flow = url }
-
-    /// Whether the launch bar has a repo, a flow and a non-empty issue.
+    /// Whether the launch bar has a launchable flow and every required field is filled (trimmed).
     public var canLaunch: Bool {
-        !isLaunching && launchForm.repo != nil && launchForm.flow != nil && !Self.trimmed(launchForm.issue).isEmpty
+        !isLaunching && selectedEntry != nil && launchError == nil
+            && launchFields.allSatisfy { !$0.isRequired || !Self.trimmed(launchForm.values[$0.name] ?? "").isEmpty }
     }
 
     /// Whether the "Add repo..." field holds a path.
@@ -126,31 +179,37 @@ extension AppModel {
         }
         if !addedRepos.contains(url) { addedRepos.append(url) }
         await refreshRepos()
-        await selectRepo(url)
+        selectRepo(url)
+        if launchFields.contains(where: { $0.kind == .repo }) { launchForm.values["repo"] = url.path }
         if launchForm.newRepoPath == path { launchForm.newRepoPath = "" }
         return true
     }
 
-    /// Launches the selected flow in the selected repo on the typed issue, then clears the issue field.
+    /// Launches the selected flow with the typed values, then resets the fields whose text was not changed meanwhile.
     @discardableResult
     public func launchFromForm() async -> RunID? {
-        guard canLaunch, let repo = launchForm.repo, let file = launchForm.flow else { return nil }
-        let typed = launchForm.issue
+        guard canLaunch, let entry = selectedEntry else { return nil }
+        let typed = launchForm.values
         let flow: Flow
-        do { flow = try client.loadFlow(file) } catch {
+        do { flow = try entry.file.map { try client.loadFlow($0) } ?? BuiltinFlows.fixGitHubIssue } catch {
             notice = Notice(error.localizedDescription)
             return nil
         }
-        let id = await launchGuarded(flow: flow, location: FlowLocation.of(file: file), repo: repo, typed: typed)
-        if id != nil, launchForm.issue == typed { launchForm.issue = "" }
+        let id = await launchGuarded(flow: flow, location: entry.location, values: typed)
+        if id != nil {
+            for field in launchFields where field.kind != .repo && launchForm.values[field.name] == typed[field.name] {
+                launchForm.values[field.name] = field.defaultValue ?? ""
+            }
+        }
         return id
     }
 
-    /// The one launch path: marks the launch in flight and sends the trimmed issue text.
-    func launchGuarded(flow: Flow, location: FlowLocation, repo: URL, typed: String) async -> RunID? {
+    /// The one launch path: marks the launch in flight and sends the trimmed, non-empty values.
+    func launchGuarded(flow: Flow, location: FlowLocation, values: [String: String]) async -> RunID? {
         isLaunching = true
         defer { isLaunching = false }
-        let field = (try? flow.launchFields(location: location))?.first { $0.kind != .repo }?.name ?? "issue"
-        return await launch(flow: flow, location: location, values: [field: Self.trimmed(typed), "repo": repo.path])
+        var sent: [String: String] = [:]
+        for (name, value) in values where !Self.trimmed(value).isEmpty { sent[name] = Self.trimmed(value) }
+        return await launch(flow: flow, location: location, values: sent)
     }
 }

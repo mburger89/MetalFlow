@@ -67,7 +67,7 @@ import Testing
         #expect(model.screen == .dashboard)
         #expect(model.selectedRun == nil)
         let focused = try window.focusedElement?.identifier
-        #expect(focused == "launch.issue")
+        #expect(focused == "launch.field.issue")
     }
 
     // MARK: New Flow

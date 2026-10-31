@@ -108,8 +108,17 @@ public final class AppModel {
     public var launchForm = LaunchForm()
     /// Repositories offered by the launch bar: the client's known repos plus ones added by path.
     public internal(set) var repos: [URL] = []
-    /// The `.flow` files of the selected repo, cached when the repo changes.
-    public internal(set) var repoFlows: [URL] = []
+    /// Every flow the app can open: built-ins, the library, then each known repo's `.flows`. Refreshed on start,
+    /// after "Add repo..." and after a save.
+    public internal(set) var catalog: [FlowEntry] = []
+    /// The repo the Studio defaults new drafts to: the first known repo, or the last one added.
+    public internal(set) var selectedRepo: URL?
+    /// The selected flow's launch fields, in order; empty when the flow cannot be launched.
+    public internal(set) var launchFields: [LaunchField] = []
+    /// Why the selected flow cannot be launched, in the spec's wording.
+    public internal(set) var launchError: String?
+    /// The repo folder name shown for a flow whose Repo node is This repo or Fixed.
+    public internal(set) var launchResolvedRepo: String?
     /// Unsent answer text, keyed by `AppModel.draftKey(_:_:)`.
     public var answerDrafts: [String: String] = [:]
     /// True while a launch from the launch bar is in flight.
