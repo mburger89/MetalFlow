@@ -18,7 +18,7 @@ extension AppModel {
     }
 
     /// The text a unsaved flow's file name is made of: lowercase letters and digits joined by dashes.
-    static func slug(_ name: String) -> String {
+    nonisolated static func slug(_ name: String) -> String {
         var out = ""
         var dash = false
         for ch in name.lowercased() {
@@ -34,7 +34,8 @@ extension AppModel {
     }
 
     /// Where an unsaved flow goes: `<repo>/.flows/<slug>.flow`, or `-2`, `-3`... when taken.
-    static func newFlowURL(name: String, repo: URL) -> URL {
+    /// Reads the directory, so it runs off the main actor.
+    nonisolated static func newFlowURL(name: String, repo: URL) -> URL {
         let dir = repo.appendingPathComponent(FlowFile.directoryName, isDirectory: true)
         let base = slug(name)
         var candidate = dir.appendingPathComponent("\(base).flow")
@@ -111,14 +112,14 @@ extension AppModel {
         case .cancel:
             abandon(action)
         case .discard:
-            perform(action)
+            await perform(action)
         case .save:
             if !draftIsValid {
                 notice = Notice("Fix the flow's errors before saving it.")
                 abandon(action)
                 return
             }
-            if await saveDraft() { perform(action) } else { abandon(action) }
+            if await saveDraft() { await perform(action) } else { abandon(action) }
         }
     }
 
@@ -129,14 +130,21 @@ extension AppModel {
         abandon(action)
     }
 
+    /// An unsaved-edits or quit alert went away. When no button answered it (it was dismissed some other way), it
+    /// counts as Cancel, so no request is left unanswered.
+    func alertDismissed() {
+        cancelPending()
+        if quitPending { cancelQuit() }
+    }
+
     private func abandon(_ action: PendingAction) {
         if action == .quit { replyToTerminate(false) }
     }
 
-    private func perform(_ action: PendingAction) {
+    private func perform(_ action: PendingAction) async {
         switch action {
         case .open(let url): openWithoutAsking(url)
-        case .newFlow: newFlowWithoutAsking()
+        case .newFlow: await newFlowWithoutAsking()
         case .quit:
             if continueQuit() == .now { replyToTerminate(true) }
         }
@@ -152,7 +160,13 @@ extension AppModel {
     @discardableResult
     public func saveDraft() async -> Bool {
         guard let draft, draftIsValid else { return false }
-        let target = draft.url ?? Self.newFlowURL(name: draft.flow.name, repo: draft.repo)
+        let target: URL
+        if let url = draft.url {
+            target = url
+        } else {
+            let (name, repo) = (draft.flow.name, draft.repo)
+            target = await Task.detached { Self.newFlowURL(name: name, repo: repo) }.value
+        }
         do {
             try client.saveFlow(draft.flow, to: target)
         } catch {
@@ -178,7 +192,7 @@ extension AppModel {
 
 extension AppModel {
     /// File > New Flow: an empty "Untitled flow" in the selected repo. With unsaved edits it asks first.
-    public func newFlow() {
+    public func newFlow() async {
         guard launchForm.repo != nil else {
             notice = Notice("Add a repo on the dashboard first.")
             return
@@ -188,18 +202,27 @@ extension AppModel {
             screen = .studio
             return
         }
-        newFlowWithoutAsking()
+        await newFlowWithoutAsking()
     }
 
-    func newFlowWithoutAsking() {
+    func newFlowWithoutAsking() async {
         guard let repo = launchForm.repo else { return }
-        draft = FlowDraft(flow: Flow(name: untitledName(in: repo), nodes: [], wires: []), url: nil, repo: repo)
+        let name = await untitledName(in: repo)
+        // The scan took a moment: drop the result if the repo changed meanwhile.
+        guard launchForm.repo == repo else { return }
+        draft = FlowDraft(flow: Flow(name: name, nodes: [], wires: []), url: nil, repo: repo)
         screen = .studio
     }
 
     /// "Untitled flow", or "Untitled flow 2", "Untitled flow 3"... when the repo's flows already use the name, so
     /// the run overlay (which matches runs by flow name) never mixes up two new flows.
-    func untitledName(in repo: URL) -> String {
+    /// Scans and loads the repo's flow files, so it runs off the main actor.
+    func untitledName(in repo: URL) async -> String {
+        let client = client
+        return await Task.detached { Self.untitledName(client: client, in: repo) }.value
+    }
+
+    nonisolated static func untitledName(client: EngineClient, in repo: URL) -> String {
         let taken = Set(client.flows(in: repo).compactMap { try? client.loadFlow($0).name })
         var name = "Untitled flow"
         var n = 2

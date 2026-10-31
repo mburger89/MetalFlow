@@ -74,7 +74,7 @@ import Testing
 
     @Test func newFlowCreatesUntitledDraft() async throws {
         let (model, _, window) = try await fixture()
-        model.newFlow()
+        await model.newFlow()
         try await window.runUntilIdle()
         let draft = try #require(model.draft)
         #expect(model.screen == .studio)
@@ -86,7 +86,7 @@ import Testing
 
     @Test func newFlowWithoutRepoSetsNotice() async throws {
         let (model, _, _) = try await fixture(repos: [])
-        model.newFlow()
+        await model.newFlow()
         #expect(model.notice?.text == "Add a repo on the dashboard first.")
         #expect(model.draft == nil)
     }
@@ -96,7 +96,7 @@ import Testing
         model.screen = .studio
         let old = try #require(model.draft)
         old.edit("rename") { $0.name = "Edited" }
-        model.newFlow()
+        await model.newFlow()
         try await window.runUntilIdle()
         #expect(model.draft === old)
         #expect(model.pendingAction == .newFlow)
@@ -109,7 +109,7 @@ import Testing
         // Cancel keeps the draft.
         let again = try #require(model.draft)
         again.edit("rename") { $0.name = "Edited 2" }
-        model.newFlow()
+        await model.newFlow()
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Cancel")
         try await window.runUntilIdle()
@@ -329,6 +329,58 @@ import Testing
         #expect(platform.terminateReplies == [false])
         #expect(model.pendingAction == nil)
         #expect(draft.isDirty, "cancel keeps the edits")
+    }
+
+    @Test func escapeOnDirtyQuitAlertCancelsQuit() async throws {
+        // The window draws its alerts, so Escape reaches the alert as a key press.
+        let client = FakeEngineClient(repos: [repo])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model, options: .init(presentsAlertsNatively: false))
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        model.screen = .studio
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        try await window.runUntilIdle()
+        let platform = window.testApp.platform
+        // A close and a quit pending behind the one alert: Escape answers both.
+        #expect(window.requestClose() == false)
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        #expect(model.pendingAction == .quit)
+        #expect(try window.elements(role: .alert).count == 1)
+        window.typeKey(.escape)
+        try await window.runUntilIdle()
+        #expect(try window.elements(role: .alert).isEmpty)
+        #expect(model.pendingAction == nil)
+        #expect(platform.terminateReplies == [false], "the quit is refused")
+        #expect(!window.window.isCloseRequestPending, "the close is answered too")
+        #expect(!window.platformWindow.isClosed)
+        #expect(draft.isDirty, "cancel keeps the edits")
+        #expect(client.files.saved.isEmpty)
+    }
+
+    @Test func dismissingTheQuitAlertWithNoButtonCancelsQuit() async throws {
+        let (model, _, window, draft) = try await dirtyFixture()
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(buttonAt: nil)
+        try await window.runUntilIdle()
+        #expect(model.pendingAction == nil)
+        #expect(platform.terminateReplies == [false], "the terminate request is answered")
+        #expect(draft.isDirty)
+    }
+
+    @Test func dismissingTheRunningRunsAlertWithNoButtonCancelsQuit() async throws {
+        let (model, _, window) = try await fixture(runs: [makeRun("a", status: .running)])
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(buttonAt: nil)
+        try await window.runUntilIdle()
+        #expect(!model.quitPending)
+        #expect(platform.terminateReplies == [false])
     }
 
     @Test func quitWithDirtyDraftSaveThenQuits() async throws {

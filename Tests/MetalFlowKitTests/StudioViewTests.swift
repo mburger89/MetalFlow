@@ -93,13 +93,13 @@ import Testing
         let window = try appWindow(model: model)
         try await window.runUntilIdle()
         await model.waitUntilReady()
-        model.newFlow()
+        await model.newFlow()
         #expect(model.draft?.flow.name == "Untitled flow 3")
         client.files.names = [a: "Other"]
-        model.newFlow()
+        await model.newFlow()
         #expect(model.draft?.flow.name == "Untitled flow")
         client.files.names = [b: "Untitled flow"]
-        model.newFlow()
+        await model.newFlow()
         #expect(model.draft?.flow.name == "Untitled flow 2")
     }
 
@@ -357,6 +357,9 @@ import Testing
         try await showStudio(model, window)
         let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
         try await press("studio.save", in: window)
+        // The new file name is chosen off the main actor.
+        await waitUntil("the save") { !client.files.saved.isEmpty }
+        try await window.runUntilIdle()
         #expect(client.files.saved.map(\.url) == [expected])
         #expect(client.files.saved.first?.flow == BuiltinFlows.fixGitHubIssue)
         #expect(model.draft?.url == expected)
@@ -376,7 +379,7 @@ import Testing
         }
         let (model, client, window) = try await fixture(repos: [dir])
         try await showStudio(model, window)
-        try await press("studio.save", in: window)
+        #expect(await model.saveDraft())
         #expect(client.files.saved.map(\.url) == [flows.appendingPathComponent("fix-github-issue-3.flow")])
     }
 

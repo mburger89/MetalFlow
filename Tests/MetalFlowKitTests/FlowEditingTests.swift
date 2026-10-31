@@ -425,6 +425,9 @@ import Testing
         #expect(draft.isDirty)
         let edited = draft.flow
         try await press("studio.save", in: window)
+        // The new file name is chosen off the main actor.
+        await waitUntil("the save") { !client.files.saved.isEmpty }
+        try await window.runUntilIdle()
         let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
         #expect(client.files.saved.map(\.url) == [expected])
         #expect(client.files.saved.first?.flow == edited)
@@ -506,6 +509,28 @@ import Testing
         #expect(model.draft === draft && draft.url == a && draft.isDirty)
         #expect(model.pendingOpen == nil)
         #expect(window.presentedAlert == nil)
+    }
+
+    @Test func escapeOnDirtySwitchAlertCancels() async throws {
+        // The window draws its alerts, so Escape reaches the alert as a key press.
+        let client = FakeEngineClient(repos: [repo])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model, options: .init(presentsAlertsNatively: false))
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        model.screen = .studio
+        try await window.runUntilIdle()
+        let (draft, a, b) = try openDirty(model)
+        model.open(flow: b)
+        try await window.runUntilIdle()
+        #expect(model.pendingOpen == b)
+        #expect(try window.elements(role: .alert).count == 1)
+        window.typeKey(.escape)
+        try await window.runUntilIdle()
+        #expect(try window.elements(role: .alert).isEmpty)
+        #expect(model.pendingAction == nil)
+        #expect(client.files.saved.isEmpty)
+        #expect(model.draft === draft && draft.url == a && draft.isDirty, "the draft is kept")
     }
 
     // MARK: Fix round 1
