@@ -74,7 +74,7 @@ import Testing
 
     @Test func newFlowCreatesUntitledDraft() async throws {
         let (model, _, window) = try await fixture()
-        model.newFlow()
+        await model.newFlow()
         try await window.runUntilIdle()
         let draft = try #require(model.draft)
         #expect(model.screen == .studio)
@@ -86,7 +86,7 @@ import Testing
 
     @Test func newFlowWithoutRepoSetsNotice() async throws {
         let (model, _, _) = try await fixture(repos: [])
-        model.newFlow()
+        await model.newFlow()
         #expect(model.notice?.text == "Add a repo on the dashboard first.")
         #expect(model.draft == nil)
     }
@@ -96,7 +96,7 @@ import Testing
         model.screen = .studio
         let old = try #require(model.draft)
         old.edit("rename") { $0.name = "Edited" }
-        model.newFlow()
+        await model.newFlow()
         try await window.runUntilIdle()
         #expect(model.draft === old)
         #expect(model.pendingAction == .newFlow)
@@ -109,7 +109,7 @@ import Testing
         // Cancel keeps the draft.
         let again = try #require(model.draft)
         again.edit("rename") { $0.name = "Edited 2" }
-        model.newFlow()
+        await model.newFlow()
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Cancel")
         try await window.runUntilIdle()

@@ -57,7 +57,7 @@ extension AppModel {
 public func installCommands(on app: App, model: AppModel) {
     app.commands {
         CommandGroup(after: .newItem) {
-            Button("New Flow") { model.newFlow() }.keyboardShortcut("n")
+            Button("New Flow") { Task { await model.newFlow() } }.keyboardShortcut("n")
             Button("Open Flow…") { model.showOpenFlow() }.keyboardShortcut("o")
             Button("Save") { Task { await model.saveDraft() } }
                 .keyboardShortcut("s")

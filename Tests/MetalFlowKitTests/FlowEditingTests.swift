@@ -425,6 +425,9 @@ import Testing
         #expect(draft.isDirty)
         let edited = draft.flow
         try await press("studio.save", in: window)
+        // The new file name is chosen off the main actor.
+        await waitUntil("the save") { !client.files.saved.isEmpty }
+        try await window.runUntilIdle()
         let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
         #expect(client.files.saved.map(\.url) == [expected])
         #expect(client.files.saved.first?.flow == edited)
