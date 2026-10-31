@@ -62,7 +62,7 @@ import Testing
         #expect(model.draft?.repo == repo)
         #expect(model.draft?.url == nil)
         #expect(model.draft?.flow.name == "Fix GitHub issue")
-        _ = try window.element(identifier: "studio.name")
+        #expect(try window.element(identifier: "studio.name").value == "Fix GitHub issue")
     }
 
     @Test func toolbarNameIsAnEditableUndoableField() async throws {
@@ -75,9 +75,11 @@ import Testing
         window.typeText("!")
         try await window.runUntilIdle()
         #expect(draft.flow.name == "Fix GitHub issue!")
+        #expect(try window.element(identifier: "studio.name").value == "Fix GitHub issue!")
         window.typeText("?")
         try await window.runUntilIdle()
         #expect(draft.flow.name == "Fix GitHub issue!?")
+        #expect(try window.element(identifier: "studio.name").value == "Fix GitHub issue!?")
         #expect(draft.isDirty)
         draft.undo()
         #expect(draft.flow.name == "Fix GitHub issue", "one typing session is one undo step")
@@ -116,13 +118,13 @@ import Testing
         _ = try window.element(identifier: "inspector.empty")
         try await press("node.plan", in: window)
         #expect(model.draft?.selection == "plan")
-        // The title is an editable field (its identifier is on the field's container, which has no value).
-        _ = try window.element(identifier: "inspector.title")
+        #expect(try window.element(identifier: "inspector.title").value == "Plan")
         #expect(try window.element(identifier: "inspector.id").value == "plan")
         #expect(model.draft?.flow.node("plan")?.title == "Plan")
         try await press("node.judge", in: window)
         #expect(model.draft?.selection == "judge")
         #expect(try window.element(identifier: "inspector.id").value == "judge")
+        #expect(try window.element(identifier: "inspector.title").value == "Recommend")
         #expect(model.draft?.flow.node("judge")?.title == "Recommend")
     }
 

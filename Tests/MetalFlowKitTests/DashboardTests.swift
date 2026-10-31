@@ -38,6 +38,7 @@ import Testing
         window.typeText("42")
         try await window.runUntilIdle()
         #expect(model.launchForm.issue == "42")
+        #expect(try window.element(identifier: "launch.issue").value == "42")
         #expect(try window.element(identifier: "launch.go").isEnabled)
         try await press("launch.go", in: window)
 
@@ -158,6 +159,7 @@ import Testing
         try window.click(window.element(identifier: "answer.\(ask.id.rawValue).plan.field"))
         window.typeText("Use A.swift")
         try await window.runUntilIdle()
+        #expect(try window.element(identifier: "answer.\(ask.id.rawValue).plan.field").value == "Use A.swift")
         try await press("answer.\(ask.id.rawValue).plan.send", in: window)
         #expect(await client.calls.contains("answer(plan, Use A.swift, [])"))
     }
@@ -205,6 +207,7 @@ import Testing
         try window.click(window.element(identifier: "answer.\(ask.id.rawValue).plan.field"))
         window.typeText("Use A.swift")
         try await window.runUntilIdle()
+        #expect(try window.element(identifier: "answer.\(ask.id.rawValue).plan.field").value == "Use A.swift")
         try await press("answer.\(ask.id.rawValue).plan.send", in: window)
         #expect(await client.calls.contains("answer(plan, Use A.swift, [])"))
         #expect(model.answerDrafts[AppModel.draftKey(ask.id, NodeKey(node: "plan"))] == "Use A.swift", "kept for another try")

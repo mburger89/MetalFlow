@@ -168,6 +168,7 @@ import Testing
         #expect(try !window.element(identifier: "cand.a.branch.ok").isEnabled, "whitespace is not a name")
         window.typeText("keep-me")
         try await window.runUntilIdle()
+        #expect(try window.element(identifier: "cand.a.branch.name").value == "   keep-me")
         #expect(try window.element(identifier: "cand.a.branch.ok").isEnabled)
         #expect(await !client.calls.contains { $0.hasPrefix("branch") })
         try await press("cand.a.branch.ok", in: window)

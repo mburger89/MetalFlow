@@ -226,9 +226,11 @@ import Testing
         window.typeText("x")
         try await window.runUntilIdle()
         #expect(try node(draft, "plan").title == "Planx")
+        #expect(try window.element(identifier: "inspector.title").value == "Planx")
         window.typeKey(.delete)
         try await window.runUntilIdle()
         #expect(try node(draft, "plan").title == "Plan")
+        #expect(try window.element(identifier: "inspector.title").value == "Plan")
         #expect(draft.flow.nodes.count == BuiltinFlows.fixGitHubIssue.nodes.count)
         #expect(draft.selection == "plan")
         guard case .prompt(let before) = try node(draft, "plan").kind else { return }
@@ -253,6 +255,7 @@ import Testing
         guard case .prompt(let after) = try node(draft, "plan").kind else { return }
         #expect(after.prompt.count == before.prompt.count + 2)
         #expect(after.prompt.contains("QQ"))
+        #expect(try window.element(identifier: "inspector.prompt").value == after.prompt)
         #expect(draft.undoStack.count == 1, "one typing session is one undo step")
         draft.undo()
         #expect(draft.flow == BuiltinFlows.fixGitHubIssue)
@@ -268,6 +271,7 @@ import Testing
         window.typeText("abc")
         try await window.runUntilIdle()
         #expect(try node(draft, "plan").title == "Planabc")
+        #expect(try window.element(identifier: "inspector.title").value == "Planabc")
         #expect(draft.undoStack.count == 1)
         // Another field starts a new step.
         draft.edit("other") { $0.name = "Other" }
@@ -347,6 +351,7 @@ import Testing
         try await window.runUntilIdle()
         guard case .prompt(let c) = try node(draft, "plan").kind else { return }
         #expect(c.maxTurns == 12)
+        #expect(try window.element(identifier: "inspector.maxTurns").value == "12")
     }
 
     @Test func inspectorShowsAndRenamesIncomingWires() async throws {
@@ -361,7 +366,7 @@ import Testing
         window.typeText("2")
         try await window.runUntilIdle()
         #expect(draft.flow.wires.contains(Wire(from: "issue", to: "plan", input: "issue2")))
-        _ = try window.element(identifier: "inspector.wire.issue.issue2")
+        #expect(try window.element(identifier: "inspector.wire.issue.issue2").value == "issue2")
     }
 
     // MARK: Validation
