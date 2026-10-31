@@ -61,5 +61,5 @@ Source: a read of /Users/maxburger/Developer/MetalUI. `S/` = `Sources/MetalUI`. 
 - **Editing quirks (Task 6):**
   - A menu `Picker` needs `.pickerStyle(.menu)` for `window.click` to present a menu, and a non-empty title adds a second element with the same identifier, so use `Picker("", ...)` with your own label.
   - Click a `TextField`'s right edge to put the caret at the end.
-  - `.lineLimit(_:)` on a Text returns an `EnvironmentScope` that does not take `.padding` or `.accessibilityIdentifier` (a compile error): wrap the Text in an `HStack` and pad that.
+  - Since MetalUI #154, decorations may follow `.lineLimit`, `.disabled` and other environment modifiers; only `.onGeometryChange` still needs decorations written before it.
   - Keys: `.focusable(true, interactions: .edit)` plus `.onKeyPress` gets keys only while the canvas is focused. ⇧⌘Z arrives with `key` uppercased ("Z"); compare lowercased.

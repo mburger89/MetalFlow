@@ -34,14 +34,12 @@ struct StudioBody: Component {
             StudioToolbar(model: model, draft: draft)
             Divider()
             if case .failure(let error) = draft.validation {
-                HStack(spacing: 0) {
-                    Text(verbatim: error.errorDescription ?? "\(error)").font(size: 12).foregroundColor(Palette.bad)
-                        .accessibilityIdentifier("studio.validation")
-                        .lineLimit(2)
-                }
-                .padding(insets(top: 6, right: 14, bottom: 6, left: 14))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.bad.opacity(0.14))
+                Text(verbatim: error.errorDescription ?? "\(error)").font(size: 12).foregroundColor(Palette.bad)
+                    .accessibilityIdentifier("studio.validation")
+                    .lineLimit(2)
+                    .padding(insets(top: 6, right: 14, bottom: 6, left: 14))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Palette.bad.opacity(0.14))
             }
             // Palette | canvas | inspector; the divider positions persist across launches (UserDefaults).
             HSplitView {

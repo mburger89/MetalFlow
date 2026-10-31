@@ -74,12 +74,10 @@ struct Chip: Component {
     let mono: Bool
 
     var content: some ElementGroup {
-        HStack(spacing: 0) {
-            Text(verbatim: text)
-                .font(mono ? Theme.mono(11) : Font.system(size: 11))
-                .foregroundColor(Color(Hsla.rgb(0xb9c0ca)))
-                .lineLimit(1)
-        }
+        Text(verbatim: text)
+            .font(mono ? Theme.mono(11) : Font.system(size: 11))
+            .foregroundColor(Color(Hsla.rgb(0xb9c0ca)))
+            .lineLimit(1)
             .padding(insets(top: 2, right: 6, bottom: 2, left: 6))
             .background(Color(Hsla.rgb(0x1f232a)))
             .cornerRadius(4)
