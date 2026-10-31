@@ -103,6 +103,12 @@ public struct RunStore: Sendable {
         }
     }
 
+    /// The ids of the saved runs, without decoding them. Unordered.
+    public func ids() -> [RunID] {
+        let urls = (try? FileManager.default.contentsOfDirectory(at: runsDirectory, includingPropertiesForKeys: nil)) ?? []
+        return urls.filter { $0.pathExtension == "json" }.map { RunID(rawValue: $0.deletingPathExtension().lastPathComponent) }
+    }
+
     /// Loads one run exactly as stored: no running-to-interrupted mapping. Nil when the file is missing or undecodable.
     public func load(_ id: RunID) -> Run? {
         guard FileManager.default.fileExists(atPath: file(for: id).path) else { return nil }

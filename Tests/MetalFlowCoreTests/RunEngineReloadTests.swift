@@ -73,4 +73,48 @@ import Testing
         let h = try Harness()
         #expect(await h.engine.reload(RunID()) == nil)
     }
+
+    @Test func discoverFindsRunSavedByAnotherStore() async throws {
+        let h = try Harness()
+        let theirs = RunStore(root: h.store.root)
+        let run = Run(flow: h.flow(), title: "from mflow", repo: h.repo.url, baseBranch: "main", branch: "mf/x",
+                      worktree: h.repo.url, createdAt: Date(timeIntervalSince1970: 5), status: .running, nodes: [:])
+        try theirs.save(run)
+        let found = await h.engine.discover()
+        #expect(found.map(\.id) == [run.id])
+        #expect(await h.engine.run(run.id)?.title == "from mflow")
+        #expect(store(h).isLocked(run.id) == false, "discovering takes no lock")
+    }
+
+    @Test func discoverIgnoresKnownRuns() async throws {
+        let (hold, cont) = AsyncStream<Void>.makeStream()
+        defer { cont.finish() }
+        let h = try Harness(planHold: hold)
+        let id = try await heldRun(h)
+        let mine = try #require(await h.engine.run(id))
+        var other = mine
+        other.revision += 9
+        other.title = "from disk"
+        try h.store.save(other)
+        #expect(await h.engine.discover().isEmpty)
+        #expect(await h.engine.run(id)?.title == mine.title)
+    }
+
+    @Test func discoverSkipsUnreadableFile() async throws {
+        let h = try Harness()
+        let id = RunID()
+        let dir = h.store.root.appendingPathComponent("runs")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("\(id.rawValue).json")
+        try "{ half".write(to: file, atomically: true, encoding: .utf8)
+        #expect(await h.engine.discover().isEmpty)
+        #expect(await h.engine.run(id) == nil)
+        // Once the file is whole, a later pass finds it.
+        let run = Run(id: id, flow: h.flow(), title: "late", repo: h.repo.url, baseBranch: "main", branch: "mf/y",
+                      worktree: h.repo.url, createdAt: Date(timeIntervalSince1970: 6), status: .running, nodes: [:])
+        try h.store.save(run)
+        #expect(await h.engine.discover().map(\.id) == [id])
+    }
+
+    private func store(_ h: Harness) -> RunStore { h.store }
 }

@@ -274,6 +274,18 @@ public actor RunEngine {
         return saved
     }
 
+    /// Runs saved by another process that this engine has not seen. Adds them to the cache and returns them. Takes no
+    /// locks and leaves known runs alone; a file that cannot be read yet is skipped and retried on a later pass.
+    public func discover() -> [Run] {
+        var found: [Run] = []
+        for id in store.ids() where runs[id] == nil {
+            guard let run = store.load(id) else { continue }
+            runs[id] = run
+            found.append(run)
+        }
+        return found
+    }
+
     // MARK: - State
 
     func persist(_ run: Run) {
