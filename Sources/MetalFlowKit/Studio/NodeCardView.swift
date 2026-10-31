@@ -62,31 +62,20 @@ extension NodeOverlay {
     static func make(node: Node, run: Run, laneScoped: Bool) -> NodeOverlay {
         if laneScoped, !run.lanes.isEmpty {
             let states = run.lanes.map { lane in run.nodes[NodeKey(node: node.id, lane: lane.id)]?.state ?? .waiting }
-            let text = zip(run.lanes, states).map { "\($0.id.uppercased()) \(symbol($1))" }.joined(separator: " ")
+            let text = zip(run.lanes, states).map { "\($0.id.uppercased()) \(NodeStateStyle($1).symbol)" }.joined(separator: " ")
             return NodeOverlay(text: text, color: aggregateColor(states))
         }
         let state = run.nodes[NodeKey(node: node.id)]?.state ?? .waiting
-        let (label, color) = StepRow.describe(state)
-        return NodeOverlay(text: label, color: color)
-    }
-
-    /// ✓ succeeded, ✕ failed, ● running, ? needs you, · anything else.
-    static func symbol(_ state: NodeState) -> String {
-        switch state {
-        case .succeeded: "✓"
-        case .failed: "✕"
-        case .running: "●"
-        case .needsYou: "?"
-        case .waiting, .interrupted, .cancelled: "·"
-        }
+        let style = NodeStateStyle(state)
+        return NodeOverlay(text: style.text, color: style.color)
     }
 
     private static func aggregateColor(_ states: [NodeState]) -> Color {
-        if states.contains(where: { if case .failed = $0 { true } else { false } }) { return Palette.bad }
-        if states.contains(where: { if case .needsYou = $0 { true } else { false } }) { return Palette.warn }
-        if states.contains(.running) { return Palette.accent }
-        if states.allSatisfy({ $0 == .succeeded }) { return Palette.ok }
-        return Palette.muted
+        if states.contains(where: { if case .failed = $0 { true } else { false } }) { return Tone.bad.color }
+        if states.contains(where: { if case .needsYou = $0 { true } else { false } }) { return Tone.warn.color }
+        if states.contains(.running) { return Tone.accent.color }
+        if states.allSatisfy({ $0 == .succeeded }) { return Tone.ok.color }
+        return Tone.muted.color
     }
 }
 
