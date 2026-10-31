@@ -43,9 +43,10 @@ struct StudioBody: Component {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.bad.opacity(0.14))
             }
-            HStack(spacing: 0) {
+            // Palette | canvas | inspector; the divider positions persist across launches (UserDefaults).
+            HSplitView {
                 PaletteView(draft: draft)
-                Divider()
+                    .frame(minWidth: 160, idealWidth: 200, maxWidth: 280, maxHeight: .infinity)
                 VStack(spacing: 0) {
                     CanvasView(model: model, draft: draft)
                     if let run = model.studioShownRun, !run.lanes.isEmpty {
@@ -53,10 +54,11 @@ struct StudioBody: Component {
                         CandidatesStrip(model: model, run: run)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
+                .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
                 InspectorView(draft: draft)
+                    .frame(minWidth: 240, idealWidth: 280, maxWidth: 420, maxHeight: .infinity)
             }
+            .splitViewAutosaveName("studio.panes")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

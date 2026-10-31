@@ -21,7 +21,7 @@ struct PaletteView: Component {
             Spacer()
         }
         .padding(insets(top: 12, right: 10, bottom: 12, left: 10))
-        .frame(width: Pixels(200), alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(maxHeight: .infinity)
         .background(Palette.panel)
     }

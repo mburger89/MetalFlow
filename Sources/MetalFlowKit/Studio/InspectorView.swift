@@ -67,7 +67,7 @@ struct InspectorView: Component {
             Spacer()
         }
         .padding(insets(top: 12, right: 14, bottom: 12, left: 14))
-        .frame(width: Pixels(320), alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(maxHeight: .infinity)
         .background(Palette.panel)
     }

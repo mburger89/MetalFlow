@@ -126,6 +126,24 @@ import Testing
         #expect(model.draft?.flow.node("judge")?.title == "Recommend")
     }
 
+    @Test func studioLaysOutPaletteCanvasAndInspectorAsSplitPanes() async throws {
+        let (model, _, window) = try await fixture()
+        try await showStudio(model, window)
+        let palette = try window.element(identifier: "palette.prompt").frame
+        let canvas = try window.element(identifier: "canvas").frame
+        let inspector = try window.element(identifier: "inspector.empty").frame
+        // Left to right, each pane inside its limits.
+        #expect(palette.maxX <= canvas.minX)
+        #expect(canvas.maxX <= inspector.minX)
+        #expect(canvas.size.width >= 400)
+        #expect(palette.size.width <= 280)
+        #expect(inspector.size.width <= 420)
+        // The canvas still receives clicks through the split view.
+        #expect(model.draft?.selection == nil)
+        try await press("node.plan", in: window)
+        #expect(model.draft?.selection == "plan")
+    }
+
     @Test func canvasFitsOnFirstShowAndFitButtonRestores() async throws {
         let (model, _, window) = try await fixture()
         try await showStudio(model, window)
