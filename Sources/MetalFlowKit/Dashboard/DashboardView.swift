@@ -28,11 +28,8 @@ public struct DashboardView: Component {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
-        .overlay(alignment: .topLeading) {
-            // An identifier on a container would replace those of everything inside it (MetalUI), so the
-            // screen's marker is a zero-size element of its own.
-            Spacer().frame(width: 0, height: 0).accessibilityIdentifier("dashboard")
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("dashboard")
     }
 }
 
@@ -67,7 +64,7 @@ struct WorkingChip: Component {
                 .background(Color(Hsla.rgb(0x1f232a))).cornerRadius(4)
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: title).font(size: 13).foregroundColor(Palette.text)
-                    .accessibilityIdentifier(id)
+                    .accessibilityIdentifier("\(id).title")
                     .lineLimit(1)
                 Text(verbatim: what).font(size: 12).foregroundColor(Palette.muted).lineLimit(1)
             }
@@ -81,6 +78,8 @@ struct WorkingChip: Component {
         .background(Palette.panel)
         .cornerRadius(10)
         .border(Color(Hsla.rgb(0x262a31)), width: 1)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(id)
     }
 
     private func describe() -> (String, String, String, String) {

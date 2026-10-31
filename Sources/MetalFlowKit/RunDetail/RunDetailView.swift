@@ -80,9 +80,8 @@ struct DetailBody: Component {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
-        .overlay(alignment: .topLeading) {
-            Spacer().frame(width: 0, height: 0).accessibilityIdentifier("detail")
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("detail")
         .alert("Discard this run?", isPresented: Binding(
             get: { model.confirmingDiscard == runID },
             set: { if !$0, model.confirmingDiscard == runID { model.confirmingDiscard = nil } })) {

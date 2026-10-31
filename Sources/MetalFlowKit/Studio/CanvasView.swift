@@ -30,10 +30,8 @@ struct CanvasView: Component {
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(Hsla.rgb(0x101215)))
         .clipped()
-        .overlay(alignment: .topLeading) {
-            // Marks the canvas's origin (a container's identifier would replace those inside it).
-            Spacer().frame(width: 0, height: 0).accessibilityIdentifier("canvas")
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("canvas")
         .overlay(alignment: .bottomTrailing) {
             HStack(spacing: Spacing.xs) {
                 Text(verbatim: "\(Int((g.zoom * 100).rounded()))%").font(size: 12).foregroundColor(Palette.body)

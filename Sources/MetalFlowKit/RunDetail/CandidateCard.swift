@@ -18,7 +18,7 @@ struct CandidateCard: Component {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.sm) {
                 Text(verbatim: "Candidate \(laneID.uppercased())").font(size: 14).foregroundColor(Palette.text)
-                    .accessibilityIdentifier(id)
+                    .accessibilityIdentifier("\(id).title")
                 Spacer()
                 if recommended {
                     HStack(spacing: 0) {
@@ -77,6 +77,8 @@ struct CandidateCard: Component {
         .background(Palette.panel)
         .cornerRadius(10)
         .border(recommended ? Palette.accent : Palette.line, width: 1)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(id)
     }
 
     @ElementBuilder

@@ -13,9 +13,7 @@ struct OpenFlowPanel: Component {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onTapGesture { model.hideOpenFlow() }
             VStack(alignment: .leading, spacing: Spacing.md) {
-                // The panel's id sits on a leaf: a container's id would override its children's.
                 Text("Open flow").font(size: 15).foregroundColor(Palette.text)
-                    .accessibilityIdentifier("openFlow.panel")
                 HStack(spacing: Spacing.sm) {
                     Text("Repo").font(size: 12).foregroundColor(Palette.muted)
                     if model.repos.isEmpty {
@@ -51,6 +49,8 @@ struct OpenFlowPanel: Component {
             .background(Palette.panel)
             .cornerRadius(14)
             .border(Palette.line, width: 1)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("openFlow.panel")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .focusable()

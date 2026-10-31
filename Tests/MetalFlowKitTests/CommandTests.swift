@@ -266,6 +266,17 @@ import Testing
         #expect(client.files.saved.isEmpty)
     }
 
+    @Test func openFlowPanelIdIsThePanelNotATitle() async throws {
+        let (model, _, window) = try await fixture()
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        let panel = try window.element(identifier: "openFlow.panel").frame
+        let cancel = try window.element(identifier: "openFlow.cancel").frame
+        #expect(panel.size.width >= 400)
+        #expect(cancel.origin.y + cancel.size.height <= panel.origin.y + panel.size.height)
+        #expect(cancel.origin.y >= panel.origin.y)
+    }
+
     @Test func escapeClosesOpenFlowPanel() async throws {
         let (model, _, window) = try await fixture()
         model.showOpenFlow()

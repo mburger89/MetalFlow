@@ -243,7 +243,7 @@ import Testing
         ])
         let (_, _, window) = try await fixture([run])
         let id = run.id.rawValue
-        #expect(try window.element(identifier: "run.\(id)").value == "#63 Word diff")
+        #expect(try window.element(identifier: "run.\(id).title").value == "#63 Word diff")
         #expect(try window.element(identifier: "run.\(id).log").value == "▸ Edit DiffView.swift")
         let pillIDs = try window.elements { ($0.identifier ?? "").hasPrefix("pill.") }
             .sorted { $0.frame.origin.x < $1.frame.origin.x }.compactMap(\.identifier)
@@ -280,7 +280,7 @@ import Testing
         let new = makeRun("#40 new", status: .discarded, createdAt: Date(timeIntervalSince1970: 2_000))
         let (model, _, window) = try await fixture([old, new])
         #expect(model.finished.map(\.title) == ["#40 new", "#39 old"])
-        let rows = try window.elements { ($0.identifier ?? "").hasPrefix("finished.") && ($0.identifier ?? "").split(separator: ".").count == 2 }
+        let rows = try window.elements { ($0.identifier ?? "").hasPrefix("finished.") && ($0.identifier ?? "").hasSuffix(".title") }
             .sorted { $0.frame.origin.y < $1.frame.origin.y }.compactMap(\.value)
         #expect(rows == ["#40 new", "#39 old"], "rendered newest first")
         #expect(try window.element(identifier: "finished.\(old.id.rawValue).result").value == "Merged A")
@@ -290,7 +290,7 @@ import Testing
     @Test func finishedListCapsAtTwenty() async throws {
         let runs = (0..<25).map { makeRun("r\($0)", status: .completed, createdAt: Date(timeIntervalSince1970: Double(1_000 + $0))) }
         let (_, _, window) = try await fixture(runs)
-        let rows = try window.elements { ($0.identifier ?? "").hasPrefix("finished.") && ($0.identifier ?? "").split(separator: ".").count == 2 }
+        let rows = try window.elements { ($0.identifier ?? "").hasPrefix("finished.") && ($0.identifier ?? "").hasSuffix(".title") }
             .sorted { $0.frame.origin.y < $1.frame.origin.y }.compactMap(\.value)
         #expect(rows == (5..<25).reversed().map { "r\($0)" }, "the 20 newest, newest first")
     }
@@ -318,6 +318,19 @@ import Testing
         #expect(try window.elements { $0.identifier == "activity.item" }.count == 1)
     }
 
+    @Test func idsSitOnTheRealContainers() async throws {
+        let run = makeRun("#1 card", status: .running)
+        let (_, _, window) = try await fixture([run])
+        let screen = try window.element(identifier: "dashboard").frame
+        #expect(screen.size.width > 1000 && screen.size.height > 500, "the screen, not a zero-size marker")
+        let card = try window.element(identifier: "run.\(run.id.rawValue)").frame
+        let cancel = try window.element(identifier: "run.\(run.id.rawValue).cancel").frame
+        #expect(card.size.width > 200 && card.size.height > 80)
+        #expect(cancel.origin.x >= card.origin.x && cancel.origin.y >= card.origin.y)
+        #expect(cancel.origin.x + cancel.size.width <= card.origin.x + card.size.width)
+        #expect(cancel.origin.y + cancel.size.height <= card.origin.y + card.size.height, "the card's frame holds its buttons")
+    }
+
     @Test func activityFeedBuildsOnlyTheVisibleRows() async throws {
         let (model, _, window) = try await fixture()
         for i in 0..<150 { model.apply(makeRun("run \(i)", status: .running, createdAt: Date(timeIntervalSince1970: Double(i)))) }
@@ -333,7 +346,9 @@ import Testing
         model.open(flow: URL(fileURLWithPath: "/b/x.flow"))
         model.screen = .dashboard
         try await window.runUntilIdle()
-        let titles = try window.elements { ($0.identifier ?? "").hasPrefix("working.flow.") && !($0.identifier ?? "").hasSuffix("open") && !($0.identifier ?? "").hasSuffix("dismiss") }
+        let chips = try window.elements { ($0.identifier ?? "").hasPrefix("working.flow.") && !($0.identifier ?? "").hasSuffix("title") && !($0.identifier ?? "").hasSuffix("open") && !($0.identifier ?? "").hasSuffix("dismiss") }
+        #expect(Set(chips.compactMap(\.identifier)).count == 2)
+        let titles = try window.elements { ($0.identifier ?? "").hasPrefix("working.flow.") && ($0.identifier ?? "").hasSuffix(".title") }
         #expect(Set(titles.compactMap(\.identifier)).count == 2)
     }
 

@@ -43,7 +43,7 @@ struct FinishedRow: Component {
         VStack(spacing: 0) {
             HStack(spacing: Spacing.md) {
                 Text(verbatim: run.title).font(size: 13).foregroundColor(Palette.text)
-                    .accessibilityIdentifier("finished.\(id.rawValue)")
+                    .accessibilityIdentifier("finished.\(id.rawValue).title")
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(verbatim: result).font(size: 12).foregroundColor(color)
@@ -56,6 +56,8 @@ struct FinishedRow: Component {
             .onTapGesture { model.open(run: id) }
             Divider()
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("finished.\(id.rawValue)")
     }
 
     static func result(_ status: RunStatus) -> (String, Color) {

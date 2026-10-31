@@ -45,7 +45,7 @@ struct NeedsCard: Component {
         let (label, detail, color) = Self.describe(item)
         let id = item.id
         VStack(alignment: .leading, spacing: 6) {
-            Text(verbatim: label).font(size: 11).foregroundColor(color).accessibilityIdentifier(id)
+            Text(verbatim: label).font(size: 11).foregroundColor(color).accessibilityIdentifier("\(id).label")
             Text(verbatim: run.title).font(size: 13).foregroundColor(Palette.text)
             Text(verbatim: detail).font(size: 13).foregroundColor(Palette.body)
             if case .question = item.kind {
@@ -63,6 +63,8 @@ struct NeedsCard: Component {
         .background(Color(Hsla.rgb(0x1a1712)))
         .cornerRadius(10)
         .border(color, width: 1)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(id)
     }
 
     @ElementBuilder
@@ -70,19 +72,20 @@ struct NeedsCard: Component {
         let run = item.run
         let model = model
         let key = item.key
-        switch item.kind {
-        case .pickWinner:
+        // A question's primary action is its reply box above, so it has no button here.
+        if case .pickWinner = item.kind {
             Button("Compare & pick") { model.open(run: run.id) }
                 .buttonStyle(.bordered).accessibilityIdentifier("\(item.id).primary")
-        case .question:
-            Spacer().frame(width: 0)
-        case .deniedTools(let tools):
+        }
+        if case .deniedTools(let tools) = item.kind {
             Button("Allow") { Task { await model.allowAndContinue(run: run.id, node: key, tools: tools) } }
                 .buttonStyle(.bordered).accessibilityIdentifier("\(item.id).primary")
-        case .interrupted:
+        }
+        if case .interrupted = item.kind {
             Button("Resume") { Task { await model.resume(run.id) } }
                 .buttonStyle(.bordered).accessibilityIdentifier("\(item.id).primary")
-        case .failed:
+        }
+        if case .failed = item.kind {
             Button("Retry") { Task { await model.retry(run.id, node: key) } }
                 .buttonStyle(.bordered).accessibilityIdentifier("\(item.id).primary")
         }

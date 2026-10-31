@@ -20,10 +20,8 @@ public struct StudioView: Component {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
-        .overlay(alignment: .topLeading) {
-            // A container's identifier would replace those inside it, so the marker is a zero-size element.
-            Spacer().frame(width: 0, height: 0).accessibilityIdentifier("studio")
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("studio")
     }
 }
 

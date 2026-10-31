@@ -57,7 +57,7 @@ import Testing
         try await showStudio(model, window)
         _ = try window.element(identifier: "studio")
         for node in BuiltinFlows.fixGitHubIssue.nodes {
-            #expect(try window.element(identifier: "node.\(node.id.rawValue)").value == node.title)
+            #expect(try window.element(identifier: "node.\(node.id.rawValue).title").value == node.title)
         }
         #expect(model.draft?.repo == repo)
         #expect(model.draft?.url == nil)

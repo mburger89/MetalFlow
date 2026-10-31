@@ -104,7 +104,7 @@ struct NodeCardView: Component {
         VStack(alignment: .leading, spacing: Pixels(Float(4 * z))) {
             Text(verbatim: node.kindLabel).font(size: 10.5 * z).foregroundColor(node.kindColor)
             Text(verbatim: node.title).font(size: 14 * z).foregroundColor(Palette.text)
-                .accessibilityIdentifier("node.\(node.id.rawValue)")
+                .accessibilityIdentifier("node.\(node.id.rawValue).title")
                 .lineLimit(1)
             Text(verbatim: node.summary).font(size: 12 * z).foregroundColor(Palette.body).lineLimit(2)
             Spacer()
@@ -119,6 +119,8 @@ struct NodeCardView: Component {
         .background(Color(Hsla.rgb(0x181b21)))
         .cornerRadius(Pixels(Float(10 * z)))
         .border(selected ? Palette.accent : Color(Hsla.rgb(0x262a31)), width: Pixels(selected ? 2 : 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("node.\(node.id.rawValue)")
         .offset(x: origin.x, y: origin.y)
     }
 }

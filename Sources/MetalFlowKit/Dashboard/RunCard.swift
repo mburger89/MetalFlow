@@ -19,7 +19,7 @@ struct RunCard: Component {
         let id = run.id
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(verbatim: run.title).font(size: 13).foregroundColor(Palette.text)
-                .accessibilityIdentifier("run.\(id.rawValue)")
+                .accessibilityIdentifier("run.\(id.rawValue).title")
                 .lineLimit(1)
             HStack(spacing: Spacing.sm) {
                 Chip(text: run.flow.name, mono: false)
@@ -63,6 +63,8 @@ struct RunCard: Component {
         .background(Palette.panel)
         .cornerRadius(10)
         .border(Palette.line, width: 1)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("run.\(id.rawValue)")
     }
 }
 
