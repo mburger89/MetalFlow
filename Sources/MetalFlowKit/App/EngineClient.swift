@@ -35,6 +35,10 @@ public protocol EngineClient: Sendable {
     func knownRepos() -> [URL]
     /// The `.flow` files of a repository.
     func flows(in repo: URL) -> [URL]
+    /// Every flow the app can open: built-ins, the library, then each known repo's `.flows`.
+    func flowCatalog() -> [FlowEntry]
+    /// Where library flows live.
+    var libraryDirectory: URL { get }
     /// Whether `url` is the top level of a git repository (it has a `.git` entry).
     func isGitRepo(_ url: URL) async -> Bool
     /// Loads a flow file.
@@ -113,6 +117,8 @@ public struct LiveEngineClient: EngineClient {
     }
     public func knownRepos() -> [URL] { store.knownRepos() }
     public func flows(in repo: URL) -> [URL] { RunEngine.flows(in: repo) }
+    public func flowCatalog() -> [FlowEntry] { FlowCatalog.entries(library: store.flowsDirectory, repos: store.knownRepos()) }
+    public var libraryDirectory: URL { store.flowsDirectory }
     public func isGitRepo(_ url: URL) async -> Bool {
         FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
     }

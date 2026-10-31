@@ -116,6 +116,10 @@ actor FakeEngineClient: EngineClient {
     /// Holds `flows(in:)` (called off the main actor) until released.
     nonisolated let scanGate = ScanGate()
     nonisolated func flows(in repo: URL) -> [URL] { scanGate.pass(); return flowFiles }
+    /// What `flowCatalog()` returns, and `libraryDirectory`.
+    nonisolated let catalog = CatalogBox()
+    nonisolated func flowCatalog() -> [FlowEntry] { catalog.entries }
+    nonisolated var libraryDirectory: URL { catalog.library }
     func isGitRepo(_ url: URL) async -> Bool { gitRepoPaths.contains(url.path) }
     /// Every `saveFlow` call, and whether `loadFlow` fails.
     nonisolated let files = FileLog()
@@ -221,4 +225,19 @@ final class FileLog: @unchecked Sendable {
         set { lock.withLock { _failSave = newValue } }
     }
     func record(_ flow: Flow, _ url: URL) { lock.withLock { _saved.append((flow, url)) } }
+}
+
+/// Seedable catalog state for `FakeEngineClient`.
+final class CatalogBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _entries: [FlowEntry] = []
+    private var _library = URL(fileURLWithPath: "/tmp/fake-library", isDirectory: true)
+    var entries: [FlowEntry] {
+        get { lock.withLock { _entries } }
+        set { lock.withLock { _entries = newValue } }
+    }
+    var library: URL {
+        get { lock.withLock { _library } }
+        set { lock.withLock { _library = newValue } }
+    }
 }

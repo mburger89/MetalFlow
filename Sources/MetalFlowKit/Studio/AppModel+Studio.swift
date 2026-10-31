@@ -18,33 +18,12 @@ extension AppModel {
     }
 
     /// The text a unsaved flow's file name is made of: lowercase letters and digits joined by dashes.
-    nonisolated static func slug(_ name: String) -> String {
-        var out = ""
-        var dash = false
-        for ch in name.lowercased() {
-            if ch.isASCII, ch.isLetter || ch.isNumber {
-                if dash, !out.isEmpty { out.append("-") }
-                out.append(ch)
-                dash = false
-            } else {
-                dash = true
-            }
-        }
-        return out.isEmpty ? "flow" : out
-    }
+    nonisolated static func slug(_ name: String) -> String { FlowCatalog.slug(name) }
 
     /// Where an unsaved flow goes: `<repo>/.flows/<slug>.flow`, or `-2`, `-3`... when taken.
     /// Reads the directory, so it runs off the main actor.
     nonisolated static func newFlowURL(name: String, repo: URL) -> URL {
-        let dir = repo.appendingPathComponent(FlowFile.directoryName, isDirectory: true)
-        let base = slug(name)
-        var candidate = dir.appendingPathComponent("\(base).flow")
-        var n = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = dir.appendingPathComponent("\(base)-\(n).flow")
-            n += 1
-        }
-        return candidate
+        FlowCatalog.newFileURL(name: name, in: repo.appendingPathComponent(FlowFile.directoryName, isDirectory: true))
     }
 
     /// Opens the Studio with the built-in flow when it has nothing open and a repo is selected.
