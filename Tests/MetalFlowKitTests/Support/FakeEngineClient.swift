@@ -75,7 +75,14 @@ actor FakeEngineClient: EngineClient {
     /// What `discover` returns (once: the fake forgets them, as the real engine caches what it found).
     var discoverable: [Run] = []
     func setDiscoverable(_ runs: [Run]) { discoverable = runs }
-    func discover() async -> [Run] { calls.append("discover"); defer { discoverable = [] }; return discoverable }
+    /// What `discover` reports as deleted (once, like `discoverable`).
+    var vanishable: [RunID] = []
+    func setVanished(_ ids: [RunID]) { vanishable = ids }
+    func discover() async -> RunEngine.Discovery {
+        calls.append("discover")
+        defer { discoverable = []; vanishable = [] }
+        return RunEngine.Discovery(found: discoverable, vanished: vanishable)
+    }
     private var holdingPicks = false
     private var heldPicks: [CheckedContinuation<Void, Never>] = []
     /// Makes `pick` suspend until `releasePicks()`.

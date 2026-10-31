@@ -274,16 +274,35 @@ public actor RunEngine {
         return saved
     }
 
-    /// Runs saved by another process that this engine has not seen. Adds them to the cache and returns them. Takes no
-    /// locks and leaves known runs alone; a file that cannot be read yet is skipped and retried on a later pass.
-    public func discover() -> [Run] {
-        var found: [Run] = []
-        for id in store.ids() where runs[id] == nil {
+    /// What one `discover()` pass learned about the store.
+    public struct Discovery: Sendable, Equatable {
+        /// Runs saved by another process that this engine had not seen; now cached.
+        public var found: [Run]
+        /// Cached runs whose file is gone (another process deleted them); now dropped from the cache.
+        public var vanished: [RunID]
+        public init(found: [Run] = [], vanished: [RunID] = []) {
+            self.found = found
+            self.vanished = vanished
+        }
+    }
+
+    /// Compares the store with the cache. Runs saved by another process that this engine has not seen are cached and
+    /// reported as found; a file that cannot be read yet is skipped and retried on a later pass. Cached runs whose file
+    /// is gone are dropped and reported as vanished, unless this engine holds them (a lock or a pass). Takes no locks
+    /// and leaves known runs alone.
+    public func discover() -> Discovery {
+        var discovery = Discovery()
+        let saved = Set(store.ids())
+        for id in saved where runs[id] == nil {
             guard let run = store.load(id) else { continue }
             runs[id] = run
-            found.append(run)
+            discovery.found.append(run)
         }
-        return found
+        for id in runs.keys where !saved.contains(id) && locks[id] == nil && tasks[id] == nil {
+            runs[id] = nil
+            discovery.vanished.append(id)
+        }
+        return discovery
     }
 
     // MARK: - State

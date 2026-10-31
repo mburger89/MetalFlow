@@ -188,11 +188,41 @@ public final class AppModel {
         }
     }
 
-    /// Adds the runs another process started since the app last looked.
+    /// Adds the runs another process started since the app last looked, and forgets the ones it deleted.
     public func discoverRuns() async {
-        for run in await client.discover() where runs[run.id] == nil {
+        let discovery = await client.discover()
+        for run in discovery.found where runs[run.id] == nil {
             if run.status == .running, await client.isRunningElsewhere(run.id) { runningElsewhere.insert(run.id) }
             apply(run, restoring: false, fromElsewhere: true)
+        }
+        for id in discovery.vanished { forget(id) }
+    }
+
+    /// Removes a run another process deleted: from the lists, the working set, the notification and badge, and the
+    /// caches. Its open detail closes with a notice.
+    private func forget(_ id: RunID) {
+        guard let run = runs[id] else { return }
+        let wasNeedsYou = bucket(of: run) == .needsYou
+        remove(id, from: bucket(of: run))
+        runs[id] = nil
+        order.removeAll { $0 == id }
+        runningElsewhere.remove(id)
+        workingOn.removeAll { $0 == .run(id) }
+        pickOutcomes[id] = nil
+        for key in diffChunks.keys where key.run == id { diffChunks[key] = nil }
+        for key in diffRevisions.keys where key.run == id { diffRevisions[key] = nil }
+        if openDiff?.run == id { openDiff = nil }
+        if studioRun == id { studioRun = nil }
+        if confirmingDiscard == id { confirmingDiscard = nil }
+        postedBodies[id] = nil
+        if wasNeedsYou {
+            enqueue(.remove(id.rawValue))
+            enqueue(.badge(needsYou.count))
+        }
+        if selectedRun == id {
+            selectedRun = nil
+            screen = .dashboard
+            notice = Notice("This run was discarded elsewhere.")
         }
     }
 

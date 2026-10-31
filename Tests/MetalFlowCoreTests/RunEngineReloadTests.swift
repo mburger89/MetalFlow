@@ -80,7 +80,7 @@ import Testing
         let run = Run(flow: h.flow(), title: "from mflow", repo: h.repo.url, baseBranch: "main", branch: "mf/x",
                       worktree: h.repo.url, createdAt: Date(timeIntervalSince1970: 5), status: .running, nodes: [:])
         try theirs.save(run)
-        let found = await h.engine.discover()
+        let found = await h.engine.discover().found
         #expect(found.map(\.id) == [run.id])
         #expect(await h.engine.run(run.id)?.title == "from mflow")
         #expect(store(h).isLocked(run.id) == false, "discovering takes no lock")
@@ -96,7 +96,7 @@ import Testing
         other.revision += 9
         other.title = "from disk"
         try h.store.save(other)
-        #expect(await h.engine.discover().isEmpty)
+        #expect(await h.engine.discover() == .init())
         #expect(await h.engine.run(id)?.title == mine.title)
     }
 
@@ -107,13 +107,38 @@ import Testing
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent("\(id.rawValue).json")
         try "{ half".write(to: file, atomically: true, encoding: .utf8)
-        #expect(await h.engine.discover().isEmpty)
+        #expect(await h.engine.discover().found.isEmpty)
         #expect(await h.engine.run(id) == nil)
         // Once the file is whole, a later pass finds it.
         let run = Run(id: id, flow: h.flow(), title: "late", repo: h.repo.url, baseBranch: "main", branch: "mf/y",
                       worktree: h.repo.url, createdAt: Date(timeIntervalSince1970: 6), status: .running, nodes: [:])
         try h.store.save(run)
-        #expect(await h.engine.discover().map(\.id) == [id])
+        #expect(await h.engine.discover().found.map(\.id) == [id])
+    }
+
+    @Test func discoverReportsDeletedRun() async throws {
+        let h = try Harness()
+        let theirs = RunStore(root: h.store.root)
+        let run = Run(flow: h.flow(), title: "from mflow", repo: h.repo.url, baseBranch: "main", branch: "mf/x",
+                      worktree: h.repo.url, createdAt: Date(timeIntervalSince1970: 5), status: .completed, nodes: [:])
+        try theirs.save(run)
+        #expect(await h.engine.discover().found.map(\.id) == [run.id])
+        try theirs.delete(run.id)
+        let again = await h.engine.discover()
+        #expect(again.vanished == [run.id])
+        #expect(again.found.isEmpty)
+        #expect(await h.engine.run(run.id) == nil, "dropped from the cache")
+        #expect(await h.engine.discover() == .init(), "reported once")
+    }
+
+    @Test func discoverKeepsHeldRunWhoseFileVanished() async throws {
+        let (hold, cont) = AsyncStream<Void>.makeStream()
+        defer { cont.finish() }
+        let h = try Harness(planHold: hold)
+        let id = try await heldRun(h)
+        try h.store.delete(id)
+        #expect(await h.engine.discover() == .init())
+        #expect(await h.engine.run(id) != nil)
     }
 
     private func store(_ h: Harness) -> RunStore { h.store }

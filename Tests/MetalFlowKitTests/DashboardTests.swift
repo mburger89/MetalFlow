@@ -313,6 +313,51 @@ import Testing
         #expect(model.running.count == 1)
     }
 
+    @Test func vanishedRunLeavesDashboard() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let keep = makeRun("keep", status: .completed, createdAt: Date(timeIntervalSince1970: 2_000))
+        let (model, client, _) = try await elsewhereFixture(theirs)
+        await client.setDiscoverable([keep])
+        await model.discoverRuns()
+        model.open(run: theirs.id)
+        await client.setVanished([theirs.id])
+        await model.discoverRuns()
+        #expect(model.runs[theirs.id] == nil)
+        #expect(!model.order.contains(theirs.id))
+        #expect(model.finished.map(\.id) == [keep.id])
+        #expect(model.running.isEmpty)
+        #expect(model.runningElsewhere.isEmpty)
+        #expect(!model.workingOn.contains(.run(theirs.id)))
+    }
+
+    @Test func vanishedRunClosesItsDetail() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let (model, client, _) = try await elsewhereFixture(theirs)
+        model.open(run: theirs.id)
+        #expect(model.selectedRun == theirs.id)
+        await client.setVanished([theirs.id])
+        await model.discoverRuns()
+        #expect(model.selectedRun == nil)
+        #expect(model.screen == .dashboard)
+        #expect(model.notice == Notice("This run was discarded elsewhere."))
+    }
+
+    @Test func vanishedNeedsYouRunClearsNotificationAndBadge() async throws {
+        let ask = makeRun("asks", status: .needsYou, nodes: [
+            NodeKey(node: "pick"): NodeRun(state: .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))])
+        let (model, client, notifier) = try await elsewhereFixture(makeRun("theirs", status: .running))
+        await client.setDiscoverable([ask])
+        await model.discoverRuns()
+        await model.flushNotifications()
+        #expect(notifier.badges.last == 1)
+        await client.setVanished([ask.id])
+        await model.discoverRuns()
+        await model.flushNotifications()
+        #expect(model.needsYou.isEmpty)
+        #expect(notifier.events.contains(.remove(id: ask.id.rawValue)))
+        #expect(notifier.badges.last == 0)
+    }
+
     @Test func quitWithOnlyOtherProcessRunsQuitsNow() async throws {
         let theirs = makeRun("theirs", status: .running)
         let client = FakeEngineClient(restored: [theirs], repos: [repo])
