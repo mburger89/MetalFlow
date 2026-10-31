@@ -57,13 +57,17 @@ public final class AppModel {
         didSet {
             guard draft !== oldValue else { return }
             studioRun = nil
-            draft?.onRetarget = { [weak self] in self?.studioRun = nil }
+            studioValues = [:]
         }
     }
     /// The run overlaid on the Studio canvas; nil shows the definition only.
     public var studioRun: RunID?
-    /// The issue typed in the Studio's launch field.
-    public var studioIssue = ""
+    /// What was typed in the Studio's launch row, by field name.
+    public var studioValues: [String: String] = [:]
+    /// True while the save-destination panel is showing.
+    public internal(set) var isSavePanelVisible = false
+    /// The save waiting for the destination panel's answer.
+    var saveDestinationWaiter: CheckedContinuation<SaveDestination?, Never>?
     /// The run shown in detail, if any.
     public var selectedRun: RunID? {
         didSet { if selectedRun != oldValue { detailMayHaveOpened() } }

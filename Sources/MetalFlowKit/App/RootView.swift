@@ -95,6 +95,9 @@ public func rootView(model: AppModel) -> some Element {
         if model.isOpenFlowVisible {
             OpenFlowPanel(model: model)
         }
+        if model.isSavePanelVisible {
+            SavePanel(model: model)
+        }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
 }

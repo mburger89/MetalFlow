@@ -83,7 +83,6 @@ extension AppModel {
     /// Selects the repo new drafts default to.
     public func selectRepo(_ url: URL?) {
         selectedRepo = url
-        retargetPristineDraft()
     }
 
     /// Re-reads the catalog (off the main actor) and keeps the selected flow, or selects the first entry. Repos

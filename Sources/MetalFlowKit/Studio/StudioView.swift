@@ -12,10 +12,6 @@ public struct StudioView: Component {
         VStack(spacing: 0) {
             if let draft = model.draft {
                 StudioBody(model: model, draft: draft)
-            } else {
-                Text(verbatim: "Add a repo on the dashboard to open a flow.").foregroundColor(Palette.muted)
-                    .accessibilityIdentifier("studio.empty")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -41,6 +37,13 @@ struct StudioBody: Component {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Palette.bad.opacity(0.14))
             }
+            if let message = model.studioLaunch.error {
+                Text(verbatim: message).font(size: 12).foregroundColor(Palette.bad)
+                    .accessibilityIdentifier("studio.launchError")
+                    .lineLimit(2)
+                    .padding(insets(top: 6, right: 14, bottom: 6, left: 14))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             // Palette | canvas | inspector; the divider positions persist across launches (UserDefaults).
             HSplitView {
                 PaletteView(draft: draft)
@@ -62,7 +65,7 @@ struct StudioBody: Component {
     }
 }
 
-/// Flow name, file, run picker, Save and Launch with issue.
+/// Flow name, file, run picker, Save, and the launch row: one control per launch field and Launch.
 struct StudioToolbar: Component {
     let model: AppModel
     let draft: FlowDraft
@@ -94,16 +97,42 @@ struct StudioToolbar: Component {
                 .keyboardShortcut("s")
                 .accessibilityIdentifier("studio.save")
                 .disabled(!valid)
-            TextField("Issue #68 or URL", text: Binding(get: { model.studioIssue }, set: { model.studioIssue = $0 }))
-                .frame(width: Pixels(180))
-                .accessibilityIdentifier("studio.issue")
-            Button("▶ Launch with issue…") { Task { await model.launchFromStudio() } }
+            let launch = model.studioLaunch
+            ForEach(launch.fields, id: \.name) { field in
+                studioControl(field)
+            }
+            Button("▶ Launch") { Task { await model.launchFromStudio() } }
                 .buttonStyle(.glassProminent)
                 .accessibilityIdentifier("studio.launch")
-                .disabled(!valid || model.isLaunching || AppModel.trimmed(model.studioIssue).isEmpty)
+                .disabled(!valid || !launch.canLaunch)
         }
         .padding(insets(top: 8, right: 14, bottom: 8, left: 14))
         .background(Palette.chrome)
+    }
+
+    @ElementBuilder
+    private func studioControl(_ field: LaunchField) -> some ElementGroup {
+        let binding = Binding(
+            get: { model.studioValue(field) }, set: { model.studioValues[field.name] = $0 })
+        if field.kind == .repo {
+            if model.repos.isEmpty {
+                Text("No repos yet").foregroundColor(Palette.muted).accessibilityIdentifier("studio.field.repo")
+            } else {
+                Picker("", selection: binding) {
+                    ForEach(model.repos, id: \.path) { url in
+                        Text(verbatim: url.lastPathComponent).tag(url.path)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: Pixels(140))
+                .accessibilityIdentifier("studio.field.repo")
+            }
+        } else {
+            TextField(field.name, text: binding)
+                .onSubmit { Task { await model.launchFromStudio() } }
+                .frame(width: Pixels(160))
+                .accessibilityIdentifier("studio.field.\(field.name)")
+        }
     }
 
     static func fileText(_ draft: FlowDraft) -> String {

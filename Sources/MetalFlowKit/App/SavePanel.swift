@@ -1,0 +1,43 @@
+import Foundation
+import MetalUI
+
+/// The save-destination panel: where a flow that has no file yet is saved. An in-window overlay like the Open Flow
+/// panel. Escape or Cancel cancels the save.
+struct SavePanel: Component {
+    let model: AppModel
+    @FocusState var focused: Bool
+
+    var content: some ElementGroup {
+        ZStack {
+            Palette.chrome.opacity(0.6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onTapGesture { model.chooseSaveDestination(nil) }
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                Text("Save flow to").font(size: 15).foregroundColor(Palette.text)
+                Button("Library") { model.chooseSaveDestination(.library) }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("save.dest.library")
+                ForEach(model.repos, id: \.path) { repo in
+                    Button(repo.lastPathComponent) { model.chooseSaveDestination(.repo(repo)) }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("save.dest.\(repo.lastPathComponent)")
+                }
+                Button("Cancel") { model.chooseSaveDestination(nil) }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("save.cancel")
+            }
+            .padding(Edges(all: Spacing.lg))
+            .frame(width: Pixels(420))
+            .background(Palette.panel)
+            .cornerRadius(14)
+            .border(Palette.line, width: 1)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("save.panel")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .focusable()
+        .focused($focused)
+        .onKeyPress(.escape) { model.chooseSaveDestination(nil); return .handled }
+        .task { focused = true }
+    }
+}

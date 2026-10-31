@@ -78,17 +78,20 @@ import Testing
         try await window.runUntilIdle()
         let draft = try #require(model.draft)
         #expect(model.screen == .studio)
-        #expect(draft.flow == Flow(name: "Untitled flow", nodes: [], wires: []))
-        #expect(draft.url == nil)
-        #expect(draft.repo == repo)
+        let repoNode = Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .exposed(default: nil))),
+                            position: Point(x: 24, y: 24))
+        #expect(draft.flow == Flow(name: "Untitled flow", nodes: [repoNode], wires: []))
+        #expect(draft.location == .unsaved)
         #expect(!draft.isDirty)
     }
 
-    @Test func newFlowWithoutRepoSetsNotice() async throws {
+    @Test func newFlowWithoutRepo() async throws {
         let (model, _, _) = try await fixture(repos: [])
         await model.newFlow()
-        #expect(model.notice?.text == "Add a repo on the dashboard first.")
-        #expect(model.draft == nil)
+        #expect(model.notice == nil)
+        #expect(model.screen == .studio)
+        #expect(model.draft?.flow.nodes.map(\.id) == ["repo"])
+        #expect(model.draft?.location == .unsaved)
     }
 
     @Test func newFlowWhileDirtyAsks() async throws {
@@ -154,6 +157,8 @@ import Testing
         let on486 = try menuItem(window, "File", "Save")
         #expect(on486.isEnabled)
         try window.testApp.performMenuBarItem("File", "Save")
+        try await window.runUntilIdle()
+        try window.click(window.element(identifier: "save.dest.repo"))
         // The new file name is chosen off the main actor.
         await waitUntil("the save") { !client.files.saved.isEmpty }
         #expect(client.files.saved.count == 1)
@@ -390,10 +395,30 @@ import Testing
         #expect(platform.simulateTerminateRequest() == .later)
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        #expect(platform.terminateReplies.isEmpty, "waiting for the destination")
+        try window.click(window.element(identifier: "save.dest.library"))
         await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
         #expect(client.files.saved.count == 1)
         #expect(platform.terminateReplies == [true])
         #expect(!model.quitPending)
+    }
+
+    @Test func quitSaveCancelledAtTheDestinationPanelCancelsTheQuit() async throws {
+        let (model, client, window, draft) = try await dirtyFixture()
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        try window.click(window.element(identifier: "save.cancel"))
+        await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
+        #expect(platform.terminateReplies == [false])
+        #expect(client.files.saved.isEmpty)
+        #expect(draft.isDirty && draft.location == .unsaved)
+        #expect(model.pendingAction == nil)
     }
 
     @Test func quitWithDirtyDraftDiscardQuitsWithoutSaving() async throws {
@@ -414,7 +439,9 @@ import Testing
         #expect(platform.simulateTerminateRequest() == .later)
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
         try await window.runUntilIdle()
+        try window.click(window.element(identifier: "save.dest.library"))
         await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
         #expect(platform.terminateReplies == [false])
         #expect(model.notice != nil)

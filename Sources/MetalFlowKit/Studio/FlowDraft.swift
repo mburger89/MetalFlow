@@ -14,14 +14,15 @@ public final class FlowDraft {
     public private(set) var flow: Flow {
         didSet { validation = Self.validate(flow) }
     }
-    /// The file it was loaded from or saved to; nil for a flow not yet saved.
-    public var url: URL?
-    /// The repository runs of this flow launch in and unsaved flows are saved into.
-    public var repo: URL {
-        didSet { if repo != oldValue { onRetarget?() } }
+    /// Where the flow lives: the built-in, not yet saved, a library file or a repo's `.flows` file.
+    public var location: FlowLocation
+    /// The file it was loaded from or saved to; nil for the built-in and for a flow not yet saved.
+    public var url: URL? {
+        switch location {
+        case .library(let file), .repo(_, let file): file
+        case .builtin, .unsaved: nil
+        }
     }
-    /// Called when the repo changes.
-    @ObservationIgnored var onRetarget: (() -> Void)?
     /// The flow as last loaded or saved.
     public private(set) var lastSavedFlow: Flow
     /// Whether the flow differs from the one last loaded or saved. Undoing back to it makes the draft clean.
@@ -63,11 +64,10 @@ public final class FlowDraft {
     @ObservationIgnored var pinchStart: (pan: ScreenPoint, zoom: Double)?
 
     /// Creates a draft.
-    public init(flow: Flow, url: URL?, repo: URL) {
+    public init(flow: Flow, location: FlowLocation) {
         self.flow = flow
         self.lastSavedFlow = flow
-        self.url = url
-        self.repo = repo
+        self.location = location
         self.validation = Self.validate(flow)
     }
 
@@ -227,10 +227,12 @@ public final class FlowDraft {
         if let canvasSize { geometry = geometry.fit(flow, in: canvasSize) }
     }
 
-    /// Marks the flow as saved to `url`.
-    func didSave(to url: URL) {
-        self.url = url
-        lastSavedFlow = flow
+    /// Marks `saved` (the flow as written, which save-time normalisation may have changed) as saved at `location`.
+    /// The draft shows what the file holds; its undo history is kept.
+    func didSave(_ saved: Flow, at location: FlowLocation) {
+        self.location = location
+        if saved != flow { flow = saved }
+        lastSavedFlow = saved
     }
 }
 
@@ -292,7 +294,7 @@ public enum PaletteKind: CaseIterable, Sendable {
         let prompt = PromptConfig(model: "sonnet", prompt: "", candidates: [], allowedTools: [], maxTurns: nil)
         switch self {
         case .flowInput: return .flowInput(FlowInputConfig(name: "issue", source: .githubIssue))
-        case .repo: return .repo(RepoConfig(mode: .thisRepo))
+        case .repo: return .repo(RepoConfig(mode: .exposed(default: nil)))
         case .prompt: return .prompt(prompt)
         case .shell: return .shell(ShellConfig(command: ""))
         case .gate: return .gate(ShellConfig(command: ""))

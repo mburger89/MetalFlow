@@ -282,7 +282,7 @@ import Testing
     }
 
     @Test func undoToSavedStateIsClean() async throws {
-        let draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, url: nil, repo: repo)
+        let draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .unsaved)
         #expect(draft.isDirty == false)
         draft.edit("rename") { $0.name = "Renamed" }
         #expect(draft.isDirty)
@@ -290,7 +290,7 @@ import Testing
         #expect(draft.isDirty == false, "undone back to the saved state")
         draft.redo()
         #expect(draft.isDirty)
-        draft.didSave(to: URL(fileURLWithPath: "/repo/.flows/x.flow"))
+        draft.didSave(draft.flow, at: .of(file: URL(fileURLWithPath: "/repo/.flows/x.flow")))
         #expect(draft.isDirty == false)
         draft.undo()
         #expect(draft.isDirty, "undoing past the save is an edit")
@@ -374,7 +374,7 @@ import Testing
     @Test func invalidDraftCannotSaveOrLaunch() async throws {
         let (model, client, window) = try await fixture()
         let draft = try #require(model.draft)
-        model.studioIssue = "42"
+        model.studioValues["issue"] = "42"
         try await window.runUntilIdle()
         #expect((try? window.element(identifier: "studio.validation")) == nil)
         #expect(try window.element(identifier: "studio.save").isEnabled)
@@ -425,12 +425,16 @@ import Testing
         #expect(draft.isDirty)
         let edited = draft.flow
         try await press("studio.save", in: window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
         // The new file name is chosen off the main actor.
         await waitUntil("the save") { !client.files.saved.isEmpty }
         try await window.runUntilIdle()
         let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
         #expect(client.files.saved.map(\.url) == [expected])
-        #expect(client.files.saved.first?.flow == edited)
+        // A repo save turns the unset Exposed repo into This repo.
+        let written = FlowCatalog.prepareForSave(edited, destination: .of(file: expected), origin: nil).0
+        #expect(client.files.saved.first?.flow == written)
+        #expect(draft.flow == written)
         #expect(draft.isDirty == false)
         #expect(draft.url == expected)
         #expect(model.workingOn.contains(.flow(expected)))
@@ -624,5 +628,186 @@ import Testing
         #expect(model.notice?.text == "engine said no")
         #expect(model.pendingOpen == nil)
         #expect(!model.workingOn.contains(.flow(b)))
+    }
+
+    // MARK: Destination, new flows, Open Flow (Task 6)
+
+    /// Starts a save and waits for the destination panel.
+    func startSave(_ model: AppModel, _ window: TestWindow) async throws -> Task<Bool, Never> {
+        let saving = Task { await model.saveDraft() }
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        return saving
+    }
+
+    @Test func firstSaveAsksDestination() async throws {
+        let (model, client, window) = try await fixture(repos: [URL(fileURLWithPath: "/work/alpha"), URL(fileURLWithPath: "/work/beta")])
+        let draft = try #require(model.draft)
+        #expect(draft.location == .unsaved)
+        try await press("studio.save", in: window)
+        _ = try window.element(identifier: "save.panel")
+        for id in ["save.dest.library", "save.dest.alpha", "save.dest.beta", "save.cancel"] {
+            _ = try window.element(identifier: id)
+        }
+        #expect(client.files.saved.isEmpty, "nothing is written before a destination is chosen")
+        // Escape cancels.
+        window.typeKey(.escape)
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "save.panel")) == nil)
+        #expect(client.files.saved.isEmpty && draft.location == .unsaved)
+        // The built-in asks too.
+        model.loadBuiltinDraft()
+        try await press("studio.save", in: window)
+        _ = try window.element(identifier: "save.panel")
+    }
+
+    @Test func saveToLibraryWritesThere() async throws {
+        let library = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: library) }
+        let (model, client, window) = try await fixture()
+        client.catalog.library = library
+        let draft = try #require(model.draft)
+        let saving = try await startSave(model, window)
+        try await press("save.dest.library", in: window)
+        #expect(await saving.value)
+        let expected = library.appendingPathComponent("fix-github-issue.flow")
+        #expect(client.files.saved.map(\.url) == [expected])
+        #expect(draft.location == .library(file: expected))
+        #expect(draft.isDirty == false)
+        #expect(model.workingOn.contains(.flow(expected)))
+        // The built-in's Repo node is already Exposed, so there is nothing to say.
+        #expect(model.notice == nil)
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.file").value == "fix-github-issue.flow")
+        // Saving again writes the same file, without asking.
+        #expect(await model.saveDraft())
+        #expect(client.files.saved.map(\.url) == [expected, expected])
+        #expect(!model.isSavePanelVisible)
+    }
+
+    @Test func saveToLibraryNoticeForThisRepo() async throws {
+        let (model, client, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("this repo") { flow in
+            for i in flow.nodes.indices where flow.nodes[i].id == "repo" { flow.nodes[i].kind = .repo(RepoConfig(mode: .thisRepo)) }
+        }
+        let saving = try await startSave(model, window)
+        model.chooseSaveDestination(.library)
+        #expect(await saving.value)
+        guard case .repo(let config)? = client.files.saved.first?.flow.node("repo")?.kind else { Issue.record("no repo"); return }
+        #expect(config.mode == .exposed(default: nil))
+        #expect(model.notice == Notice("Saved to the library: the repo is now asked at launch (no default).", kind: .info))
+    }
+
+    @Test func saveToRepoMakesThisRepo() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window) = try await fixture(repos: [dir])
+        let draft = try #require(model.draft)
+        let saving = try await startSave(model, window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
+        #expect(await saving.value)
+        let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
+        guard case .repo(let config)? = client.files.saved.first?.flow.node("repo")?.kind else { Issue.record("no repo"); return }
+        #expect(config.mode == .thisRepo)
+        #expect(draft.location == .of(file: expected))
+        guard case .repo(let shown)? = draft.flow.node("repo")?.kind else { return }
+        #expect(shown.mode == .thisRepo, "the draft shows what the file holds")
+        #expect(draft.isDirty == false)
+        #expect(draft.lastSavedFlow == draft.flow)
+    }
+
+    @Test func saveCancelKeepsDraftUnsaved() async throws {
+        let (model, client, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        let saving = try await startSave(model, window)
+        try await press("save.cancel", in: window)
+        #expect(await saving.value == false)
+        #expect(!model.isSavePanelVisible)
+        #expect(draft.location == .unsaved && draft.isDirty)
+        #expect(client.files.saved.isEmpty)
+        #expect(model.notice == nil)
+    }
+
+    @Test func dirtySwitchSaveOnUnsavedAsksDestination() async throws {
+        let (model, client, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        let target = repo.appendingPathComponent(".flows/b.flow")
+        model.open(flow: target)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        #expect(model.pendingAction == nil, "the alert's answer was taken first")
+        #expect(model.draft === draft, "not switched yet")
+        try await press("save.dest.library", in: window)
+        await waitUntil("the switch") { model.draft?.url == target }
+        #expect(client.files.saved.count == 1)
+        // Cancelling the panel cancels the switch.
+        let again = try #require(model.draft)
+        again.edit("rename") { $0.name = "Edited 2" }
+        model.draft = FlowDraft(flow: again.flow, location: .unsaved)
+        let other = try #require(model.draft)
+        other.edit("rename") { $0.name = "Edited 3" }
+        model.open(flow: repo.appendingPathComponent(".flows/c.flow"))
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        try await press("save.cancel", in: window)
+        await waitUntil("the panel to go") { !model.isSavePanelVisible }
+        #expect(model.draft === other && other.isDirty && other.location == .unsaved)
+        #expect(client.files.saved.count == 1)
+        #expect(model.pendingAction == nil)
+    }
+
+    @Test func newFlowLaunchesWithFields() async throws {
+        let (model, client, window) = try await fixture()
+        await model.newFlow()
+        try await window.runUntilIdle()
+        let draft = try #require(model.draft)
+        #expect(draft.flow.nodes.map(\.id) == ["repo"])
+        // The repo field is the one launch field.
+        #expect(model.studioLaunch.fields.map(\.name) == ["repo"])
+        model.studioValues["repo"] = "/repo"
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.launch").isEnabled)
+        #expect(await model.launchFromStudio() != nil)
+        #expect(await client.launches.first?.values == ["repo": "/repo"])
+        #expect(await client.launches.first?.location == .unsaved)
+    }
+
+    @Test func paletteRepoDefaultsToExposed() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("palette.repo", in: window)
+        guard case .repo(let config)? = draft.flow.node(try #require(draft.selection))?.kind else { Issue.record("not a repo"); return }
+        #expect(config.mode == .exposed(default: nil))
+    }
+
+    @Test func openFlowListsCatalog() async throws {
+        let (model, client, window) = try await fixture()
+        let lib = URL(fileURLWithPath: "/lib/mine.flow"), inRepo = URL(fileURLWithPath: "/repo/.flows/theirs.flow")
+        client.catalog.entries = [
+            FlowEntry(id: "builtin:Fix GitHub issue", name: "Fix GitHub issue", location: .builtin, file: nil),
+            FlowEntry(id: lib.path, name: "Mine", location: .library(file: lib), file: lib),
+            FlowEntry(id: inRepo.path, name: "Theirs", location: .of(file: inRepo), file: inRepo),
+        ]
+        await model.refreshCatalog()
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "openFlow.builtin").label == "Fix GitHub issue \u{2014} Built-in")
+        #expect(try window.element(identifier: "openFlow.mine.flow").label == "Mine \u{2014} Library")
+        #expect(try window.element(identifier: "openFlow.theirs.flow").label == "Theirs \u{2014} repo")
+        try await press("openFlow.mine.flow", in: window)
+        #expect(model.draft?.location == .library(file: lib))
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        try await press("openFlow.builtin", in: window)
+        #expect(model.draft?.location == .builtin)
+        #expect(model.screen == .studio)
+        #expect(!model.isOpenFlowVisible)
     }
 }

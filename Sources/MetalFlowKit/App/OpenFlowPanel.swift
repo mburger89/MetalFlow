@@ -1,4 +1,5 @@
 import Foundation
+import MetalFlowCore
 import MetalUI
 
 /// The Open Flow panel (⌘O): a layer over the window with the catalog's flow files and Cancel.
@@ -14,15 +15,14 @@ struct OpenFlowPanel: Component {
                 .onTapGesture { model.hideOpenFlow() }
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("Open flow").font(size: 15).foregroundColor(Palette.text)
-                let files = model.catalog.compactMap(\.file)
-                if files.isEmpty {
+                if model.catalog.isEmpty {
                     Text("No flows").foregroundColor(Palette.muted)
                         .accessibilityIdentifier("openFlow.empty")
                 } else {
-                    ForEach(files, id: \.self) { url in
-                        Button(url.lastPathComponent) { model.chooseFlow(url) }
+                    ForEach(model.catalog, id: \.id) { entry in
+                        Button(LaunchBar.title(of: entry)) { model.chooseEntry(entry) }
                             .buttonStyle(.bordered)
-                            .accessibilityIdentifier("openFlow.\(url.lastPathComponent)")
+                            .accessibilityIdentifier(Self.identifier(of: entry))
                     }
                 }
                 Button("Cancel") { model.hideOpenFlow() }
@@ -42,5 +42,12 @@ struct OpenFlowPanel: Component {
         .focused($focused)
         .onKeyPress(.escape) { model.hideOpenFlow(); return .handled }
         .task { focused = true }
+    }
+}
+
+extension OpenFlowPanel {
+    /// `openFlow.builtin` for the built-in, otherwise `openFlow.<file name>`.
+    static func identifier(of entry: FlowEntry) -> String {
+        entry.file.map { "openFlow.\($0.lastPathComponent)" } ?? "openFlow.builtin"
     }
 }
