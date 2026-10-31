@@ -54,6 +54,8 @@ extension Flow {
         switch error {
         case .unboundInput(let id, let name):
             return FlowError.unboundMessage(title: node(id)?.title ?? id.rawValue, name: name)
+        case .inputBoundTwice(let id, let name):
+            return "\(node(id)?.title ?? id.rawValue): input {\(name)} is both wired and set — choose one"
         default:
             return error.errorDescription ?? "\(error)"
         }

@@ -76,4 +76,11 @@ import Testing
         #expect(r.position == Point(x: 24, y: 24))
         #expect(r.kind == .repo(RepoConfig(mode: .exposed(default: nil))))
     }
+
+    @Test func implicitRepoNodeIdFindsAFreeOne() throws {
+        let json = #"{"formatVersion":1,"flow":{"name":"x","wires":[],"nodes":[{"id":"repo","title":"A","kind":{"pick":{}},"position":{"x":0,"y":0}},{"id":"repo2","title":"B","kind":{"pick":{}},"position":{"x":0,"y":0}}]}}"#
+        let (root, url) = try writeLegacy(json, dir: ".flows")
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(try FlowFile.load(from: url).repoNodes.first?.id == "repo3")
+    }
 }

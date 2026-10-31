@@ -39,6 +39,8 @@ public enum LaunchError: Error, Equatable, Sendable {
     case invalid(FlowError)
     case noRepoNode, multipleRepoNodes
     case thisRepoOutsideRepo
+    /// A Fixed repo has no path, or one that is not absolute.
+    case fixedRepoPathMissing
     /// An exposed placeholder is named like a Flow input.
     case exposedShadowsFlowInput(NodeID, String)
     /// An exposed placeholder is named `repo`.
@@ -55,6 +57,7 @@ extension LaunchError: LocalizedError {
         case .thisRepoOutsideRepo: return "This repo only works for a flow saved in a repo — choose Fixed or Exposed"
         case .exposedShadowsFlowInput(_, let name):
             return "{\(name)} is the name of a Flow input — wire it from that node instead"
+        case .fixedRepoPathMissing: return "Choose the folder for the Fixed repo"
         case .reservedName(let id): return "'\(id.rawValue)': {repo} is reserved for the Repo field — wire it from the Repo node instead"
         case .conflictingDefaults(let name): return "The exposed input {\(name)} has different defaults on different nodes"
         }
@@ -87,7 +90,8 @@ extension Flow {
             switch cfg.mode {
             case .thisRepo:
                 if case .repo = location {} else { throw .thisRepoOutsideRepo }
-            case .fixed: break
+            case .fixed(let path):
+                if path.isEmpty || !path.hasPrefix("/") { throw .fixedRepoPathMissing }
             case .exposed(let d): repoField = LaunchField(name: "repo", kind: .repo, defaultValue: d)
             }
         }

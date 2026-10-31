@@ -138,3 +138,26 @@ private let inLibrary = FlowLocation.library(file: URL(fileURLWithPath: "/tmp/li
         #expect(FlowLocation.of(file: l) == .library(file: l))
     }
 }
+
+@Suite struct FlowLaunchFixedPathTests {
+    private func flow(_ path: String) -> Flow {
+        Flow(name: "f", nodes: [Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .fixed(path: path))), position: Point(x: 0, y: 0))], wires: [])
+    }
+
+    @Test func emptyOrRelativeFixedPathRejected() {
+        for path in ["", "relative/dir"] {
+            #expect(throws: LaunchError.fixedRepoPathMissing) { try flow(path).launchFields(location: .builtin) }
+        }
+        #expect(LaunchError.fixedRepoPathMissing.errorDescription == "Choose the folder for the Fixed repo")
+        #expect(flow("").message(for: LaunchError.fixedRepoPathMissing) == "Choose the folder for the Fixed repo")
+    }
+
+    @Test func absoluteFixedPathAccepted() throws {
+        #expect(try flow("/tmp/r").launchFields(location: .builtin).isEmpty)
+    }
+
+    @Test func inputBoundTwiceMessageUsesTitle() {
+        let f = Flow(name: "f", nodes: [Node(id: "a", title: "Alpha", kind: .pick, position: Point(x: 0, y: 0))], wires: [])
+        #expect(f.message(for: .inputBoundTwice("a", "x")) == "Alpha: input {x} is both wired and set — choose one")
+    }
+}

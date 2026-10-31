@@ -42,7 +42,9 @@ public enum FlowFile {
         }
         if flow.repoNodes.isEmpty {
             let taken = Set(flow.nodes.map(\.id.rawValue))
-            let id = taken.contains("repo") ? "repo2" : "repo"
+            var id = "repo"
+            var n = 2
+            while taken.contains(id) { id = "repo\(n)"; n += 1 }
             let position = flow.nodes.isEmpty ? Point(x: 24, y: 24)
                 : Point(x: flow.nodes.map(\.position.x).min()! - 240, y: flow.nodes.map(\.position.y).min()!)
             flow.nodes.append(Node(id: NodeID(rawValue: id), title: "Repo", kind: .repo(fallback), position: position))

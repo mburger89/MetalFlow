@@ -4,8 +4,6 @@ import Foundation
 public enum RunEngineError: Error, Equatable {
     /// The repository has a detached HEAD, so there is no base branch to start from.
     case detachedHead
-    /// The flow has more than one `flowInput` node.
-    case multipleFlowInputs
     /// No run with this ID is known to the engine.
     case unknownRun(RunID)
     /// The flow failed validation.
@@ -44,7 +42,6 @@ extension RunEngineError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .detachedHead: return "the repository has a detached HEAD; check out a branch first"
-        case .multipleFlowInputs: return "the flow has more than one flow-input node"
         case .unknownRun(let id): return "no run \(id.rawValue)"
         case .invalid(let error): return "the flow is not valid: \(error.localizedDescription)"
         case .tooManyCandidates(let n): return "a fan-out lists \(n) candidates; at most 26 are supported"
@@ -151,7 +148,8 @@ public actor RunEngine {
     public func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID {
         let fields: [LaunchField]
         do { fields = try flow.launchFields(location: location) } catch { throw RunEngineError.launch(error) }
-        guard let plan = try? flow.validate() else { throw RunEngineError.launch(.noRepoNode) }
+        let plan: FlowPlan
+        do { plan = try flow.validate() } catch { throw RunEngineError.launch(.invalid(error)) }
         if let fan = plan.fanOut, case .prompt(let c)? = flow.node(fan)?.kind, c.candidates.count > 26 {
             throw RunEngineError.tooManyCandidates(c.candidates.count)
         }
