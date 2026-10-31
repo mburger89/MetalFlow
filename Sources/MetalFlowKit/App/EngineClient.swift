@@ -33,6 +33,8 @@ public protocol EngineClient: Sendable {
     func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws
     /// Repositories runs were launched in.
     func knownRepos() -> [URL]
+    /// Remembers `url` as a known repo, so it is listed on the next start.
+    func addKnownRepo(_ url: URL) async throws
     /// The `.flow` files of a repository.
     func flows(in repo: URL) -> [URL]
     /// Every flow the app can open: built-ins, the library, then each known repo's `.flows`.
@@ -116,6 +118,10 @@ public struct LiveEngineClient: EngineClient {
         try await engine.value.branchFromHere(id, lane: lane, name: name)
     }
     public func knownRepos() -> [URL] { store.knownRepos() }
+    public func addKnownRepo(_ url: URL) async throws {
+        let store = store
+        try await Task.detached { try store.addKnownRepo(url) }.value
+    }
     public func flows(in repo: URL) -> [URL] { RunEngine.flows(in: repo) }
     public func flowCatalog() -> [FlowEntry] { FlowCatalog.entries(library: store.flowsDirectory, repos: store.knownRepos()) }
     public var libraryDirectory: URL { store.flowsDirectory }

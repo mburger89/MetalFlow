@@ -16,13 +16,15 @@ actor FakeEngineClient: EngineClient {
     /// What `pick` returns.
     var pickResult: MergeResult = .merged(commit: "abc")
 
-    nonisolated let repos: [URL]
+    nonisolated let repoList: URLList
+    /// The known repos: those given at init plus any added through `addKnownRepo`.
+    nonisolated var repos: [URL] { repoList.urls }
     nonisolated let flowFiles: [URL]
     nonisolated let gitRepoPaths: Set<String>
 
     init(restored: [Run] = [], repos: [URL] = [], flowFiles: [URL] = [], gitRepoPaths: Set<String> = []) {
         self.restored = restored
-        self.repos = repos
+        self.repoList = URLList(repos)
         self.flowFiles = flowFiles
         self.gitRepoPaths = gitRepoPaths
         (updates, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .unbounded)
@@ -117,6 +119,10 @@ actor FakeEngineClient: EngineClient {
         try record("branch(\(lane), \(name))")
     }
     nonisolated func knownRepos() -> [URL] { repos }
+    func addKnownRepo(_ url: URL) async throws {
+        try record("addKnownRepo(\(url.path))")
+        repoList.add(url)
+    }
     nonisolated func flows(in repo: URL) -> [URL] { flowFiles }
     /// What `flowCatalog()` returns, and `libraryDirectory`.
     nonisolated let catalog = CatalogBox()
@@ -248,4 +254,13 @@ final class CatalogBox: @unchecked Sendable {
         get { lock.withLock { _library } }
         set { lock.withLock { _library = newValue } }
     }
+}
+
+/// A lock-guarded URL list for `FakeEngineClient`.
+final class URLList: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _urls: [URL]
+    init(_ urls: [URL]) { _urls = urls }
+    var urls: [URL] { lock.withLock { _urls } }
+    func add(_ url: URL) { lock.withLock { if !_urls.contains(url) { _urls.append(url) } } }
 }

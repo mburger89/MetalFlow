@@ -191,6 +191,9 @@ extension AppModel {
             return false
         }
         if !addedRepos.contains(url) { addedRepos.append(url) }
+        do { try await client.addKnownRepo(url) } catch {
+            notice = Notice("Added \(url.lastPathComponent) for this session only: \(error.localizedDescription)")
+        }
         await refreshRepos()
         selectRepo(url)
         return true

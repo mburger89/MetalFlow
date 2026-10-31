@@ -221,11 +221,15 @@ import Testing
         let dir = try folder()
         defer { try? FileManager.default.removeItem(at: dir) }
         let path = dir.standardizedFileURL.path
-        let (model, _, window) = try await fixture(gitRepos: [path])
+        let (model, client, window) = try await fixture(gitRepos: [path])
         try await press("launch.addrepo", in: window)
         try window.respondToFileDialog(choosing: [dir.path])
         await waitUntil("the repo") { model.repos.map(\.path).contains(path) }
         try await window.runUntilIdle()
+        #expect(client.knownRepos().map(\.path).contains(path), "persisted through the client")
+        let fresh = AppModel(client: client, notifier: NoopNotifier())
+        await fresh.refreshRepos()
+        #expect(fresh.repos.map(\.path).contains(path))
         #expect(model.addRepoRequest == nil)
         #expect(model.notice == nil)
         #expect(window.presentedFileDialog == nil)
@@ -261,6 +265,14 @@ import Testing
         try window.respondToFileDialog(choosing: [dir.path])
         await waitUntil("the field") { model.launchForm.values["repo"] == path }
         #expect(model.repos.map(\.path).contains(path))
+    }
+
+    @Test func addRepoKeepsTheRepoForTheSessionWhenSavingFails() async throws {
+        let (model, client, _) = try await fixture(gitRepos: ["/other"])
+        await client.setFailure(FakeFailure())
+        #expect(await model.addRepo(path: "/other"))
+        #expect(model.notice != nil)
+        #expect(model.repos.map(\.path).contains("/other"))
     }
 
     @Test func addRepoValidatesThePath() async throws {
