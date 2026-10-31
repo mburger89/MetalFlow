@@ -80,7 +80,12 @@ extension NodeOverlay {
 }
 
 extension NodeCardView {
-    @MainActor static func countBody() { bodyCount += 1 }
+    /// Counts a `content` run in debug builds (tests); nothing in release.
+    @MainActor static func countBody() {
+        #if DEBUG
+        bodyCount += 1
+        #endif
+    }
 }
 
 /// One node on the canvas, drawn at its position for the zoom but not the pan: the canvas offsets all the cards by the
