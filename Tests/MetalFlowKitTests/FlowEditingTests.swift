@@ -373,6 +373,15 @@ struct KindMismatch: Error {}
 
     // MARK: Validation
 
+    @Test func validationBannerNamesNodesByTitle() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("bind") { $0.nodes[$0.nodes.firstIndex { $0.id == "plan" }!].inputs["issue"] = .fixed("x") }
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.validation").value == "Plan: input {issue} is both wired and set — choose one")
+        _ = model
+    }
+
     @Test func invalidDraftCannotSaveOrLaunch() async throws {
         let (model, client, window) = try await fixture()
         let draft = try #require(model.draft)
@@ -384,7 +393,8 @@ struct KindMismatch: Error {}
         draft.edit("unwire") { $0.wires.removeAll() }
         try await window.runUntilIdle()
         guard case .failure(let error) = draft.validation else { Issue.record("should be invalid"); return }
-        #expect(try window.element(identifier: "studio.validation").value == error.errorDescription)
+        let shown = try window.element(identifier: "studio.validation").value
+        #expect(shown == draft.flow.message(for: error))
         #expect((try? window.element(identifier: "studio.error")) == nil, "no duplicate toolbar error")
         #expect(try window.element(identifier: "studio.save").isEnabled == false)
         #expect(try window.element(identifier: "studio.launch").isEnabled == false)

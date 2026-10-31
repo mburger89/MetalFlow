@@ -61,7 +61,7 @@ struct StudioBody: Component {
 extension StudioBody {
     /// Why the flow cannot run: it does not validate, or it validates but cannot be launched from where it is.
     static func problem(_ draft: FlowDraft, launchError: String?) -> String? {
-        if case .failure(let error) = draft.validation { return error.errorDescription ?? "\(error)" }
+        if case .failure(let error) = draft.validation { return draft.flow.message(for: error) }
         return launchError
     }
 }
