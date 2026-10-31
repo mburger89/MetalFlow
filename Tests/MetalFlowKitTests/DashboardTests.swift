@@ -260,14 +260,7 @@ import Testing
         _ = try window.element(identifier: "pill.pick.wait")
 
         #expect(try window.element(identifier: "run.\(id).elapsed").value == "2m")
-        // The timeline's wake sleeps in real time, so the test moves the clock and dirties the window itself.
-        // The first build at a nonzero timestamp anchors the timeline clock to real time: do that first.
-        window.advance(by: 1)
-        window.window.setNeedsRedraw()
-        window.tick()
         window.advance(by: 60)
-        window.window.setNeedsRedraw()
-        window.tick()
         #expect(try window.element(identifier: "run.\(id).elapsed").value == "3m")
     }
 
