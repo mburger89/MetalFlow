@@ -1,4 +1,4 @@
-# MetalUI API facts for MetalFlow (2026-10-30, MetalUI master 65e300a0)
+# MetalUI API facts for MetalFlow (2026-10-30, MetalUI master 63cc5af1, after PRs #152 and #153)
 
 Source: a read of /Users/maxburger/Developer/MetalUI. `S/` = `Sources/MetalUI`. Verify signatures before relying on them.
 
@@ -15,14 +15,14 @@ Source: a read of /Users/maxburger/Developer/MetalUI. `S/` = `Sources/MetalUI`. 
   - Tests: after async writes, `try await window.runUntilIdle()`.
 - **Layout:**
   - `HStack/VStack(alignment:spacing:)`, `ZStack(alignment:)`, `Spacer`, `Divider`. Flex `Row/Column(gap:)`, `Box`, `Stack(alignment:)`.
-  - `.frame(width:height:)` and `.frame(minWidth:…maxHeight:)`, `.padding(Pixels | Edges)`, `.background(Color)`, `.border(_:width:)`, `.cornerRadius`, `.clipped()`, `.overlay(alignment:){}`.
+  - `.frame(width:height:)` and `.frame(minWidth:…maxHeight:)`, `.padding(8 | .horizontal, 8 | EdgeInsets | Edges<Pixels>)` on Text and stacks alike, `.background(Color)`, `.border(_:width:)`, `.cornerRadius`, `.clipped()`, `.overlay(alignment:){}`.
   - `.offset(x:y:)` moves hit testing too. There is no `.position(x:y:)`.
   - `ScrollView(.vertical|.horizontal)` only, no 2D.
   - `LazyVGrid(columns: [GridItem(.adaptive(minimum: 300))], spacing:)`. `ForEach(data, id:)`. `List(data, selection:)`.
 - **Controls:**
   - `Button(_:role:action:)` with `.buttonStyle(.bordered|.borderless|.plain)`.
-  - `TextField(_:text:)`, with `.onSubmit`, `.focused($f)`.
-  - `TextEditor(_:text:)`. Monospace via `.font(family: "Menlo", size: 12)`.
+  - `TextField(_:text:)`, with `.onSubmit`, `.focused($f)`. Its `.accessibilityIdentifier` lands on the field and the element's `.value` is its current text.
+  - `TextEditor(_:text:)`, same identifier and `.value` behaviour. Monospace via `.font(family: "Menlo", size: 12)`.
   - `Picker(_:selection:){ Text().tag() }` with `.pickerStyle(.menu|.segmented)`.
   - `Slider(value:in:step:)`, `Toggle(_:isOn:)`, `Stepper(_:value:in:step:)`.
   - `Menu(_:) {}`, `.contextMenu {}` (located form `{ loc in }`), `.popover(isPresented:)`, `.help("tip")`.
@@ -47,13 +47,19 @@ Source: a read of /Users/maxburger/Developer/MetalUI. `S/` = `Sources/MetalUI`. 
   - `TestWindow(size:colorScheme:) { root }` / `TestApp().openWindow(...)`.
   - Input: `tick()`, `advance(by:)`, `runUntilIdle()`, `click(at:)`, `click(element)`, `drag(from:to:steps:)`, `scroll(at:byDeltaX:deltaY:)`, `typeText`, `typeKey(_:modifierFlags:)`.
   - Lookup: `element(identifier:)` via `.accessibilityIdentifier("x")`. See Jotter Tests/Support.swift.
+  - An id on a container needs `.accessibilityElement(children: .contain)`, or it does not land on the container.
+  - A periodic `TimelineView` is re-evaluated by `advance(by:)` alone; no `setNeedsRedraw()` or extra `tick()`.
 - **Absent:**
   - TabView: use a segmented Picker.
-  - Split panes, window activation, `.app` bundling: requested from MetalUI, in progress (HSplitView/VSplitView + `.splitViewAutosaveName`, `Window.makeKeyAndOrderFront()` / `App.activate()`, `metalui bundle --product --bundle-id`).
   - Notifications: agreed MetalFlow calls `UNUserNotificationCenter` directly (bundle-guarded) and `NSApp.dockTile.badgeLabel`.
-- **Packaging (manual until `metalui bundle` lands):** MetalUI/docs/packaging.md. Copy `MetalUI_MetalUIRender.bundle` into `Contents/Resources`, then `codesign --force --sign -`.
+- **Split views, activation, packaging (PR #152):**
+  - `HSplitView` / `VSplitView` with `.splitViewAutosaveName`.
+  - `App.activate()` and `Window.makeKeyAndOrderFront()`.
+  - `metalui bundle --product --bundle-id` builds the `.app` (MetalUI/docs/packaging.md).
+  - Segmented Picker segments have accessibility ids, so tests can click a segment by id.
 - **Menu Pickers in tests:** `window.click(picker)` → `window.presentedMenu` (`PlatformMenu`, `.items` with title/checked/enabled) → `window.chooseMenuItem("Title")` (throws `noMenuItem`/`disabledMenuItem`) or `window.dismissMenu()`. History: `window.platformWindow.presentedMenus`. Example: MetalUI `Tests/MetalUITestingTests/MenuAnchorTests.swift`.
 - **Editing quirks (Task 6):**
   - A menu `Picker` needs `.pickerStyle(.menu)` for `window.click` to present a menu, and a non-empty title adds a second element with the same identifier, so use `Picker("", ...)` with your own label.
-  - A `TextField`'s identifier lands on a valueless group: assert the model, not `.value`. Click its right edge to put the caret at the end.
+  - Click a `TextField`'s right edge to put the caret at the end.
+  - `.lineLimit(_:)` on a Text returns an `EnvironmentScope` that does not take `.padding` or `.accessibilityIdentifier` (a compile error): wrap the Text in an `HStack` and pad that.
   - Keys: `.focusable(true, interactions: .edit)` plus `.onKeyPress` gets keys only while the canvas is focused. ⇧⌘Z arrives with `key` uppercased ("Z"); compare lowercased.
