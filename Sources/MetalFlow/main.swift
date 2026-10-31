@@ -1,4 +1,3 @@
-import AppKit
 import MetalFlowKit
 import MetalUI
 
@@ -10,13 +9,17 @@ func makeModel(notifier: Notifier) -> AppModel {
 
 let notifier = UserNotificationsNotifier()
 let model = makeModel(notifier: notifier)
-// Only a notification click brings the window forward; nothing else activates the app.
-model.activateApp = { NSApp.activate() }
 let app = try App()
 installCommands(on: app, model: model)
 let window = try app.openWindow(title: "MetalFlow", size: metalFlowWindowSize, minSize: metalFlowMinimumSize) {
     rootView(model: model)
 }
 installQuitHandling(on: app, window: window, model: model)
+// Only a notification click brings the window forward; nothing else activates the app. Activating the app
+// does not raise a window (WA-A), so the main window is ordered front as well.
+model.activateApp = {
+    app.activate()
+    window.makeKeyAndOrderFront()
+}
 Task { await notifier.requestAuthorization() }
 app.run()
