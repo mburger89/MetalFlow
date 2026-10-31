@@ -417,7 +417,7 @@ import Testing
         await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
         #expect(platform.terminateReplies == [false])
         #expect(client.files.saved.isEmpty)
-        #expect(draft.isDirty && draft.location == .unsaved)
+        #expect(draft.isDirty && draft.location == .builtin)
         #expect(model.pendingAction == nil)
     }
 
@@ -437,8 +437,33 @@ import Testing
         try await window.runUntilIdle()
         #expect(platform.terminateReplies == [false])
         #expect(client.files.saved.isEmpty)
-        #expect(draft.isDirty && draft.location == .unsaved)
+        #expect(draft.isDirty && draft.location == .builtin)
         #expect(!model.isSavePanelVisible)
+    }
+
+    @Test func saveDestinationAddNonGitFolderKeepsThePanelAndTheQuitWaiting() async throws {
+        let (model, client, window, draft) = try await dirtyFixture()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mf-nongit-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let platform = window.testApp.platform
+        #expect(platform.simulateTerminateRequest() == .later)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        try window.click(window.element(identifier: "save.dest.add"))
+        try await window.runUntilIdle()
+        try window.respondToFileDialog(choosing: [dir.path])
+        await waitUntil("the notice") { model.notice != nil }
+        try await window.runUntilIdle()
+        #expect(model.isSavePanelVisible, "the panel stays up")
+        #expect(platform.terminateReplies.isEmpty, "the quit still waits")
+        try window.click(window.element(identifier: "save.cancel"))
+        await waitUntil("the quit reply") { platform.terminateReplies.count == 1 }
+        #expect(platform.terminateReplies == [false])
+        #expect(client.files.saved.isEmpty)
+        #expect(draft.isDirty)
     }
 
     @Test func quitWithDirtyDraftDiscardQuitsWithoutSaving() async throws {

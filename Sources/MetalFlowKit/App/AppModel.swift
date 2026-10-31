@@ -119,7 +119,7 @@ public final class AppModel {
     /// Every flow the app can open: built-ins, the library, then each known repo's `.flows`. Refreshed on start,
     /// after "Add repo..." and after a save.
     public internal(set) var catalog: [FlowEntry] = []
-    /// The repo the Studio defaults new drafts to: the first known repo, or the last one added.
+    /// The repo that seeds the launch form's exposed repo field: the first known repo, or the last one added.
     public internal(set) var selectedRepo: URL?
     /// The selected flow's launch fields, in order; empty when the flow cannot be launched.
     public internal(set) var launchFields: [LaunchField] = []

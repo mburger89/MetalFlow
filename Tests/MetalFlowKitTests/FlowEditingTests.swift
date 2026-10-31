@@ -655,7 +655,7 @@ struct KindMismatch: Error {}
     @Test func firstSaveAsksDestination() async throws {
         let (model, client, window) = try await fixture(repos: [URL(fileURLWithPath: "/work/alpha"), URL(fileURLWithPath: "/work/beta")])
         let draft = try #require(model.draft)
-        #expect(draft.location == .unsaved)
+        #expect(draft.location == .builtin)
         try await press("studio.save", in: window)
         _ = try window.element(identifier: "save.panel")
         for id in ["save.dest.library", "save.dest.alpha", "save.dest.beta", "save.cancel"] {
@@ -666,7 +666,7 @@ struct KindMismatch: Error {}
         window.typeKey(.escape)
         try await window.runUntilIdle()
         #expect((try? window.element(identifier: "save.panel")) == nil)
-        #expect(client.files.saved.isEmpty && draft.location == .unsaved)
+        #expect(client.files.saved.isEmpty && draft.location == .builtin)
         // The built-in asks too.
         model.loadBuiltinDraft()
         try await press("studio.save", in: window)
@@ -747,6 +747,19 @@ struct KindMismatch: Error {}
         #expect(!model.isSavePanelVisible)
     }
 
+    @Test func saveRechecksValidityAfterTheDestinationAnswers() async throws {
+        let (model, client, window) = try await fixture()
+        let draft = try #require(model.draft)
+        let saving = try await startSave(model, window)
+        draft.edit("unwire") { $0.wires.removeAll() }
+        try await window.runUntilIdle()
+        model.chooseSaveDestination(.library)
+        #expect(await saving.value == false)
+        #expect(client.files.saved.isEmpty)
+        #expect(model.notice != nil)
+        #expect(draft.location == .builtin)
+    }
+
     @Test func saveDestinationAddCancelCancelsTheSave() async throws {
         let (model, client, window) = try await fixture()
         let saving = try await startSave(model, window)
@@ -801,7 +814,7 @@ struct KindMismatch: Error {}
         try await press("save.cancel", in: window)
         #expect(await saving.value == false)
         #expect(!model.isSavePanelVisible)
-        #expect(draft.location == .unsaved && draft.isDirty)
+        #expect(draft.location == .builtin && draft.isDirty)
         #expect(client.files.saved.isEmpty)
         #expect(model.notice == nil)
     }

@@ -59,7 +59,7 @@ import Testing
         for node in BuiltinFlows.fixGitHubIssue.nodes {
             #expect(try window.element(identifier: "node.\(node.id.rawValue).title").value == node.title)
         }
-        #expect(model.draft?.location == .unsaved)
+        #expect(model.draft?.location == .builtin)
         #expect(model.draft?.url == nil)
         #expect(model.draft?.flow.name == "Fix GitHub issue")
         #expect(try window.element(identifier: "studio.name").value == "Fix GitHub issue")
@@ -112,7 +112,7 @@ import Testing
         _ = try window.element(identifier: "studio")
         #expect((try? window.element(identifier: "studio.empty")) == nil)
         let draft = try #require(model.draft)
-        #expect(draft.location == .unsaved)
+        #expect(draft.location == .builtin)
         #expect(draft.flow == BuiltinFlows.fixGitHubIssue)
         _ = try window.element(identifier: "node.plan")
         #expect(try window.element(identifier: "studio.file").value == "Unsaved")
@@ -423,7 +423,7 @@ import Testing
         try await press("studio.launch", in: window)
         #expect(await client.calls.contains("launch(Fix GitHub issue, /repo, #42)"))
         let launched = await client.launches
-        #expect(launched.map(\.location) == [.unsaved], "an unsaved draft launches at .unsaved")
+        #expect(launched.map(\.location) == [.builtin], "an unsaved draft launches at .builtin")
         #expect(launched.first?.values == ["issue": "#42", "repo": "/repo"])
         #expect(model.studioValues["issue"] == nil, "the typed text is cleared")
         #expect(model.isLaunching == false)

@@ -21,7 +21,7 @@ extension AppModel {
     /// Opens the Studio with the built-in flow, unsaved, when it has nothing open. No repo is needed.
     func ensureDraft() {
         guard screen == .studio, draft == nil else { return }
-        draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .unsaved)
+        draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .builtin)
     }
 
     /// Loads a flow file into the Studio. A load error becomes a notice and leaves the screen alone.
@@ -140,6 +140,11 @@ extension AppModel {
             }
         } else {
             guard let choice = await askSaveDestination(), self.draft === draft else { return false }
+            // The draft can change while the panel is up.
+            if case .failure(let error) = draft.validation {
+                notice = Notice("Not saved: \(draft.flow.message(for: error))")
+                return false
+            }
             let directory: URL
             switch choice {
             case .library: directory = client.libraryDirectory

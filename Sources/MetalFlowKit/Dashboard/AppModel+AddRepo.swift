@@ -61,7 +61,8 @@ extension AppModel {
                 launchForm.values["repo"] = added.path
             }
         case .saveDestination:
-            chooseSaveDestination(added.map { .repo($0) })
+            // A folder that is not a repo leaves the panel up (addRepo has set the notice); only a cancel ends the save.
+            if let added { chooseSaveDestination(.repo(added)) } else if folder == nil { chooseSaveDestination(nil) }
         case .repoNode(let id):
             if let added, let draft { RepoFields.setPath(draft, id, added.path, coalescing: false) }
         }
