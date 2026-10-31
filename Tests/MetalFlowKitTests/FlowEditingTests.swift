@@ -961,6 +961,24 @@ struct KindMismatch: Error {}
         #expect(try node(draft, "plan").inputs["issue"] == .exposed(default: nil))
     }
 
+    @Test func renamingPlaceholderPrunesBinding() async throws {
+        let (model, _, _) = try await fixture()
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        draft.edit("test.bind") { flow in
+            if let i = flow.nodes.firstIndex(where: { $0.id == "plan" }) {
+                flow.nodes[i].inputs["topic"] = .exposed(default: "x")
+            }
+        }
+        let steps = draft.undoStack.count
+        draft.editPrompt("plan", "prompt") { $0.prompt = $0.prompt.replacingOccurrences(of: "{topic}", with: "{subject}") }
+        #expect(try node(draft, "plan").inputs["topic"] == nil, "the stale binding is gone")
+        #expect(!(try node(draft, "plan").hasExposedInput), "and no longer counts as exposed")
+        #expect(draft.undoStack.count == steps + 1)
+        draft.undo()
+        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: "x"), "one undo step brings it back")
+    }
+
     @Test func wireOntoBoundInputClearsBinding() async throws {
         let (model, _, _) = try await fixture()
         let draft = try #require(model.draft)

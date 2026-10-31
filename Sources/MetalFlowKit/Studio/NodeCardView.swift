@@ -51,7 +51,11 @@ extension Node {
 extension Node {
     /// Whether the node has a value the user fills in at launch.
     var hasExposedInput: Bool {
-        if inputs.values.contains(where: { if case .exposed = $0 { true } else { false } }) { return true }
+        // Only bindings of placeholders the node still has count; one left behind by an edit is stale.
+        let names = Set(Flow(name: "", nodes: [self], wires: []).inputNames(of: id))
+        for (name, binding) in inputs where names.contains(name) {
+            if case .exposed = binding { return true }
+        }
         switch kind {
         case .flowInput(let c): if case .exposed = c.binding { return true }
         case .repo(let c): if case .exposed = c.mode { return true }

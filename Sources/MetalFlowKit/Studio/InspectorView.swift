@@ -8,16 +8,23 @@ let inspectorModels = ["opus", "sonnet", "haiku"]
 extension FlowDraft {
     /// Edits one field of a node as an undo step named `<field>.<id>`, which coalesces with the previous edit of
     /// that field.
-    func editNode(_ id: NodeID, _ field: String, coalescing: Bool = true, _ change: @escaping (inout Node) -> Void) {
+    /// With `pruning`, bindings whose placeholder the change removed are dropped in the same step.
+    func editNode(_ id: NodeID, _ field: String, coalescing: Bool = true, pruning: Bool = false,
+                  _ change: @escaping (inout Node) -> Void) {
         apply("\(field).\(id.rawValue)", coalescing: coalescing) { flow in
-            if let i = flow.nodes.firstIndex(where: { $0.id == id }) { change(&flow.nodes[i]) }
+            guard let i = flow.nodes.firstIndex(where: { $0.id == id }) else { return }
+            change(&flow.nodes[i])
+            if pruning {
+                let names = Set(flow.inputNames(of: id))
+                flow.nodes[i].inputs = flow.nodes[i].inputs.filter { names.contains($0.key) }
+            }
         }
     }
 
     /// Edits a prompt or judge node's configuration.
     func editPrompt(_ id: NodeID, _ field: String, coalescing: Bool = true,
                     _ change: @escaping (inout PromptConfig) -> Void) {
-        editNode(id, field, coalescing: coalescing) { node in
+        editNode(id, field, coalescing: coalescing, pruning: true) { node in
             switch node.kind {
             case .prompt(var c): change(&c); node.kind = .prompt(c)
             case .judge(var c): change(&c); node.kind = .judge(c)
@@ -28,7 +35,7 @@ extension FlowDraft {
 
     /// Edits a shell or gate node's command.
     func editShell(_ id: NodeID, _ change: @escaping (inout ShellConfig) -> Void) {
-        editNode(id, "command") { node in
+        editNode(id, "command", pruning: true) { node in
             switch node.kind {
             case .shell(var c): change(&c); node.kind = .shell(c)
             case .gate(var c): change(&c); node.kind = .gate(c)
