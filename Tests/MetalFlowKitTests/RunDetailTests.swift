@@ -348,4 +348,60 @@ import Testing
         await model.toggleDiff(run.id, lane: "a")   // reopen after the run changed
         #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 2)
     }
+
+    func shownDiff(_ model: AppModel, _ run: Run, lane: LaneID = "a") -> String {
+        (model.diffChunks[DiffKey(run: run.id, lane: lane)] ?? []).map { String($0.characters) }.joined()
+    }
+
+    @Test func openDiffReloadsOnRunUpdate() async throws {
+        let run = pickRun()
+        let (model, client, window) = try await fixture(run)
+        await client.setDiff("@@ -1 +1 @@\n+old\n")
+        try await press("cand.a.diff", in: window)
+        #expect(shownDiff(model, run).contains("+old"))
+        await client.setDiff("@@ -1 +1 @@\n+new\n")
+        var changed = run
+        changed.revision += 1
+        model.apply(changed)
+        await waitUntil("the open diff to show the new text") { shownDiff(model, run).contains("+new") }
+        #expect(model.openDiff == DiffKey(run: run.id, lane: "a"))
+        #expect(model.diffChunks[DiffKey(run: run.id, lane: "a")] != nil, "never blanked to the loading line")
+        #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 2)
+    }
+
+    @Test func closedDiffIsNotReloaded() async throws {
+        let run = pickRun()
+        let (model, client, _) = try await fixture(run)
+        await model.toggleDiff(run.id, lane: "a")
+        await model.toggleDiff(run.id, lane: "a")   // close
+        var changed = run
+        changed.revision += 1
+        model.apply(changed)
+        for _ in 0..<100 { await Task.yield() }
+        #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 1)
+        #expect(model.openDiff == nil)
+    }
+
+    @Test func reloadWhileInFlightCoalesces() async throws {
+        let run = pickRun()
+        let (model, client, _) = try await fixture(run)
+        await client.setDiff("@@ -1 +1 @@\n+v0\n")
+        await model.toggleDiff(run.id, lane: "a")
+        await client.holdDiffs()
+        var first = run
+        first.revision += 1
+        model.apply(first)                           // starts a reload, which is held
+        await client.waitForDiffStart()
+        await client.setDiff("@@ -1 +1 @@\n+v3\n")
+        var second = run, third = run
+        second.revision += 2
+        third.revision += 3
+        model.apply(second)                          // arrive while the load is pending
+        model.apply(third)
+        await client.releaseDiffs()
+        await waitUntil("the newest text") { shownDiff(model, run).contains("+v3") }
+        await waitUntil("the load to finish") { model.diffInFlight.isEmpty }
+        #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 3, "initial, the reload, one follow-up")
+        #expect(model.diffRevisions[DiffKey(run: run.id, lane: "a")] == third.revision)
+    }
 }

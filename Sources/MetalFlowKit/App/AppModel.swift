@@ -131,6 +131,8 @@ public final class AppModel {
     public var confirmingDiscard: RunID?
     var diffRevisions: [DiffKey: Int] = [:]
     var diffInFlight: Set<DiffKey> = []
+    /// Diffs whose run changed while they were loading: the load repeats once more when it ends.
+    var diffReloadWanted: Set<DiffKey> = []
     /// True once `start()` has restored the saved runs and made the first repo selection.
     public private(set) var isReady = false
     private var readyWaiters: [CheckedContinuation<Void, Never>] = []
@@ -215,7 +217,10 @@ public final class AppModel {
         if old == nil {
             insertID(run)
         }
-        if old != nil { dropStaleDiffs(of: run.id) }
+        if old != nil {
+            dropStaleDiffs(of: run.id)
+            if !restoring { reloadOpenDiff(of: run) }
+        }
         let before = old.map(bucket(of:))
         let after = bucket(of: run)
         if before == after {

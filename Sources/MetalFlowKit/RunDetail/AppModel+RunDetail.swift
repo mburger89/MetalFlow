@@ -53,14 +53,34 @@ extension AppModel {
         if diffChunks[key] != nil, diffRevisions[key] == revision { return }
         guard !diffInFlight.contains(key) else { return }
         diffChunks[key] = nil
-        diffInFlight.insert(key)
-        defer { diffInFlight.remove(key) }
-        let text = await client.diff(run, lane: lane)
-        diffChunks[key] = diffAttributed(text)
-        diffRevisions[key] = revision
+        await loadDiff(key)
     }
 
-    /// Forgets the cached diffs of a run that changed, except the one on screen (it is reloaded when reopened).
+    /// Loads a lane's diff and caches it under the run's revision at the time. The old chunks stay until the new text
+    /// arrives. Does nothing but ask for one more pass when a load is already in flight; the running load repeats once.
+    /// Caches the result even if the diff was closed meanwhile; opens nothing.
+    func loadDiff(_ key: DiffKey) async {
+        guard !diffInFlight.contains(key) else { diffReloadWanted.insert(key); return }
+        diffInFlight.insert(key)
+        defer { diffInFlight.remove(key) }
+        repeat {
+            diffReloadWanted.remove(key)
+            let revision = runs[key.run]?.revision ?? 0
+            let text = await client.diff(key.run, lane: key.lane)
+            diffChunks[key] = diffAttributed(text)
+            diffRevisions[key] = revision
+        } while diffReloadWanted.contains(key)
+    }
+
+    /// Reloads the open diff in place when it belongs to `run` and its cached text is older than the run.
+    func reloadOpenDiff(of run: Run) {
+        guard let key = openDiff, key.run == run.id else { return }
+        if let cached = diffRevisions[key], run.revision <= cached { return }
+        if diffInFlight.contains(key) { diffReloadWanted.insert(key); return }
+        Task { await loadDiff(key) }
+    }
+
+    /// Forgets the cached diffs of a run that changed, except the one on screen (it is reloaded in place by `reloadOpenDiff(of:)`).
     func dropStaleDiffs(of run: RunID) {
         for key in diffChunks.keys where key.run == run && key != openDiff {
             diffChunks[key] = nil
