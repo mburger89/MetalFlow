@@ -95,11 +95,6 @@ struct StepPillView: Component {
     }
 
     static func colors(_ s: StepPill.State) -> (Color, Color) {
-        switch s {
-        case .done: (Color(Hsla.rgb(0x16261b)), Palette.ok)
-        case .run: (Color(Hsla.rgb(0x152235)), Palette.accent)
-        case .wait: (Color(Hsla.rgb(0x1b1e23)), Color(Hsla.rgb(0x8b93a1)))
-        case .fail: (Color(Hsla.rgb(0x2a1618)), Palette.bad)
-        }
+        (s.tone.tint, s.tone.color)
     }
 }

@@ -152,7 +152,8 @@ struct StepRow: Component {
 
     var content: some ElementGroup {
         let id = "detail.node.\(row.key)"
-        let (label, color) = Self.describe(row.state)
+        let style = NodeStateStyle(row.state)
+        let (label, color) = (style.text, style.color)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: Spacing.sm) {
                 Text(verbatim: row.key.lane.map { "\(row.title) (\($0.uppercased()))" } ?? row.title)
@@ -193,17 +194,4 @@ struct StepRow: Component {
         }
     }
 
-    static func describe(_ state: NodeState) -> (String, Color) {
-        switch state {
-        case .waiting: ("Waiting", Palette.muted)
-        case .running: ("Running", Palette.accent)
-        case .succeeded: ("Done", Palette.ok)
-        case .failed(let message): ("Failed: \(message)", Palette.bad)
-        case .needsYou(.question): ("Has a question", Palette.warn)
-        case .needsYou(.deniedTools): ("Needs approval", Palette.warn)
-        case .needsYou(.pickWinner): ("Pick a winner", Palette.warn)
-        case .interrupted: ("Interrupted", Palette.warn)
-        case .cancelled: ("Cancelled", Palette.muted)
-        }
-    }
 }

@@ -103,12 +103,12 @@ struct WorkingChip: Component {
 
     static func statusText(_ run: Run) -> String {
         switch run.status {
-        case .running: "Running"
-        case .needsYou: "Needs you"
+        case .running: NodeStateStyle(.running).label
+        case .needsYou: NodeStateStyle.needsYouLabel
         case .merged(let lane): "Merged \(lane.uppercased())"
         case .discarded: "Discarded"
-        case .failed: "Failed"
-        case .cancelled: "Cancelled"
+        case .failed: NodeStateStyle(.failed("")).label
+        case .cancelled: NodeStateStyle(.cancelled).label
         case .completed: "Completed"
         }
     }

@@ -50,9 +50,9 @@ struct ActivityRow: Component {
     static func color(_ kind: ActivityItem.Kind) -> Color {
         switch kind {
         case .info: Color(Hsla.rgb(0xd7dae0))
-        case .needsYou: Palette.warn
-        case .ok: Palette.ok
-        case .bad: Palette.bad
+        case .needsYou: Tone.warn.color
+        case .ok: Tone.ok.color
+        case .bad: Tone.bad.color
         }
     }
 }

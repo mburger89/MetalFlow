@@ -92,15 +92,29 @@ struct NeedsCard: Component {
     }
 
     static func describe(_ item: NeedsItem) -> (String, String, Color) {
+        let color = NodeStateStyle(item.kind.nodeState).color
         switch item.kind {
         case .pickWinner(let recommended, let allFailed):
-            if allFailed { return ("GATE FAILED", "All candidates fail the gate", Palette.bad) }
+            if allFailed { return ("GATE FAILED", "All candidates fail the gate", color) }
             let hint = recommended.map { "Judge recommends \($0.uppercased())" } ?? "Candidates are ready"
-            return ("PICK A WINNER", hint, Palette.warn)
-        case .question(let q): return ("QUESTION", q, Palette.warn)
-        case .deniedTools(let tools): return ("APPROVAL", "Needs approval for \(tools.joined(separator: ", "))", Palette.warn)
-        case .interrupted: return ("INTERRUPTED", "\(item.key) was cut short", Palette.warn)
-        case .failed(let message): return ("FAILED", "\(item.key): \(message)", Palette.bad)
+            return ("PICK A WINNER", hint, color)
+        case .question(let q): return ("QUESTION", q, color)
+        case .deniedTools(let tools): return ("APPROVAL", "Needs approval for \(tools.joined(separator: ", "))", color)
+        case .interrupted: return ("INTERRUPTED", "\(item.key) was cut short", color)
+        case .failed(let message): return ("FAILED", "\(item.key): \(message)", color)
+        }
+    }
+}
+
+extension NeedsItem.Kind {
+    /// The node state this card stands for, so its colour comes from the shared table.
+    var nodeState: NodeState {
+        switch self {
+        case .pickWinner(let r, let all): .needsYou(.pickWinner(recommended: r, allGatesFailed: all))
+        case .question(let q): .needsYou(.question(q))
+        case .deniedTools(let t): .needsYou(.deniedTools(t))
+        case .interrupted: .interrupted
+        case .failed(let m): .failed(m)
         }
     }
 }

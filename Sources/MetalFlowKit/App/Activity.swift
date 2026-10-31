@@ -75,9 +75,9 @@ func deriveActivity(old: Run?, new: Run, now: Date) -> [ActivityItem] {
             case .needsYou(.deniedTools(let tools)):
                 add("needs approval for \(tools.joined(separator: ", "))", .needsYou)
             case .failed(let message):
-                if isGate { gateFailed = true } else { add("\(key) failed: \(clipped(message))", .bad) }
+                if isGate { gateFailed = true } else { add("\(key) \(NodeStateStyle(.failed(message)).label.lowercased()): \(clipped(message))", .bad) }
             case .interrupted:
-                add("\(key) interrupted", .info)
+                add("\(key) \(NodeStateStyle(.interrupted).label.lowercased())", .info)
             case .running:
                 if let line = node.log.last, line != before?.log.last { add(describeLogLine(line), .info) }
             case .waiting, .succeeded, .cancelled:
