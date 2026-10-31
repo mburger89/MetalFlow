@@ -72,6 +72,10 @@ actor FakeEngineClient: EngineClient {
     var reloads: [RunID: Run] = [:]
     func setReload(_ run: Run) { reloads[run.id] = run }
     func reload(_ id: RunID) async -> Run? { calls.append("reload"); return reloads[id] }
+    /// What `discover` returns (once: the fake forgets them, as the real engine caches what it found).
+    var discoverable: [Run] = []
+    func setDiscoverable(_ runs: [Run]) { discoverable = runs }
+    func discover() async -> [Run] { calls.append("discover"); defer { discoverable = [] }; return discoverable }
     private var holdingPicks = false
     private var heldPicks: [CheckedContinuation<Void, Never>] = []
     /// Makes `pick` suspend until `releasePicks()`.

@@ -23,6 +23,8 @@ public protocol EngineClient: Sendable {
     func isRunningElsewhere(_ id: RunID) async -> Bool
     /// The newest saved state of a run: what another process has written since this app last saw it. Nil if unknown.
     func reload(_ id: RunID) async -> Run?
+    /// Runs another process saved that this app has not seen yet.
+    func discover() async -> [Run]
     /// Merges a candidate lane into the base branch.
     func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult
     /// Throws a run away.
@@ -103,6 +105,7 @@ public struct LiveEngineClient: EngineClient {
     public func suspend(_ id: RunID) async { await engine.value.suspend(id) }
     public func isRunningElsewhere(_ id: RunID) async -> Bool { await engine.value.isRunningElsewhere(id) }
     public func reload(_ id: RunID) async -> Run? { await engine.value.reload(id) }
+    public func discover() async -> [Run] { await engine.value.discover() }
     public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult { try await engine.value.pick(id, lane: lane) }
     public func discard(_ id: RunID) async throws { try await engine.value.discard(id) }
     public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws {

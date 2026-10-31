@@ -269,6 +269,50 @@ import Testing
         tick.finish()
     }
 
+    @Test func discoveredRunAppearsOnDashboard() async throws {
+        let (model, client, _) = try await elsewhereFixture(makeRun("theirs", status: .running))
+        let fresh = makeRun("fresh", status: .completed, createdAt: Date(timeIntervalSince1970: 2_000))
+        await client.setDiscoverable([fresh])
+        await model.discoverRuns()
+        #expect(model.runs[fresh.id] != nil)
+        #expect(model.finished.map(\.id) == [fresh.id])
+        #expect(!model.runningElsewhere.contains(fresh.id))
+    }
+
+    @Test func discoveredRunningRunIsMarkedElsewhere() async throws {
+        let (model, client, _) = try await elsewhereFixture(makeRun("theirs", status: .running))
+        let fresh = makeRun("fresh", status: .running)
+        await client.setDiscoverable([fresh])
+        await client.setElsewhere([fresh.id])
+        await model.discoverRuns()
+        #expect(model.runningElsewhere.contains(fresh.id))
+        #expect(model.statusText(fresh) == "Running in another mflow")
+        #expect(model.running.contains { $0.id == fresh.id })
+    }
+
+    @Test func discoveredNeedsYouRunNotifiesOnce() async throws {
+        let (model, client, notifier) = try await elsewhereFixture(makeRun("theirs", status: .running))
+        let fresh = makeRun("asks", status: .needsYou, nodes: [
+            NodeKey(node: "pick"): NodeRun(state: .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))])
+        await client.setDiscoverable([fresh])
+        await model.discoverRuns()
+        await model.discoverRuns()
+        await model.flushNotifications()
+        #expect(notifier.posts.count == 1)
+        #expect(model.needsYou.map(\.id) == [fresh.id])
+    }
+
+    @Test func knownRunNotRediscovered() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let (model, client, _) = try await elsewhereFixture(theirs)
+        var stale = theirs
+        stale.title = "stale copy"
+        await client.setDiscoverable([stale])
+        await model.discoverRuns()
+        #expect(model.runs[theirs.id]?.title == "theirs")
+        #expect(model.running.count == 1)
+    }
+
     @Test func quitWithOnlyOtherProcessRunsQuitsNow() async throws {
         let theirs = makeRun("theirs", status: .running)
         let client = FakeEngineClient(restored: [theirs], repos: [repo])

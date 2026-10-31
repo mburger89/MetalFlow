@@ -188,11 +188,20 @@ public final class AppModel {
         }
     }
 
-    /// Re-reads the runs other processes drive every `pause`, while there are any, until cancelled.
+    /// Adds the runs another process started since the app last looked.
+    public func discoverRuns() async {
+        for run in await client.discover() where runs[run.id] == nil {
+            if run.status == .running, await client.isRunningElsewhere(run.id) { runningElsewhere.insert(run.id) }
+            apply(run, restoring: false, fromElsewhere: true)
+        }
+    }
+
+    /// Every `pause`, until cancelled: discovers new runs, and re-reads the ones other processes drive.
     private func pollElsewhere() async {
         while !Task.isCancelled {
             await pause()
             if Task.isCancelled { return }
+            await discoverRuns()
             if !runningElsewhere.isEmpty { await refreshElsewhere() }
         }
     }
