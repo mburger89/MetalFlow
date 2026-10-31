@@ -18,8 +18,10 @@ public enum FlowError: Error, Equatable, Sendable {
     case multipleFanOuts(NodeID)
     /// A judge node has no fan-out upstream of it.
     case judgeWithoutFanOut(NodeID)
-    /// A placeholder has no wire feeding it.
-    case unwiredPlaceholder(NodeID, String)
+    /// A placeholder has no wire and no binding.
+    case unboundInput(NodeID, String)
+    /// A placeholder has both a wire and a binding.
+    case inputBoundTwice(NodeID, String)
 }
 
 extension FlowError: LocalizedError {
@@ -34,7 +36,26 @@ extension FlowError: LocalizedError {
         case .nestedFanOut(let id): return "fan-out node '\(id.rawValue)' sits downstream of another fan-out"
         case .multipleFanOuts(let id): return "the flow has more than one fan-out node ('\(id.rawValue)')"
         case .judgeWithoutFanOut(let id): return "judge '\(id.rawValue)' has no fan-out upstream"
-        case .unwiredPlaceholder(let id, let name): return "node '\(id.rawValue)' uses {\(name)} but nothing is wired to it"
+        case .unboundInput(let id, let name): return FlowError.unboundMessage(title: id.rawValue, name: name)
+        case .inputBoundTwice(let id, let name): return "node '\(id.rawValue)' has both a wire and a value for {\(name)}"
+        }
+    }
+}
+
+extension FlowError {
+    fileprivate static func unboundMessage(title: String, name: String) -> String {
+        "\(title): input {\(name)} has no value — wire it, give it a value, or expose it"
+    }
+}
+
+extension Flow {
+    /// A readable message for `error`, naming nodes by title where the error carries a node.
+    public func message(for error: FlowError) -> String {
+        switch error {
+        case .unboundInput(let id, let name):
+            return FlowError.unboundMessage(title: node(id)?.title ?? id.rawValue, name: name)
+        default:
+            return error.errorDescription ?? "\(error)"
         }
     }
 }
@@ -101,18 +122,11 @@ extension Flow {
 
         for id in order {
             guard let n = node(id) else { continue }
-            var texts: [String] = []
-            var exempt: Set<String> = []
-            switch n.kind {
-            case .prompt(let c): texts = [c.prompt]
-            case .judge(let c): texts = [c.prompt]; exempt = ["candidates"]
-            case .shell(let c), .gate(let c): texts = [c.command]
-            case .flowInput, .repo, .pick: break
-            }
             let wired = Set(self.inputs(of: id).map(\.input))
-            for name in texts.flatMap({ Template.placeholders(in: $0) })
-            where !wired.contains(name) && !exempt.contains(name) {
-                throw .unwiredPlaceholder(id, name)
+            for name in inputNames(of: id) {
+                let bound = n.inputs[name] != nil
+                if wired.contains(name) && bound { throw .inputBoundTwice(id, name) }
+                if !wired.contains(name) && !bound { throw .unboundInput(id, name) }
             }
         }
 

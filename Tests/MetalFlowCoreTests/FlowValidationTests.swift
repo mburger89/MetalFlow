@@ -103,9 +103,9 @@ private func wire(_ from: NodeID, _ to: NodeID, _ input: String = "in") -> Wire 
         #expect(throws: FlowError.judgeWithoutFanOut("j")) { try flow.validate() }
     }
 
-    @Test func unwiredPlaceholderIsRejected() {
+    @Test func unboundInputIsRejected() {
         let flow = Flow(name: "f", nodes: [prompt("a", "Fix {issue}")], wires: [])
-        #expect(throws: FlowError.unwiredPlaceholder("a", "issue")) { try flow.validate() }
+        #expect(throws: FlowError.unboundInput("a", "issue")) { try flow.validate() }
     }
 
     @Test func judgeIsExemptForCandidatesOnly() throws {
@@ -114,7 +114,7 @@ private func wire(_ from: NodeID, _ to: NodeID, _ input: String = "in") -> Wire 
             return Flow(name: "f", nodes: [prompt("a", candidates: ["x", "y"]), j], wires: [wire("a", "j")])
         }
         _ = try judge("Pick {candidates}").validate()
-        #expect(throws: FlowError.unwiredPlaceholder("j", "other")) { try judge("{candidates} {other}").validate() }
+        #expect(throws: FlowError.unboundInput("j", "other")) { try judge("{candidates} {other}").validate() }
     }
 
     @Test func placeholderScanner() {
