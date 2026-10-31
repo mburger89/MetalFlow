@@ -67,7 +67,6 @@ struct InspectorView: Component {
                 Text(verbatim: "Select a node to see its settings.").font(size: 12).foregroundColor(Palette.muted)
                     .accessibilityIdentifier("inspector.empty")
             }
-            Spacer()
         }
         .padding(insets(top: 12, right: 14, bottom: 12, left: 14))
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -122,6 +121,7 @@ struct NodeInspector: Component {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     static func command(_ draft: FlowDraft, _ id: NodeID) -> String {

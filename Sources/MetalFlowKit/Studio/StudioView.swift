@@ -29,20 +29,13 @@ struct StudioBody: Component {
         VStack(spacing: 0) {
             StudioToolbar(model: model, draft: draft)
             Divider()
-            if let problem = Self.problem(draft) {
+            if let problem = Self.problem(draft, launchError: model.studioLaunch.error) {
                 Text(verbatim: problem).font(size: 12).foregroundColor(Palette.bad)
                     .accessibilityIdentifier("studio.validation")
                     .lineLimit(2)
                     .padding(insets(top: 6, right: 14, bottom: 6, left: 14))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Palette.bad.opacity(0.14))
-            }
-            if let message = model.studioLaunch.error {
-                Text(verbatim: message).font(size: 12).foregroundColor(Palette.bad)
-                    .accessibilityIdentifier("studio.launchError")
-                    .lineLimit(2)
-                    .padding(insets(top: 6, right: 14, bottom: 6, left: 14))
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Palette | canvas | inspector; the divider positions persist across launches (UserDefaults).
             HSplitView {
@@ -67,10 +60,9 @@ struct StudioBody: Component {
 
 extension StudioBody {
     /// Why the flow cannot run: it does not validate, or it validates but cannot be launched from where it is.
-    static func problem(_ draft: FlowDraft) -> String? {
+    static func problem(_ draft: FlowDraft, launchError: String?) -> String? {
         if case .failure(let error) = draft.validation { return error.errorDescription ?? "\(error)" }
-        do { _ = try draft.flow.launchFields(location: draft.location) } catch { return draft.flow.message(for: error) }
-        return nil
+        return launchError
     }
 }
 

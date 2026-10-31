@@ -5,15 +5,16 @@ import MetalUITesting
 import Testing
 @testable import MetalFlowKit
 
+struct KindMismatch: Error {}
+
 @MainActor
 @Suite struct FlowEditingTests {
     let repo = URL(fileURLWithPath: "/repo")
 
-    /// `tall` gives the window room for the whole inspector, so the Inputs rows below the editors are on screen.
-    func fixture(runs: [Run] = [], repos: [URL]? = nil, tall: Bool = false) async throws -> (AppModel, FakeEngineClient, TestWindow) {
+    func fixture(runs: [Run] = [], repos: [URL]? = nil) async throws -> (AppModel, FakeEngineClient, TestWindow) {
         let client = FakeEngineClient(restored: runs, repos: repos ?? [repo])
         let model = AppModel(client: client, notifier: NoopNotifier())
-        let window = try appWindow(model: model, size: tall ? Size(width: Pixels(1440), height: Pixels(2000)) : metalFlowWindowSize)
+        let window = try appWindow(model: model, size: metalFlowWindowSize)
         try await window.runUntilIdle()
         await model.waitUntilReady()
         model.screen = .studio
@@ -823,15 +824,23 @@ import Testing
         }
     }
 
+    /// Scrolls the inspector to its end, where the Inputs rows are.
+    func scrollInspectorToEnd(_ window: TestWindow) async throws {
+        try window.scroll(window.element(identifier: "inspector.id"), byDeltaX: 0, deltaY: -2000)
+        window.advance(by: 5)  // the scroll's momentum decays with the clock; runUntilIdle alone never advances it
+        try await window.runUntilIdle()
+    }
+
     func planWires(_ draft: FlowDraft, _ input: String) -> [Wire] {
         draft.flow.wires.filter { $0.to == "plan" && $0.input == input }
     }
 
     @Test func inspectorListsInputs() async throws {
-        let (model, _, window) = try await fixture(tall: true)
+        let (model, _, window) = try await fixture()
         let draft = try #require(model.draft)
         planWithTopic(draft)
         try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
         for name in ["issue", "repo", "topic"] {
             _ = try window.element(identifier: "inspector.input.\(name)")
             _ = try window.element(identifier: "inspector.input.\(name).mode.wire")
@@ -846,9 +855,10 @@ import Testing
     }
 
     @Test func switchToValueRemovesWire() async throws {
-        let (model, _, window) = try await fixture(tall: true)
+        let (model, _, window) = try await fixture()
         let draft = try #require(model.draft)
         try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
         #expect(planWires(draft, "issue").count == 1)
         try await press("inspector.input.issue.mode.value", in: window)
         #expect(planWires(draft, "issue").isEmpty)
@@ -861,10 +871,11 @@ import Testing
     }
 
     @Test func switchToExposedSetsBinding() async throws {
-        let (model, _, window) = try await fixture(tall: true)
+        let (model, _, window) = try await fixture()
         let draft = try #require(model.draft)
         planWithTopic(draft)
         try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
         try await press("inspector.input.topic.mode.exposed", in: window)
         #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: nil))
         try typeAtEnd(window, "inspector.input.topic.default", "x")
@@ -894,9 +905,10 @@ import Testing
     }
 
     @Test func bindingSwitchIsOneUndoStep() async throws {
-        let (model, _, window) = try await fixture(tall: true)
+        let (model, _, window) = try await fixture()
         let draft = try #require(model.draft)
         try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
         let before = draft.flow
         let steps = draft.undoStack.count
         try await press("inspector.input.issue.mode.value", in: window)
@@ -915,7 +927,7 @@ import Testing
         #expect(menu.items.first { $0.isOn }?.title == "Exposed")
         try window.chooseMenuItem("Fixed")
         try await window.runUntilIdle()
-        guard case .repo(let fixed) = try node(draft, "repo").kind else { return }
+        guard case .repo(let fixed) = try node(draft, "repo").kind else { throw KindMismatch() }
         #expect(fixed.mode == .fixed(path: "/repo"))
         try window.click(window.element(identifier: "inspector.repo.path"))
         #expect(window.presentedMenu?.items.map(\.title) == ["repo"])
@@ -923,12 +935,12 @@ import Testing
         try await window.runUntilIdle()
         try typeAtEnd(window, "inspector.repo.pathField", "2")
         try await window.runUntilIdle()
-        guard case .repo(let typed) = try node(draft, "repo").kind else { return }
+        guard case .repo(let typed) = try node(draft, "repo").kind else { throw KindMismatch() }
         #expect(typed.mode == .fixed(path: "/repo2"))
         try window.click(window.element(identifier: "inspector.repo.mode"))
         try window.chooseMenuItem("This repo")
         try await window.runUntilIdle()
-        guard case .repo(let here) = try node(draft, "repo").kind else { return }
+        guard case .repo(let here) = try node(draft, "repo").kind else { throw KindMismatch() }
         #expect(here.mode == .thisRepo)
         #expect((try? window.element(identifier: "inspector.repo.path")) == nil)
     }
@@ -939,25 +951,42 @@ import Testing
         try await press("node.issue", in: window)
         _ = try window.element(identifier: "inspector.flowInput.mode")
         try await press("inspector.flowInput.mode.fixed", in: window)
-        guard case .flowInput(let c) = try node(draft, "issue").kind else { return }
+        guard case .flowInput(let c) = try node(draft, "issue").kind else { throw KindMismatch() }
         #expect(c.binding == .fixed(""))
         try typeAtEnd(window, "inspector.flowInput.value", "7")
         try await window.runUntilIdle()
-        guard case .flowInput(let d) = try node(draft, "issue").kind else { return }
+        guard case .flowInput(let d) = try node(draft, "issue").kind else { throw KindMismatch() }
         #expect(d.binding == .fixed("7"))
     }
 
     @Test func exposedTagShowsOnCard() async throws {
-        let (model, _, window) = try await fixture(tall: true)
+        let (model, _, window) = try await fixture()
         let draft = try #require(model.draft)
         planWithTopic(draft)
         try await window.runUntilIdle()
         #expect((try? window.element(identifier: "node.plan.exposed")) == nil)
         try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
         try await press("inspector.input.topic.mode.exposed", in: window)
         #expect(try window.element(identifier: "node.plan.exposed").value == "\u{21E2} launch")
         try await press("inspector.input.topic.mode.wire", in: window)
         #expect((try? window.element(identifier: "node.plan.exposed")) == nil)
+    }
+
+    @Test func reselectingSameModeIsNoUndoStep() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
+        let steps = draft.undoStack.count
+        try await press("inspector.input.issue.mode.wire", in: window)
+        #expect(draft.undoStack.count == steps, "wired input, Wire again")
+        try await press("inspector.input.issue.mode.value", in: window)
+        try await press("inspector.input.issue.mode.value", in: window)
+        #expect(draft.undoStack.count == steps + 1)
+        try await press("inspector.input.issue.mode.exposed", in: window)
+        try await press("inspector.input.issue.mode.exposed", in: window)
+        #expect(draft.undoStack.count == steps + 2)
     }
 
     @Test func launchErrorShowsInBanner() async throws {
@@ -968,5 +997,7 @@ import Testing
         try await window.runUntilIdle()
         #expect(draft.plan != nil)
         #expect(try window.element(identifier: "studio.validation").value == "A flow can have only one Repo node")
+        let shown = try window.elements(where: { $0.value == "A flow can have only one Repo node" })
+        #expect(shown.count == 1, "the message appears once")
     }
 }

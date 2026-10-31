@@ -478,7 +478,7 @@ import Testing
         }
         try await window.runUntilIdle()
         #expect(try window.element(identifier: "studio.launch").isEnabled == false)
-        #expect(try window.element(identifier: "studio.launchError").value
+        #expect(try window.element(identifier: "studio.validation").value
             == draft.flow.message(for: .thisRepoOutsideRepo))
     }
 
