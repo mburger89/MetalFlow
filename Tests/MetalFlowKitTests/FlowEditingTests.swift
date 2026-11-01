@@ -861,7 +861,7 @@ struct KindMismatch: Error {}
         #expect(client.files.saved.map(\.url) == [expected])
         #expect(repoMode(client.files.saved.first?.flow) == .exposed(default: "/repo"))
         #expect(model.draft?.location == .library(file: expected))
-        #expect(model.notice?.text.hasPrefix("Copied to \(expected.path). Saved to the library") == true)
+        #expect(model.notice == Notice("Copied to \(expected.path). The repo is now asked at launch (defaults to repo).", kind: .info))
     }
 
     @Test func copyKeepsUnsavedEditsWithoutAsking() async throws {

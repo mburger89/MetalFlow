@@ -53,8 +53,7 @@ public enum FlowCatalog {
             switch (destination, config.mode) {
             case (.library, .thisRepo):
                 config.mode = .exposed(default: origin?.path)
-                let detail = origin.map { "defaults to \($0.lastPathComponent)" } ?? "no default"
-                notice = "Saved to the library: the repo is now asked at launch (\(detail))."
+                notice = "Saved to the library: the repo is now asked at launch (\(defaultDetail(origin)))."
             case (.repo, .exposed(let d)) where d == nil:
                 config.mode = .thisRepo
             default:
@@ -68,15 +67,23 @@ public enum FlowCatalog {
     /// Prepares `flow` for a "Copy to..." at `destination`, like `prepareForSave` but a repo copy is made for that
     /// repo: every Repo node becomes `.thisRepo`, whatever its mode. A library copy follows `prepareForSave`'s rule
     /// (`.thisRepo` becomes `.exposed(default: origin?.path)`); `origin` is the repo the flow came from.
+    /// The notice describes only the change, since the copy reports where it went.
     public static func prepareForCopy(_ flow: Flow, destination: FlowLocation, origin: URL?) -> (Flow, String?) {
         var (out, notice) = prepareForSave(flow, destination: destination, origin: origin)
-        guard case .repo = destination else { return (out, notice) }
+        guard case .repo = destination else {
+            return (out, notice.map { _ in "The repo is now asked at launch (\(defaultDetail(origin)))." })
+        }
         for i in out.nodes.indices {
             guard case .repo(var config) = out.nodes[i].kind, config.mode != .thisRepo else { continue }
             config.mode = .thisRepo
             out.nodes[i].kind = .repo(config)
         }
         return (out, notice)
+    }
+
+    /// "defaults to <repo>" for the exposed Repo field, or "no default" without an origin.
+    private static func defaultDetail(_ origin: URL?) -> String {
+        origin.map { "defaults to \($0.lastPathComponent)" } ?? "no default"
     }
 
     /// The file to write a new flow named `name` into `directory`: `<slug>.flow`, or `-2`, `-3`... when taken.

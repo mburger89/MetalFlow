@@ -122,7 +122,7 @@ private func mode(_ flow: Flow) -> RepoMode? {
         let dest = FlowLocation.library(file: URL(fileURLWithPath: "/lib/a.flow"))
         let (out, notice) = FlowCatalog.prepareForCopy(flow(.thisRepo), destination: dest, origin: origin)
         #expect(mode(out) == .exposed(default: "/work/myrepo"))
-        #expect(notice == "Saved to the library: the repo is now asked at launch (defaults to myrepo).")
+        #expect(notice == "The repo is now asked at launch (defaults to myrepo).")
         let (fixed, fixedNotice) = FlowCatalog.prepareForCopy(flow(.fixed(path: "/p")), destination: dest, origin: origin)
         #expect(mode(fixed) == .fixed(path: "/p") && fixedNotice == nil)
     }
