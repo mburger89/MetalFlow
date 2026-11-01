@@ -61,8 +61,7 @@ struct NeedsCard: Component {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Edges(all: Spacing.md))
         .background(Color(Hsla.rgb(0x1a1712)))
-        .cornerRadius(10)
-        .border(color, width: 1)
+        .roundedBorder(color, radius: 10)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(id)
     }

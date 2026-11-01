@@ -58,8 +58,7 @@ struct LaunchBar: Component {
         }
         .padding(Edges(all: Spacing.md))
         .background(Color(Hsla.rgb(0x171a1f)))
-        .cornerRadius(14)
-        .border(Color(Hsla.rgb(0x2f343c)), width: 1)
+        .roundedBorder(Color(Hsla.rgb(0x2f343c)), radius: 14)
     }
 
     /// "name — Library", "name — <repo folder>" or "name — Built-in".

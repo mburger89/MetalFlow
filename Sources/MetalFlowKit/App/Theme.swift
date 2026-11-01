@@ -59,3 +59,14 @@ public let metalFlowMinimumSize = Size(width: Pixels(1000), height: Pixels(640))
 func insets(top: Double, right: Double, bottom: Double, left: Double) -> Edges<Pixels> {
     Edges(top: Pixels(floatLiteral: top), right: Pixels(floatLiteral: right), bottom: Pixels(floatLiteral: bottom), left: Pixels(floatLiteral: left))
 }
+
+extension ProposalElementGroup {
+    /// Rounds this view's corners and strokes the same shape inside its edge. `.border` after `.cornerRadius` stays square.
+    func roundedBorder(_ color: Color, radius: Pixels, width: Pixels = 1) -> some ProposalElementGroup {
+        cornerRadius(radius).overlay {
+            RoundedRectangle(cornerRadius: radius)
+                .strokeBorder(color, lineWidth: width)
+                .allowsHitTesting(false)
+        }
+    }
+}

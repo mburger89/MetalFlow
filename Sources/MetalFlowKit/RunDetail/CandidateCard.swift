@@ -73,8 +73,7 @@ struct CandidateCard: Component {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Edges(all: Spacing.md))
         .background(Palette.panel)
-        .cornerRadius(10)
-        .border(recommended ? Palette.accent : Palette.line, width: 1)
+        .roundedBorder(recommended ? Palette.accent : Palette.line, radius: 10)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(id)
     }

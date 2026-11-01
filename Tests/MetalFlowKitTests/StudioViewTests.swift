@@ -174,6 +174,13 @@ import Testing
         }
     }
 
+    @Test func launchBarBorderIsRounded() async throws {
+        let (_, _, window) = try await fixture()
+        #expect(window.scene.rects.contains { (rect: MUIRect) in
+            rect.borderWidths.left == 1 && rect.cornerRadii.topLeft == 14
+        })
+    }
+
     @Test func canvasFitsOnFirstShowAndFitButtonRestores() async throws {
         let (model, _, window) = try await fixture()
         try await showStudio(model, window)

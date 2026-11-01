@@ -81,7 +81,11 @@ struct DiffView: Component {
         .frame(maxWidth: .infinity, maxHeight: Pixels(360))
         .background(Palette.chrome)
         .cornerRadius(8)
-        .border(Palette.line, width: 1)
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Palette.line, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
     }
 }
 

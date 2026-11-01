@@ -76,8 +76,7 @@ struct WorkingChip: Component {
         }
         .padding(insets(top: 10, right: 12, bottom: 10, left: 12))
         .background(Palette.panel)
-        .cornerRadius(10)
-        .border(Color(Hsla.rgb(0x262a31)), width: 1)
+        .roundedBorder(Color(Hsla.rgb(0x262a31)), radius: 10)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(id)
     }

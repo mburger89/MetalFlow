@@ -61,8 +61,7 @@ struct RunCard: Component {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Edges(all: Spacing.md))
         .background(Palette.panel)
-        .cornerRadius(10)
-        .border(Palette.line, width: 1)
+        .roundedBorder(Palette.line, radius: 10)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("run.\(id.rawValue)")
     }

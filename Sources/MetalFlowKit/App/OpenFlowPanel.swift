@@ -33,8 +33,7 @@ struct OpenFlowPanel: Component {
             .padding(Edges(all: Spacing.lg))
             .frame(width: Pixels(420))
             .background(Palette.panel)
-            .cornerRadius(14)
-            .border(Palette.line, width: 1)
+            .roundedBorder(Palette.line, radius: 14)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("openFlow.panel")
         }
