@@ -153,6 +153,27 @@ import Testing
         #expect(model.draft?.selection == "plan")
     }
 
+    @Test func nodeCardBorderIsRounded() async throws {
+        let (model, _, window) = try await fixture()
+        try await showStudio(model, window)
+        let draft = try #require(model.draft)
+        draft.geometry.zoom = 2
+        try await window.runUntilIdle()
+        for selected in [false, true] {
+            draft.selection = selected ? "plan" : nil
+            try await window.runUntilIdle()
+            let card = try window.element(identifier: "node.plan").frame
+            let x = card.origin.x.value, y = card.origin.y.value, width = card.size.width.value
+            let border = try #require(window.scene.rects.first { (rect: MUIRect) in
+                rect.borderWidths.left > 0
+                    && abs(rect.bounds.origin.x - x) < 1 && abs(rect.bounds.origin.y - y) < 1
+                    && abs(rect.bounds.size.width - width) < 1
+            })
+            #expect(border.cornerRadii.topLeft == 20, "10 canvas units at 200%")
+            #expect(border.borderWidths.left == (selected ? 2 : 1))
+        }
+    }
+
     @Test func canvasFitsOnFirstShowAndFitButtonRestores() async throws {
         let (model, _, window) = try await fixture()
         try await showStudio(model, window)

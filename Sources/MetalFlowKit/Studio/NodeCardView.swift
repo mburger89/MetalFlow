@@ -143,7 +143,12 @@ struct NodeCardView: Component, @MainActor Equatable {
         .frame(width: Pixels(Float(rect.w * z)), height: Pixels(Float(rect.h * z)), alignment: .topLeading)
         .background(Color(Hsla.rgb(0x181b21)))
         .cornerRadius(Pixels(Float(10 * z)))
-        .border(selected ? Palette.accent : Color(Hsla.rgb(0x262a31)), width: Pixels(selected ? 2 : 1))
+        // A stroke of the same shape: `.border` after `.cornerRadius` stays square.
+        .overlay {
+            RoundedRectangle(cornerRadius: Pixels(Float(10 * z)))
+                .strokeBorder(selected ? Palette.accent : Color(Hsla.rgb(0x262a31)), lineWidth: Pixels(selected ? 2 : 1))
+                .allowsHitTesting(false)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("node.\(node.id.rawValue)")
         .offset(x: origin.x, y: origin.y)
