@@ -226,12 +226,13 @@ import Testing
     }
 
     @Test func addRepoOpensFolderDialog() async throws {
-        let (model, _, window) = try await fixture()
-        try await press("launch.addrepo", in: window)
+        let (model, _, window) = try await catalogFixture()
+        #expect((try? window.element(identifier: "launch.addrepo")) == nil, "only the repo field's button adds a repo")
+        try await press("launch.field.repo.add", in: window)
         let dialog = try #require(window.presentedFileDialog)
         #expect(dialog.canChooseDirectories && !dialog.canChooseFiles)
         #expect(dialog.allowedTypes.map(\.identifier) == ["public.folder"])
-        #expect(model.addRepoRequest == .dashboard)
+        #expect(model.addRepoRequest == .launchField)
         #expect(dialog.prompt == "Add Repository")
         #expect(dialog.message == "Choose a git repository folder")
     }
@@ -240,8 +241,8 @@ import Testing
         let dir = try folder()
         defer { try? FileManager.default.removeItem(at: dir) }
         let path = dir.standardizedFileURL.path
-        let (model, client, window) = try await fixture(gitRepos: [path])
-        try await press("launch.addrepo", in: window)
+        let (model, client, window) = try await catalogFixture(gitRepos: [path])
+        try await press("launch.field.repo.add", in: window)
         try window.respondToFileDialog(choosing: [dir.path])
         try await window.runUntil { model.repos.map(\.path).contains(path) }
         #expect(client.knownRepos().map(\.path).contains(path), "persisted through the client")
@@ -256,16 +257,16 @@ import Testing
     @Test func addRepoRejectsNonRepoFolder() async throws {
         let dir = try folder()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let (model, _, window) = try await fixture()
-        try await press("launch.addrepo", in: window)
+        let (model, _, window) = try await catalogFixture()
+        try await press("launch.field.repo.add", in: window)
         try window.respondToFileDialog(choosing: [dir.path])
         try await window.runUntil { model.notice != nil }
         #expect(model.repos.map(\.path) == ["/repo"])
     }
 
     @Test func addRepoCancelAddsNothing() async throws {
-        let (model, _, window) = try await fixture()
-        try await press("launch.addrepo", in: window)
+        let (model, _, window) = try await catalogFixture()
+        try await press("launch.field.repo.add", in: window)
         try window.cancelFileDialog()
         try await window.runUntilIdle()
         #expect(model.addRepoRequest == nil)

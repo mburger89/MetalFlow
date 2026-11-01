@@ -2,7 +2,7 @@ import Foundation
 import MetalFlowCore
 import MetalUI
 
-/// The flow picker, one control per launch field and the Launch button, plus an "Add repo..." button.
+/// The flow picker, one control per launch field and the Launch button.
 struct LaunchBar: Component {
     let model: AppModel
     @FocusState var issueFocused: Bool
@@ -46,9 +46,6 @@ struct LaunchBar: Component {
                 Text(verbatim: error).font(size: 12).foregroundColor(Palette.bad)
                     .accessibilityIdentifier("launch.error")
             }
-            Button("Add repo\u{2026}") { model.requestAddRepo(.dashboard) }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("launch.addrepo")
         }
         .task(id: model.launchFocusRequested) {
             // ⌘L: take the request, then focus the issue field.

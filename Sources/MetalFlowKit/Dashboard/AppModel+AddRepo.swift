@@ -3,8 +3,6 @@ import MetalFlowCore
 
 /// Why the folder dialog was opened, and so what happens with the folder chosen.
 public enum AddRepoPurpose: Equatable, Sendable {
-    /// Just add it.
-    case dashboard
     /// Add it, then select it in the launch form's repo field.
     case launchField
     /// Add it, then save the pending draft into `<it>/.flows`.
@@ -17,7 +15,7 @@ public enum AddRepoPurpose: Equatable, Sendable {
     /// The folder dialog's explanatory message for this purpose.
     var dialogMessage: String {
         switch self {
-        case .dashboard, .launchField: "Choose a git repository folder"
+        case .launchField: "Choose a git repository folder"
         case .saveDestination: "Choose the git repository to save this flow in"
         case .copyDestination: "Choose the git repository to copy this flow into"
         case .repoNode: "Choose the git repository this flow runs on"
@@ -62,8 +60,6 @@ extension AppModel {
             added = folder.standardizedFileURL
         }
         switch purpose {
-        case .dashboard:
-            break
         case .launchField:
             guard let added else { break }
             // The dashboard's field or the Studio's row, whichever has a repo field on the current screen.
