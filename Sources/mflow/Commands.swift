@@ -82,6 +82,69 @@ func requirePositionals(_ a: Arguments, min: Int, max: Int? = nil, name: String)
     }
 }
 
+/// The commands `run()` dispatches.
+let knownCommands: Set<String> = ["init-flow", "launch", "list", "show", "answer", "resume", "pick", "discard", "branch"]
+
+/// The stderr text for a missing or unknown command (exit 64), or nil when `argv` names a known one.
+func commandLineProblem(_ argv: [String]) -> String? {
+    guard let command = argv.first else { return usageText }
+    guard knownCommands.contains(command) else { return "mflow: unknown command '\(command)'\n\n\(usageText)" }
+    return nil
+}
+
+/// The exit code and stderr text for an error that ended a command.
+func failureReport(_ error: Error) -> (code: Int32, message: String) {
+    switch error {
+    case let e as LaunchArgumentError:
+        if case .badSet = e { return (64, "mflow: \(e.localizedDescription)\n\n\(usageText)") }
+        return (1, "mflow: \(e.localizedDescription)")
+    case let e as UsageError: return (64, "mflow: \(e.message)\n\n\(usageText)")
+    case let e as CommandFailure: return (1, "mflow: \(e.message)")
+    default: return (1, "mflow: \(error.localizedDescription)")
+    }
+}
+
+/// The flow `launch` runs: `--flow` as a file or a catalog name, else `<repo>/.flows/fix-issue.flow` if present, else the built-in.
+func selectFlow(flowArgument: String?, cwdRepo: URL?, library: URL, repos: @autoclosure () -> [URL]) throws -> (Flow, FlowLocation) {
+    if let arg = flowArgument {
+        let url = URL(fileURLWithPath: arg)
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue {
+            return (try loadFlow(url), FlowLocation.of(file: url))
+        }
+        let entries = FlowCatalog.entries(library: library, repos: repos())
+        let entry = try FlowCatalog.resolve(flowArgument: arg, entries: entries)
+        if let file = entry.file { return (try loadFlow(file), entry.location) }
+        return (BuiltinFlows.fixGitHubIssue, .builtin)
+    }
+    let file = cwdRepo?.appendingPathComponent(FlowFile.directoryName).appendingPathComponent("fix-issue.flow")
+    if let file, FileManager.default.fileExists(atPath: file.path) {
+        return (try loadFlow(file), FlowLocation.of(file: file))
+    }
+    return (BuiltinFlows.fixGitHubIssue, .builtin)
+}
+
+/// The launch values from VALUE, `--set` and the repo. An exposed repo is filled from `--repo` or the current
+/// directory; a bound flow only takes an explicit `--repo` (the engine refuses one that differs). `cwdError` is why
+/// the current directory is no repo, thrown when nothing else names a required repo.
+func launchValues(flow: Flow, location: FlowLocation, args: Arguments, cwdRepo: URL?, cwdError: Error?) throws -> [String: String] {
+    let fields: [LaunchField]
+    do { fields = try flow.launchFields(location: location) } catch {
+        throw CommandFailure(message: flow.message(for: error))
+    }
+    var values = try LaunchArguments.values(fields: fields, positional: args.positionals.first, sets: args.sets)
+    if fields.contains(where: { $0.kind == .repo }) {
+        if let cwdRepo, values["repo"] == nil { values["repo"] = cwdRepo.path }
+        // Nothing names the repo and the current directory is not one: say why, not just that a value is missing.
+        if let cwdError, values["repo"] == nil, fields.first(where: { $0.kind == .repo })?.defaultValue == nil {
+            throw cwdError
+        }
+    } else if args.repo != nil, let cwdRepo {
+        values["repo"] = cwdRepo.path
+    }
+    return values
+}
+
 func stderrPrint(_ s: String) {
     FileHandle.standardError.write(Data((s + "\n").utf8))
 }

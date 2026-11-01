@@ -41,6 +41,7 @@ let package = Package(
             dependencies: ["MetalFlowCore"],
             resources: [.copy("Fixtures")]
         ),
+        .testTarget(name: "mflowTests", dependencies: ["mflow", "MetalFlowCore"]),
         .testTarget(
             name: "MetalFlowKitTests",
             dependencies: [
