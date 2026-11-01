@@ -382,6 +382,29 @@ import Testing
         #expect(client.files.saved.map(\.url) == [expected, expected])
     }
 
+    @Test func savingDropsOrphanBindings() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window) = try await fixture(repos: [dir])
+        try await showStudio(model, window)
+        let draft = try #require(model.draft)
+        draft.edit("test.orphan") { flow in
+            if let i = flow.nodes.firstIndex(where: { $0.id == "plan" }) { flow.nodes[i].inputs["gone"] = .fixed("x") }
+        }
+        try await press("studio.save", in: window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
+        try await window.runUntil { !client.files.saved.isEmpty }
+        #expect(client.files.saved.first?.flow.node("plan")?.inputs["gone"] == nil, "first save")
+        draft.edit("test.orphan2") { flow in
+            if let i = flow.nodes.firstIndex(where: { $0.id == "plan" }) { flow.nodes[i].inputs["gone"] = .fixed("y") }
+        }
+        try await press("studio.save", in: window)
+        try await window.runUntil { client.files.saved.count == 2 }
+        #expect(client.files.saved.last?.flow.node("plan")?.inputs["gone"] == nil, "later save")
+        #expect(draft.flow.node("plan")?.inputs["gone"] == nil)
+        #expect(draft.isDirty == false)
+    }
+
     @Test func saveNeverOverwritesAnExistingFile() async throws {
         let dir = try tempRepo()
         defer { try? FileManager.default.removeItem(at: dir) }

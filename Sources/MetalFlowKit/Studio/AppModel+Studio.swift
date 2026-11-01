@@ -138,7 +138,7 @@ extension AppModel {
         let flow: Flow
         let location: FlowLocation
         if let url = draft.url {
-            flow = draft.flow
+            flow = draft.flow.droppingOrphanBindings()
             location = draft.location
             do { try client.saveFlow(flow, to: url) } catch {
                 notice = Notice(error.localizedDescription)

@@ -60,7 +60,8 @@ extension RunEngine {
                 }.joined(separator: "\n\n")
             }
         }
-        for (name, binding) in run.flow.node(key.node)?.inputs ?? [:] {
+        let names = Set(run.flow.inputNames(of: key.node))
+        for (name, binding) in run.flow.node(key.node)?.inputs ?? [:] where names.contains(name) {
             switch binding {
             case .fixed(let v): values[name] = v
             case .exposed(let d): values[name] = run.inputs[name] ?? d ?? ""

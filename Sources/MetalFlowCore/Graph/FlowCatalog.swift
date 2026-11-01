@@ -44,8 +44,9 @@ public enum FlowCatalog {
     /// Prepares `flow` for saving at `destination`, returning the flow to write and an optional notice.
     /// Library: `.thisRepo` becomes `.exposed(default: origin?.path)`.
     /// Repo: `.exposed(default: nil)` becomes `.thisRepo`. Every other mode is unchanged.
+    /// Input bindings whose placeholder is gone are dropped.
     public static func prepareForSave(_ flow: Flow, destination: FlowLocation, origin: URL?) -> (Flow, String?) {
-        var out = flow
+        var out = flow.droppingOrphanBindings()
         var notice: String?
         for i in out.nodes.indices {
             guard case .repo(var config) = out.nodes[i].kind else { continue }
