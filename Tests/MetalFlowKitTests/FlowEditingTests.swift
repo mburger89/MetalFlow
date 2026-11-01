@@ -651,13 +651,12 @@ struct KindMismatch: Error {}
     }
 
     @Test func sameNamedReposGetDistinctDestinationIds() async throws {
-        let (model, client, window) = try await fixture(repos: [URL(fileURLWithPath: "/work/a/app"), URL(fileURLWithPath: "/work/b/app")])
+        let (_, client, window) = try await fixture(repos: [URL(fileURLWithPath: "/work/a/app"), URL(fileURLWithPath: "/work/b/app")])
         try await press("studio.save", in: window)
         _ = try window.element(identifier: "save.dest.app")
         _ = try window.element(identifier: "save.dest.app-2")
         try await press("save.dest.app-2", in: window)
         #expect(client.files.saved.first?.url.path.hasPrefix("/work/b/app/") == true)
-        _ = model
     }
 
     @Test func firstSaveAsksDestination() async throws {
