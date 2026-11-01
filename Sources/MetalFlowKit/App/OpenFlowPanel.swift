@@ -19,10 +19,11 @@ struct OpenFlowPanel: Component {
                     Text("No flows").foregroundColor(Palette.muted)
                         .accessibilityIdentifier("openFlow.empty")
                 } else {
-                    ForEach(model.catalog, id: \.id) { entry in
+                    let ids = UniqueIdentifiers.dedupe(model.catalog.map(Self.identifier(of:)))
+                    ForEach(Array(zip(model.catalog, ids)), id: \.0.id) { entry, id in
                         Button(LaunchBar.title(of: entry)) { model.chooseEntry(entry) }
                             .buttonStyle(.bordered)
-                            .accessibilityIdentifier(Self.identifier(of: entry))
+                            .accessibilityIdentifier(id)
                     }
                 }
                 Button("Cancel") { model.hideOpenFlow() }
@@ -46,7 +47,7 @@ struct OpenFlowPanel: Component {
 }
 
 extension OpenFlowPanel {
-    /// `openFlow.builtin` for the built-in, otherwise `openFlow.<file name>`.
+    /// `openFlow.builtin` for the built-in, otherwise `openFlow.<file name>`; the panel suffixes repeats (see `UniqueIdentifiers`).
     static func identifier(of entry: FlowEntry) -> String {
         entry.file.map { "openFlow.\($0.lastPathComponent)" } ?? "openFlow.builtin"
     }

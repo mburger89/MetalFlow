@@ -146,6 +146,25 @@ import Testing
         #expect((try? window.element(identifier: "openFlow.panel")) == nil)
     }
 
+    @Test func sameNamedFlowFilesGetDistinctIds() async throws {
+        let first = URL(fileURLWithPath: "/a/.flows/fix.flow"), second = URL(fileURLWithPath: "/b/.flows/fix.flow")
+        let client = FakeEngineClient(repos: [repo], flowFiles: [first, second])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        _ = try window.element(identifier: "openFlow.fix.flow")
+        try window.click(window.element(identifier: "openFlow.fix.flow-2"))
+        try await window.runUntilIdle()
+        #expect(model.draft?.url == second)
+    }
+
+    @Test func uniqueIdentifiersSuffixRepeatsInOrder() {
+        #expect(UniqueIdentifiers.dedupe(["a", "b", "a", "a", "b"]) == ["a", "b", "a-2", "a-3", "b-2"])
+    }
+
     // MARK: Save, Undo, Redo
 
     @Test func saveCommandSavesDraft() async throws {

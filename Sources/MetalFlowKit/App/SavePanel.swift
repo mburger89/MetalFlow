@@ -17,10 +17,12 @@ struct SavePanel: Component {
                 Button("Library") { model.chooseSaveDestination(.library) }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("save.dest.library")
-                ForEach(model.repos, id: \.path) { repo in
+                let repos = model.repos
+                let ids = UniqueIdentifiers.dedupe(repos.map { "save.dest.\($0.lastPathComponent)" })
+                ForEach(Array(zip(repos, ids)), id: \.0.path) { repo, id in
                     Button(repo.lastPathComponent) { model.chooseSaveDestination(.repo(repo)) }
                         .buttonStyle(.bordered)
-                        .accessibilityIdentifier("save.dest.\(repo.lastPathComponent)")
+                        .accessibilityIdentifier(id)
                 }
                 Button("Add repo\u{2026}") { model.requestAddRepo(.saveDestination) }
                     .buttonStyle(.bordered)
