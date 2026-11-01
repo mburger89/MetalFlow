@@ -287,6 +287,48 @@ import os
         #expect(h.agent.requests.filter { $0.resumeSessionID == "sc" }.count == 2)
     }
 
+    private var failedFix: [AgentEvent] {
+        [.started(sessionID: "x"), .finished(AgentResult(sessionID: "x", text: "boom", isError: true, deniedTools: [], costUSD: 0, turns: 1))]
+    }
+
+    @Test func failedFixSessionFailsOnlyThatLane() async throws {
+        let h = try Harness()
+        _ = scriptLane(h, "a", session: "sa", fixesOn: nil, resumeEvents: failedFix)
+        let id = try await launch(h, flow(h, attempts: 1))
+        let run = try await finished(h, id)
+        #expect(run.nodes[implement("a")]?.state == .failed("boom"))
+        #expect(run.nodes[gate("a")]?.state == .waiting)
+        let judges = h.agent.requests.filter { $0.prompt.contains("judging candidate") }
+        #expect(judges.count == 1)
+        #expect(judges.first?.prompt.contains("## a (sonnet) — failed: boom") == true)
+        #expect(run.status == .needsYou)
+        #expect(run.nodes[NodeKey(node: "pick")]?.state == .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))
+    }
+
+    @Test func everyFixSessionFailingFailsTheRunLikeAllCandidatesFailed() async throws {
+        let h = try Harness()
+        for lane in ["a", "b", "c"] { _ = scriptLane(h, lane, session: "s\(lane)", fixesOn: nil, resumeEvents: failedFix) }
+        let id = try await launch(h, flow(h, attempts: 1))
+        let run = try await finished(h, id)
+        #expect(run.status == .failed("all candidates failed"))
+        #expect(h.agent.requests.filter { $0.prompt.contains("judging candidate") }.isEmpty)
+    }
+
+    @Test func retriedAgentThatFailsAgainDoesNotStrandTheJudge() async throws {
+        let h = try Harness()
+        _ = scriptLane(h, "a", session: "sa", fixesOn: nil, resumeEvents: failedFix)
+        let id = try await launch(h, flow(h, attempts: 1))
+        _ = try await finished(h, id)
+        // Retrying resets the gate to waiting behind the agent; the agent fails again.
+        try await h.engine.retry(id, node: implement("a"))
+        let run = try await finished(h, id)
+        #expect(run.nodes[implement("a")]?.state == .failed("boom"))
+        #expect(run.nodes[gate("a")]?.state == .waiting)
+        #expect(h.agent.requests.filter { $0.prompt.contains("judging candidate") }.count == 2)
+        #expect(run.status == .needsYou)
+        #expect(run.nodes[NodeKey(node: "pick")]?.state == .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))
+    }
+
     @Test func cancellingDuringAFixLeavesTheRunCancelled() async throws {
         let h = try Harness()
         let (hold, cont) = AsyncStream<Void>.makeStream()

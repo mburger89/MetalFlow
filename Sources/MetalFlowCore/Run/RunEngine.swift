@@ -475,9 +475,7 @@ public actor RunEngine {
             // An interrupted lane node blocks the judge until it is resumed.
             if let current = runs[id], hasInterrupted(current) { return }
             // A lane answered during this pass is waiting again; the requested rerun finishes it before judge/pick.
-            if rerunRequested.contains(id) || (runs[id]?.nodes.contains { $0.key.lane != nil && $0.value.state == .waiting } ?? false) {
-                return
-            }
+            if rerunRequested.contains(id) || anyLaneCanProgress(id, nodes: laneNodes) { return }
             if !hasFinishedLane(id, nodes: laneNodes) {
                 mutate(id) { $0.status = .failed("all candidates failed") }
                 return
@@ -502,6 +500,20 @@ public actor RunEngine {
         }
         await runNode(id, key, plan: plan)
         return nodeState(id, key) == .succeeded
+    }
+
+    /// True when a lane is about to run again: its first node (in plan order) that has not succeeded is waiting.
+    /// A lane stopped at a failed node is finished, even if later nodes of it were reset to waiting.
+    func anyLaneCanProgress(_ id: RunID, nodes: [NodeID]) -> Bool {
+        guard let run = runs[id] else { return false }
+        return run.lanes.contains { lane in
+            for node in nodes {
+                let state = run.nodes[NodeKey(node: node, lane: lane.id)]?.state
+                if state == .succeeded { continue }
+                return state == .waiting
+            }
+            return false
+        }
     }
 
     private func hasFinishedLane(_ id: RunID, nodes: [NodeID]) -> Bool {
