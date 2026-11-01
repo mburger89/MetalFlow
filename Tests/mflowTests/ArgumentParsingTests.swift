@@ -95,4 +95,26 @@ import MetalFlowCore
             #expect(usageText.contains("  \(c) "))
         }
     }
+
+    @Test func parsesForceFlag() throws {
+        #expect(try parseArguments(["--force", "--repo", "/r"]).force)
+        #expect(try parseArguments([]).force == false)
+        #expect(usageText.contains("init-flow [--repo DIR] [--force]"))
+    }
+
+    @Test func initFlowRefusesExistingFileWithoutForce() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("initflow-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("fix-issue.flow")
+        try checkInitFlowTarget(file, force: false)
+        try Data("old".utf8).write(to: file)
+        do {
+            try checkInitFlowTarget(file, force: false)
+            Issue.record("expected a refusal")
+        } catch let e as CommandFailure {
+            #expect(e.message == "\(file.path) already exists; not overwriting (pass --force to replace it)")
+        }
+        try checkInitFlowTarget(file, force: true)
+    }
 }

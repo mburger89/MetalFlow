@@ -2,6 +2,8 @@ import Foundation
 import MetalFlowCore
 
 func run() async -> Int32 {
+    // Line-buffer stdout so a run id reaches a pipe or file as soon as it is printed.
+    setvbuf(stdout, nil, _IOLBF, 0)
     let argv = Array(CommandLine.arguments.dropFirst())
     if let message = commandLineProblem(argv) {
         stderrPrint(message)
@@ -17,9 +19,7 @@ func run() async -> Int32 {
             try requirePositionals(args, min: 0, max: 0, name: command)
             let repo = try await resolveRepo(args.repo, runner: runner)
             let file = repo.appendingPathComponent(FlowFile.directoryName).appendingPathComponent("fix-issue.flow")
-            guard !FileManager.default.fileExists(atPath: file.path) else {
-                throw CommandFailure(message: "\(file.path) already exists; not overwriting")
-            }
+            try checkInitFlowTarget(file, force: args.force)
             let (prepared, _) = FlowCatalog.prepareForSave(
                 BuiltinFlows.fixGitHubIssue, destination: FlowLocation.of(file: file), origin: repo)
             try FlowFile.save(prepared, to: file)

@@ -124,4 +124,32 @@ private func mode(_ flow: Flow) -> RepoMode? {
         let store = RunStore(root: URL(fileURLWithPath: "/r"))
         #expect(store.flowsDirectory.path == "/r/flows")
     }
+
+    private func entry(_ name: String, _ path: String?) -> FlowEntry {
+        let file = path.map { URL(fileURLWithPath: $0) }
+        return FlowEntry(id: path ?? "builtin:\(name)", name: name, location: file.map { .library(file: $0) } ?? .builtin, file: file)
+    }
+
+    @Test func resolveMatchesFileStem() throws {
+        let entries = [entry("Fix GitHub issue", nil), entry("Fix an issue", "/repo/.flows/fix-issue.flow")]
+        #expect(try FlowCatalog.resolve(flowArgument: "fix-issue", entries: entries).id == "/repo/.flows/fix-issue.flow")
+        #expect(try FlowCatalog.resolve(flowArgument: "Fix-Issue", entries: entries).id == "/repo/.flows/fix-issue.flow")
+    }
+
+    @Test func resolveNameAndStemOfSameEntryIsOneMatch() throws {
+        let entries = [entry("deploy", "/lib/deploy.flow")]
+        #expect(try FlowCatalog.resolve(flowArgument: "deploy", entries: entries).id == "/lib/deploy.flow")
+    }
+
+    @Test func resolveStemAmbiguousAcrossLocations() {
+        let entries = [entry("A", "/lib/fix-issue.flow"), entry("B", "/repo/.flows/fix-issue.flow")]
+        #expect(throws: LaunchArgumentError.ambiguousFlow("fix-issue", ["/lib/fix-issue.flow", "/repo/.flows/fix-issue.flow"])) {
+            _ = try FlowCatalog.resolve(flowArgument: "fix-issue", entries: entries)
+        }
+    }
+
+    @Test func resolveNameMatchedByOneAndStemByAnotherIsAmbiguous() {
+        let entries = [entry("deploy", "/lib/a.flow"), entry("Other", "/lib/deploy.flow")]
+        #expect(throws: LaunchArgumentError.self) { _ = try FlowCatalog.resolve(flowArgument: "deploy", entries: entries) }
+    }
 }

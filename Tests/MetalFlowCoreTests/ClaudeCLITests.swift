@@ -66,6 +66,30 @@ import Testing
         _ = try? await task.value
     }
 
+    @Test func silentSessionFailsAfterStartupTimeoutAndTerminatesProcess() async throws {
+        let (flag, flagCont) = AsyncStream<Void>.makeStream()
+        let runner = HangingRunner(onTerminate: { flagCont.yield() })
+        let cli = ClaudeCLI(runner: runner, startupTimeout: .milliseconds(50))
+        do {
+            _ = try await collect(cli.run(request()))
+            Issue.record("expected a timeout")
+        } catch {
+            #expect(error.localizedDescription == "claude did not respond within 0.05 seconds of starting")
+        }
+        for await _ in flag { break }
+    }
+
+    @Test func timeoutMessageFormatsWholeSeconds() {
+        #expect(ClaudeStartupTimeout(duration: .seconds(60)).errorDescription == "claude did not respond within 60 seconds of starting")
+    }
+
+    @Test func noTimeoutOnceAnEventHasArrived() async throws {
+        let runner = LateRunner(first: #"{"type":"system","subtype":"init","session_id":"x"}"#, delay: .milliseconds(200),
+                                rest: try fixtureLines("success"))
+        let events = try await collect(ClaudeCLI(runner: runner, startupTimeout: .milliseconds(50)).run(request()))
+        guard case .finished? = events.last else { Issue.record("no finished"); return }
+    }
+
     @Test func fakeAgentScriptsEffectsAndRecords() async throws {
         let agent = FakeAgent()
         let result = AgentResult(sessionID: "s", text: "ok", isError: false, deniedTools: [], costUSD: 0, turns: 1)
@@ -109,6 +133,27 @@ private final class HangingRunner: CommandRunner {
         return AsyncThrowingStream { continuation in
             continuation.onTermination = { _ in onTerminate() }
             started.yield()
+        }
+    }
+}
+
+/// Emits one line at once, then the rest after `delay`.
+private final class LateRunner: CommandRunner {
+    let first: String, delay: Duration, rest: [String]
+    init(first: String, delay: Duration, rest: [String]) { self.first = first; self.delay = delay; self.rest = rest }
+
+    func run(_ c: Command) async throws -> CommandResult { CommandResult(exitCode: 0, stdout: "", stderr: "") }
+
+    func lines(_ c: Command) -> AsyncThrowingStream<String, Error> {
+        let first = first, delay = delay, rest = rest
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                continuation.yield(first)
+                try? await Task.sleep(for: delay)
+                for l in rest { continuation.yield(l) }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 }
