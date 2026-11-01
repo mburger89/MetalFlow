@@ -32,17 +32,23 @@ import MetalUI
                 repoPicker(field)
                 addButton
             }
-        } else if let focus {
-            TextField(field.name, text: value(field))
-                .onSubmit(submit)
-                .focused(focus)
-                .frame(width: textWidth)
-                .accessibilityIdentifier("\(idPrefix).field.\(field.name)")
         } else {
-            TextField(field.name, text: value(field))
-                .onSubmit(submit)
-                .frame(width: textWidth)
-                .accessibilityIdentifier("\(idPrefix).field.\(field.name)")
+            textField(field, focus: focus)
+        }
+    }
+
+    /// A text field; the frame is applied only when a width is given, so the caller's flexible layout is left alone.
+    @ElementBuilder
+    private func textField(_ field: LaunchField, focus: FocusState<Bool>.Binding?) -> some ElementGroup {
+        let id = "\(idPrefix).field.\(field.name)"
+        if let focus, let width = textWidth {
+            TextField(field.name, text: value(field)).onSubmit(submit).focused(focus).frame(width: width).accessibilityIdentifier(id)
+        } else if let focus {
+            TextField(field.name, text: value(field)).onSubmit(submit).focused(focus).accessibilityIdentifier(id)
+        } else if let width = textWidth {
+            TextField(field.name, text: value(field)).onSubmit(submit).frame(width: width).accessibilityIdentifier(id)
+        } else {
+            TextField(field.name, text: value(field)).onSubmit(submit).accessibilityIdentifier(id)
         }
     }
 
@@ -50,15 +56,22 @@ import MetalUI
     private func repoPicker(_ field: LaunchField) -> some ElementGroup {
         if model.repos.isEmpty {
             Text("No repos yet").foregroundColor(Palette.muted).accessibilityIdentifier("\(idPrefix).field.repo")
+        } else if let width = repoWidth {
+            Picker("", selection: value(field)) { repoRows }
+                .pickerStyle(.menu)
+                .frame(width: width)
+                .accessibilityIdentifier("\(idPrefix).field.repo")
         } else {
-            Picker("", selection: value(field)) {
-                ForEach(model.repos, id: \.path) { url in
-                    Text(verbatim: url.lastPathComponent).tag(url.path)
-                }
-            }
-            .pickerStyle(.menu)
-            .frame(width: repoWidth)
-            .accessibilityIdentifier("\(idPrefix).field.repo")
+            Picker("", selection: value(field)) { repoRows }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("\(idPrefix).field.repo")
+        }
+    }
+
+    @ElementBuilder
+    private var repoRows: some ElementGroup {
+        ForEach(model.repos, id: \.path) { url in
+            Text(verbatim: url.lastPathComponent).tag(url.path)
         }
     }
 
