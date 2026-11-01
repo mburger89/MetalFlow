@@ -53,8 +53,9 @@ struct NodeStateStyle: Equatable, Sendable {
     /// The word run statuses use for a run that waits on the user.
     static let needsYouLabel = "Needs you"
 
-    /// The style of `state`.
-    init(_ state: NodeState) {
+    /// The style of `state`. A gate that has used fix attempts reads "Fix 1 of 2" as its detail, where the state
+    /// has none of its own.
+    init(_ state: NodeState, fix: Run.FixProgress? = nil) {
         switch state {
         case .waiting: (label, tone, symbol, detail) = ("Waiting", .muted, "·", nil)
         case .running: (label, tone, symbol, detail) = ("Running", .accent, "●", nil)
@@ -72,6 +73,7 @@ struct NodeStateStyle: Equatable, Sendable {
                 (tone, detail) = allGatesFailed ? (.bad, "gate failed") : (.warn, "pick a winner")
             }
         }
+        if detail == nil, let fix { detail = "Fix \(fix.used) of \(fix.of)" }
     }
 
     /// The tone's foreground colour.

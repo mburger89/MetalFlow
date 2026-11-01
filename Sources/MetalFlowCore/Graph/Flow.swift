@@ -100,8 +100,30 @@ public struct PromptConfig: Codable, Hashable, Sendable {
 /// Configuration of a shell or gate node.
 public struct ShellConfig: Codable, Hashable, Sendable {
     public var command: String
+    /// How many times a failing gate may send the agent that wrote the code back to fix it before it gives up.
+    /// Only gates use it; a shell node ignores it.
+    public var fixAttempts: Int
     /// Creates a shell configuration.
-    public init(command: String) { self.command = command }
+    public init(command: String, fixAttempts: Int = 0) {
+        self.command = command
+        self.fixAttempts = fixAttempts
+    }
+
+    private enum CodingKeys: String, CodingKey { case command, fixAttempts }
+
+    /// Decodes a configuration; files written before fix attempts existed have no `fixAttempts` and mean 0.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        command = try c.decode(String.self, forKey: .command)
+        fixAttempts = try c.decodeIfPresent(Int.self, forKey: .fixAttempts) ?? 0
+    }
+
+    /// Encodes the command, and `fixAttempts` only when it is set, so files without fix attempts stay as they were.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(command, forKey: .command)
+        if fixAttempts != 0 { try c.encode(fixAttempts, forKey: .fixAttempts) }
+    }
 }
 
 /// What a node does.

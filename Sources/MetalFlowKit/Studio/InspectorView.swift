@@ -30,15 +30,35 @@ extension FlowDraft {
         }
     }
 
-    /// Edits a shell or gate node's command.
-    func editShell(_ id: NodeID, _ change: @escaping (inout ShellConfig) -> Void) {
-        editNode(id, "command") { node in
+    /// Edits a shell or gate node's command, or another of its settings when `field` names it.
+    func editShell(_ id: NodeID, _ field: String = "command", coalescing: Bool = true,
+                   _ change: @escaping (inout ShellConfig) -> Void) {
+        editNode(id, field, coalescing: coalescing) { node in
             switch node.kind {
             case .shell(var c): change(&c); node.kind = .shell(c)
             case .gate(var c): change(&c); node.kind = .gate(c)
             default: break
             }
         }
+    }
+
+    /// The fix attempts of a gate; 0 for any other node.
+    func fixAttempts(_ id: NodeID) -> Int {
+        if case .gate(let c)? = flow.node(id)?.kind { return c.fixAttempts }
+        return 0
+    }
+
+    /// Whether a prompt node feeds the node, directly or through other nodes: someone the gate could send back to fix.
+    func hasPromptUpstream(of id: NodeID) -> Bool {
+        var seen: Set<NodeID> = [id]
+        var stack = [id]
+        while let current = stack.popLast() {
+            for wire in flow.inputs(of: current) where seen.insert(wire.from).inserted {
+                if case .prompt? = flow.node(wire.from)?.kind { return true }
+                stack.append(wire.from)
+            }
+        }
+        return false
     }
 
     /// A prompt or judge node's configuration.
@@ -119,6 +139,7 @@ struct NodeInspector: Component {
                         set: { value in draft.editShell(id) { $0.command = value } }))
                         .font(family: "Menlo", size: 12)
                         .accessibilityIdentifier("inspector.command")
+                    if case .gate = node.kind { GateFixFields(draft: draft, id: id) }
                 case .pick:
                     Text(verbatim: "Waits for you to pick a candidate.").font(size: 12).foregroundColor(Palette.muted)
                 }
@@ -139,6 +160,31 @@ struct NodeInspector: Component {
 
     func label(_ text: String) -> some Element {
         Text(verbatim: text).font(size: 11).foregroundColor(Palette.muted)
+    }
+}
+
+/// How many times a failing gate may send its agent back to fix the code.
+struct GateFixFields: Component {
+    let draft: FlowDraft
+    let id: NodeID
+
+    /// The most fix attempts a gate can be given.
+    static let maxAttempts = 5
+
+    var content: some ElementGroup {
+        let draft = draft, id = id
+        Text(verbatim: "Fix attempts").font(size: 11).foregroundColor(Palette.muted)
+        Picker("", selection: Binding(
+            get: { draft.fixAttempts(id) },
+            set: { value in draft.editShell(id, "fixAttempts", coalescing: false) { $0.fixAttempts = value } })) {
+            ForEach(Array(0...Self.maxAttempts), id: \.self) { Text(verbatim: "\($0)").tag($0) }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("inspector.gate.fixAttempts")
+        if !draft.hasPromptUpstream(of: id) {
+            Text(verbatim: "Needs a Prompt node feeding this gate.").font(size: 12).foregroundColor(Palette.muted)
+                .accessibilityIdentifier("inspector.gate.fixHint")
+        }
     }
 }
 

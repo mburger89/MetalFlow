@@ -218,6 +218,10 @@ extension RunEngine {
             .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
         while lines.last?.isEmpty == true { lines.removeLast() }
         let tail = lines.suffix(Self.maxShellOutputLines).joined(separator: "\n")
+        if isGate, !result.succeeded,
+           beginFix(id, key, config: config, command: command, exitCode: result.exitCode, output: tail, plan: plan) {
+            return
+        }
         if isGate, let lane {
             let stat = try? await git.diffStat(worktree: worktree, base: run.branch)
             mutate(id) { run in

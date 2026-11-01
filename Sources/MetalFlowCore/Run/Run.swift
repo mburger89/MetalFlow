@@ -106,12 +106,15 @@ public struct NodeRun: Codable, Hashable, Sendable {
     public var startedAt: Date?
     /// When execution ended.
     public var endedAt: Date?
+    /// For a gate: how many times it sent its agent back to fix a failure.
+    public var fixAttemptsUsed: Int
     /// Creates a node run with defaults (waiting, empty log).
     public init(
         state: NodeState = .waiting, output: String? = nil, sessionID: String? = nil,
         log: [String] = [], pendingReply: String? = nil, extraAllowedTools: [String] = [],
-        costUSD: Double = 0, startedAt: Date? = nil, endedAt: Date? = nil
+        costUSD: Double = 0, startedAt: Date? = nil, endedAt: Date? = nil, fixAttemptsUsed: Int = 0
     ) {
+        self.fixAttemptsUsed = fixAttemptsUsed
         self.state = state
         self.output = output
         self.sessionID = sessionID
@@ -122,6 +125,26 @@ public struct NodeRun: Codable, Hashable, Sendable {
         self.startedAt = startedAt
         self.endedAt = endedAt
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed
+    }
+
+    /// Decodes a node run; runs saved before fix attempts existed have no `fixAttemptsUsed` and mean 0.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = try c.decode(NodeState.self, forKey: .state)
+        output = try c.decodeIfPresent(String.self, forKey: .output)
+        sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
+        log = try c.decode([String].self, forKey: .log)
+        pendingReply = try c.decodeIfPresent(String.self, forKey: .pendingReply)
+        extraAllowedTools = try c.decode([String].self, forKey: .extraAllowedTools)
+        costUSD = try c.decode(Double.self, forKey: .costUSD)
+        startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
+        endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
+        fixAttemptsUsed = try c.decodeIfPresent(Int.self, forKey: .fixAttemptsUsed) ?? 0
+    }
+
     /// Appends a log line, keeping only the last 50.
     public mutating func appendLog(_ line: String) {
         log.append(line)
@@ -252,6 +275,26 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
             let (i, j) = (order.firstIndex(of: $0.node) ?? Int.max, order.firstIndex(of: $1.node) ?? Int.max)
             return i != j ? i < j : ($0.lane ?? "") < ($1.lane ?? "")
         }
+    }
+
+    /// How far a gate has got with its fix attempts.
+    public struct FixProgress: Equatable, Sendable {
+        /// Attempts used so far.
+        public var used: Int
+        /// Attempts the gate allows.
+        public var of: Int
+        /// Creates a progress value.
+        public init(used: Int, of: Int) {
+            self.used = used
+            self.of = of
+        }
+    }
+
+    /// The fix attempts a gate has used, or nil for a node that is not a gate or has used none.
+    public func fixProgress(_ key: NodeKey) -> FixProgress? {
+        guard case .gate(let config)? = flow.node(key.node)?.kind,
+              let used = nodes[key]?.fixAttemptsUsed, used > 0 else { return nil }
+        return FixProgress(used: used, of: config.fixAttempts)
     }
 
     /// True when any node, in any lane, has failed.

@@ -174,6 +174,13 @@ func stateText(_ s: NodeState) -> String {
     }
 }
 
+/// A node's state, and for a gate that has used fix attempts how many: "running (fix 1 of 2)".
+func nodeText(_ key: NodeKey, in run: Run) -> String {
+    let text = stateText(run.nodes[key]?.state ?? .waiting)
+    guard let fix = run.fixProgress(key) else { return text }
+    return "\(text) (fix \(fix.used) of \(fix.of))"
+}
+
 func needsYouText(_ n: NeedsYou) -> String {
     switch n {
     case .question(let q): "question: \(q)"
@@ -208,7 +215,7 @@ func runSummary(_ run: Run) -> [String] {
                  "  repo \(run.repo.path)  base \(run.baseBranch)  branch \(run.branch)"]
     lines.append("nodes:")
     for (key, node) in run.nodes.sorted(by: { $0.key.description < $1.key.description }) {
-        lines.append("  \(key) \(stateText(node.state))")
+        lines.append("  \(key) \(nodeText(key, in: run))")
     }
     let pending = run.needsYou
     if !pending.isEmpty {
@@ -290,7 +297,9 @@ func uninterruptible<T>(_ body: () async throws -> T) async rethrows -> T {
 /// Prints node state changes until the run leaves `.running`; returns the exit code.
 /// SIGINT, SIGTERM or SIGHUP cancels a running run, waits for it to settle, prints "cancelled" and returns 130.
 func follow(engine: RunEngine, id: RunID, seed: Run?) async -> Int32 {
-    var last: [NodeKey: NodeState] = seed?.nodes.mapValues(\.state) ?? [:]
+    var last: [NodeKey: String] = seed.map { run in
+        Dictionary(uniqueKeysWithValues: run.nodes.keys.map { ($0, nodeText($0, in: run)) })
+    } ?? [:]
     var lastStatus: RunStatus? = seed?.status
     let interrupted = OSAllocatedUnfairLock(initialState: false)
 
@@ -308,10 +317,11 @@ func follow(engine: RunEngine, id: RunID, seed: Run?) async -> Int32 {
     func report(_ run: Run) -> Bool {
         guard run.revision > lastRevision else { return false }
         lastRevision = run.revision
-        for (key, node) in run.nodes.sorted(by: { $0.key.description < $1.key.description })
-        where last[key] != node.state {
-            last[key] = node.state
-            print("\(key) \(stateText(node.state))")
+        for key in run.nodes.keys.sorted(by: { $0.description < $1.description }) {
+            let text = nodeText(key, in: run)
+            guard last[key] != text else { continue }
+            last[key] = text
+            print("\(key) \(text)")
         }
         if run.status != lastStatus {
             lastStatus = run.status

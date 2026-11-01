@@ -124,6 +124,8 @@ struct StepsSection: Component {
         var key: NodeKey
         var title: String
         var state: NodeState
+        /// For a gate: the fix attempts it has used.
+        var fix: Run.FixProgress?
     }
 
     /// One row per execution, in plan order. A node with no execution yet is one waiting row.
@@ -138,7 +140,7 @@ struct StepsSection: Component {
             }
             for key in keys {
                 guard let state = run.nodes[key]?.state else { continue }
-                rows.append(Row(key: key, title: node.title, state: state))
+                rows.append(Row(key: key, title: node.title, state: state, fix: run.fixProgress(key)))
             }
         }
         return rows
@@ -152,7 +154,7 @@ struct StepRow: Component {
 
     var content: some ElementGroup {
         let id = "detail.node.\(row.key)"
-        let style = NodeStateStyle(row.state)
+        let style = NodeStateStyle(row.state, fix: row.fix)
         let (label, color) = (style.text, style.color)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: Spacing.sm) {

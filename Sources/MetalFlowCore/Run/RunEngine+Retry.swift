@@ -55,6 +55,7 @@ extension RunEngine {
                 retried.output = nil
                 retried.startedAt = nil
                 retried.endedAt = nil
+                retried.fixAttemptsUsed = 0
                 run.nodes[node] = retried
             }
             for key in keys where run.nodes[key] != nil {

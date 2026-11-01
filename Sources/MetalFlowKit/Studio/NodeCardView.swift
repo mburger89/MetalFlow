@@ -82,8 +82,9 @@ extension NodeOverlay {
             let text = zip(run.lanes, states).map { "\($0.id.uppercased()) \(NodeStateStyle($1).symbol)" }.joined(separator: " ")
             return NodeOverlay(text: text, color: aggregateColor(states))
         }
-        let state = run.nodes[NodeKey(node: node.id)]?.state ?? .waiting
-        let style = NodeStateStyle(state)
+        let key = NodeKey(node: node.id)
+        let state = run.nodes[key]?.state ?? .waiting
+        let style = NodeStateStyle(state, fix: run.fixProgress(key))
         return NodeOverlay(text: style.text, color: style.color)
     }
 

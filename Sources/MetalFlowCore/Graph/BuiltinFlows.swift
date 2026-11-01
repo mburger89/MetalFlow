@@ -20,7 +20,7 @@ public enum BuiltinFlows {
                 candidates: ["sonnet", "opus", "haiku"],
                 allowedTools: ["Read", "Edit", "Write", "Grep", "Glob", "Bash(swift build:*)", "Bash(swift test:*)", "Bash(git ls-files:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)"],
                 maxTurns: nil)), position: Point(x: 504, y: 185)),
-            Node(id: "gate", title: "swift test", kind: .gate(ShellConfig(command: "swift test")), position: Point(x: 744, y: 185)),
+            Node(id: "gate", title: "swift test", kind: .gate(ShellConfig(command: "swift test", fixAttempts: 2)), position: Point(x: 744, y: 185)),
             Node(id: "judge", title: "Recommend", kind: .judge(PromptConfig(
                 model: "opus",
                 prompt: "You are judging candidate fixes for this issue. Prefer candidates whose tests pass, then the smallest correct diff. Explain briefly, then end with a final line `RECOMMEND: <lane>`.\n\nIssue:\n{issue}\n\nCandidates:\n{candidates}",
