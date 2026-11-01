@@ -98,8 +98,7 @@ import Testing
         notifier.click(id.rawValue)
         await model.flushNotifications()
         // The click is consumed by a task; wait for its effect through the model.
-        await waitUntil("the click to open the run") { model.selectedRun == id }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.selectedRun == id }
         #expect(model.screen == .dashboard)
         #expect(model.selectedRun == id)
         #expect(model.workingOn.contains(.run(id)))
@@ -117,8 +116,7 @@ import Testing
         model.open(flow: URL(fileURLWithPath: "/repo/.flows/other.flow"))
         #expect(model.pendingAction != nil)
         notifier.click(id.rawValue)
-        await waitUntil("the click to open the run") { model.selectedRun == id }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.selectedRun == id }
         #expect(!model.isOpenFlowVisible, "the overlay would hide the run the user clicked")
         #expect(model.pendingAction == nil, "answering the alert later must not pull the user away")
         #expect(model.screen == .dashboard)
@@ -180,7 +178,7 @@ import Testing
         let window = try appWindow(model: model)
         try await window.runUntilIdle()
         await model.waitUntilReady()
-        await waitUntil("the early click to open the run") { model.selectedRun == id }
+        try await window.runUntil { model.selectedRun == id }
         #expect(model.selectedRun == id)
         #expect(activations == 1)
         _ = window
@@ -214,7 +212,7 @@ import Testing
         _ = window.testApp.platform.simulateTerminateRequest()
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Quit")
-        await waitUntil("quit to begin") { model.isQuitting }
+        try await window.runUntil { model.isQuitting }
         // Suspending turns the run into needs-you; that must not notify on the way out.
         model.apply(makeRun("a", status: .needsYou, revision: 1, id: a.id, nodes: [
             NodeKey(node: "plan"): NodeRun(state: .interrupted)]))

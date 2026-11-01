@@ -109,10 +109,10 @@ import Testing
 
     @Test func pickIgnoresSecondClickWhileInFlight() async throws {
         let run = pickRun()
-        let (model, client, _) = try await fixture(run)
+        let (model, client, window) = try await fixture(run)
         await client.holdPicks()
         let first = Task { await model.pick(run.id, lane: "a") }
-        await waitUntil("the pick to be in flight") { model.pickingRun != nil }
+        try await window.runUntil { model.pickingRun != nil }
         // The second call must return at once with the first still held. The fake holds only the first call,
         // so a broken guard shows up as a recorded pick-start(b) instead of a hang.
         let second = Task { await model.pick(run.id, lane: "b") }
@@ -132,8 +132,7 @@ import Testing
         _ = try window.element(identifier: "cand.a.result")
         await client.holdPicks()
         let again = Task { await model.pick(model.selectedRun!, lane: "a") }
-        await waitUntil("the pick to be in flight") { model.pickingRun != nil }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.pickingRun != nil }
         #expect((try? window.element(identifier: "cand.a.result")) == nil, "cleared while the new attempt runs")
         await client.releasePicks()
         _ = await again.value
@@ -146,8 +145,7 @@ import Testing
         let (model, client, window) = try await fixture(run)
         await client.holdPicks()
         let task = Task { await model.pick(run.id, lane: "a") }
-        await waitUntil("the pick to be in flight") { model.pickingRun != nil }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.pickingRun != nil }
         for lane in ["a", "b", "c"] {
             #expect(try !window.element(identifier: "cand.\(lane).pick").isEnabled)
         }
@@ -363,7 +361,7 @@ import Testing
         var changed = run
         changed.revision += 1
         model.apply(changed)
-        await waitUntil("the open diff to show the new text") { shownDiff(model, run).contains("+new") }
+        try await window.runUntil { shownDiff(model, run).contains("+new") }
         #expect(model.openDiff == DiffKey(run: run.id, lane: "a"))
         #expect(model.diffChunks[DiffKey(run: run.id, lane: "a")] != nil, "never blanked to the loading line")
         #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 2)
@@ -384,7 +382,7 @@ import Testing
 
     @Test func reloadWhileInFlightCoalesces() async throws {
         let run = pickRun()
-        let (model, client, _) = try await fixture(run)
+        let (model, client, window) = try await fixture(run)
         await client.setDiff("@@ -1 +1 @@\n+v0\n")
         await model.toggleDiff(run.id, lane: "a")
         await client.holdDiffs()
@@ -399,8 +397,8 @@ import Testing
         model.apply(second)                          // arrive while the load is pending
         model.apply(third)
         await client.releaseDiffs()
-        await waitUntil("the newest text") { shownDiff(model, run).contains("+v3") }
-        await waitUntil("the load to finish") { model.diffInFlight.isEmpty }
+        try await window.runUntil { shownDiff(model, run).contains("+v3") }
+        try await window.runUntil { model.diffInFlight.isEmpty }
         #expect(await client.calls.filter { $0.hasPrefix("diff") }.count == 3, "initial, the reload, one follow-up")
         #expect(model.diffRevisions[DiffKey(run: run.id, lane: "a")] == third.revision)
     }

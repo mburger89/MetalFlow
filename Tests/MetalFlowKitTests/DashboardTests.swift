@@ -224,8 +224,7 @@ import Testing
         let (model, client, window) = try await fixture(gitRepos: [path])
         try await press("launch.addrepo", in: window)
         try window.respondToFileDialog(choosing: [dir.path])
-        await waitUntil("the repo") { model.repos.map(\.path).contains(path) }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.repos.map(\.path).contains(path) }
         #expect(client.knownRepos().map(\.path).contains(path), "persisted through the client")
         let fresh = AppModel(client: client, notifier: NoopNotifier())
         await fresh.refreshRepos()
@@ -241,7 +240,7 @@ import Testing
         let (model, _, window) = try await fixture()
         try await press("launch.addrepo", in: window)
         try window.respondToFileDialog(choosing: [dir.path])
-        await waitUntil("the notice") { model.notice != nil }
+        try await window.runUntil { model.notice != nil }
         #expect(model.repos.map(\.path) == ["/repo"])
     }
 
@@ -263,7 +262,7 @@ import Testing
         try await press("launch.field.repo.add", in: window)
         #expect(model.addRepoRequest == .launchField)
         try window.respondToFileDialog(choosing: [dir.path])
-        await waitUntil("the field") { model.launchForm.values["repo"] == path }
+        try await window.runUntil { model.launchForm.values["repo"] == path }
         #expect(model.repos.map(\.path).contains(path))
     }
 
@@ -342,11 +341,11 @@ import Testing
     }
 
     @Test func textTypedDuringALaunchSurvives() async throws {
-        let (model, client, _) = try await fixture()
+        let (model, client, window) = try await fixture()
         await client.holdLaunches()
         model.launchForm.values["issue"] = "42"
         let task = Task { await model.launchFromForm() }
-        await waitUntil("the launch to be in flight") { model.isLaunching }
+        try await window.runUntil { model.isLaunching }
         #expect(model.isLaunching)
         #expect(!model.canLaunch)
         model.launchForm.values["issue"] = "43"

@@ -439,8 +439,7 @@ struct KindMismatch: Error {}
         try await press("studio.save", in: window)
         try await press("save.dest.\(dir.lastPathComponent)", in: window)
         // The new file name is chosen off the main actor.
-        await waitUntil("the save") { !client.files.saved.isEmpty }
-        try await window.runUntilIdle()
+        try await window.runUntil { !client.files.saved.isEmpty }
         let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
         #expect(client.files.saved.map(\.url) == [expected])
         // A repo save turns the unset Exposed repo into This repo.
@@ -493,7 +492,7 @@ struct KindMismatch: Error {}
         model.open(flow: b)
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
-        await waitUntil("the save and the switch") { model.draft?.url == b }
+        try await window.runUntil { model.draft?.url == b }
         #expect(client.files.saved.map(\.url) == [a])
         #expect(client.files.saved.first?.flow == edited)
         #expect(model.draft?.url == b)
@@ -635,7 +634,7 @@ struct KindMismatch: Error {}
         model.open(flow: b)
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
-        await waitUntil("the save failure notice") { model.notice != nil }
+        try await window.runUntil { model.notice != nil }
         #expect(model.draft === draft && draft.url == a && draft.isDirty)
         #expect(model.notice?.text == "engine said no")
         #expect(model.pendingOpen == nil)
@@ -647,8 +646,7 @@ struct KindMismatch: Error {}
     /// Starts a save and waits for the destination panel.
     func startSave(_ model: AppModel, _ window: TestWindow) async throws -> Task<Bool, Never> {
         let saving = Task { await model.saveDraft() }
-        await waitUntil("the destination panel") { model.isSavePanelVisible }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.isSavePanelVisible }
         return saving
     }
 
@@ -784,7 +782,7 @@ struct KindMismatch: Error {}
         try await press("inspector.repo.add", in: window)
         #expect(model.addRepoRequest == .repoNode("repo"))
         try window.respondToFileDialog(choosing: [dir.path])
-        await waitUntil("the path") {
+        try await window.runUntil {
             if case .repo(let c)? = draft.flow.node("repo")?.kind { return c.mode == .fixed(path: path) }
             return false
         }
@@ -803,7 +801,7 @@ struct KindMismatch: Error {}
         try await press("studio.field.repo.add", in: window)
         #expect(model.addRepoRequest == .launchField)
         try window.respondToFileDialog(choosing: [dir.path])
-        await waitUntil("the field") { model.studioValues["repo"] == path }
+        try await window.runUntil { model.studioValues["repo"] == path }
     }
 
     @Test func saveCancelKeepsDraftUnsaved() async throws {
@@ -827,12 +825,11 @@ struct KindMismatch: Error {}
         model.open(flow: target)
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
-        await waitUntil("the destination panel") { model.isSavePanelVisible }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.isSavePanelVisible }
         #expect(model.pendingAction == nil, "the alert's answer was taken first")
         #expect(model.draft === draft, "not switched yet")
         try await press("save.dest.library", in: window)
-        await waitUntil("the switch") { model.draft?.url == target }
+        try await window.runUntil { model.draft?.url == target }
         #expect(client.files.saved.count == 1)
         // Cancelling the panel cancels the switch.
         let again = try #require(model.draft)
@@ -843,10 +840,9 @@ struct KindMismatch: Error {}
         model.open(flow: repo.appendingPathComponent(".flows/c.flow"))
         try await window.runUntilIdle()
         try window.respondToAlert(button: "Save")
-        await waitUntil("the destination panel") { model.isSavePanelVisible }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.isSavePanelVisible }
         try await press("save.cancel", in: window)
-        await waitUntil("the panel to go") { !model.isSavePanelVisible }
+        try await window.runUntil { !model.isSavePanelVisible }
         #expect(model.draft === other && other.isDirty && other.location == .unsaved)
         #expect(client.files.saved.count == 1)
         #expect(model.pendingAction == nil)
@@ -914,7 +910,6 @@ struct KindMismatch: Error {}
     /// Scrolls the inspector to its end, where the Inputs rows are.
     func scrollInspectorToEnd(_ window: TestWindow) async throws {
         try window.scroll(window.element(identifier: "inspector.id"), byDeltaX: 0, deltaY: -2000)
-        window.advance(by: 5)  // the scroll's momentum decays with the clock; runUntilIdle alone never advances it
         try await window.runUntilIdle()
     }
 

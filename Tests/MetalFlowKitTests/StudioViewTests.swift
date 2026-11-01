@@ -231,8 +231,7 @@ import Testing
         try await window.runUntilIdle()
         #expect((try? window.element(identifier: "diff.hunk.0")) == nil)
         try await press("cand.a.diff", in: window)
-        await waitUntil("the diff to load") { model.diffChunks[DiffKey(run: run.id, lane: "a")] != nil }
-        try await window.runUntilIdle()
+        try await window.runUntil { model.diffChunks[DiffKey(run: run.id, lane: "a")] != nil }
         _ = try window.element(identifier: "diff.hunk.0")
         try await press("cand.a.diff", in: window)
         #expect((try? window.element(identifier: "diff.hunk.0")) == nil, "Hide diff closes it")
@@ -357,8 +356,7 @@ import Testing
         try await press("studio.save", in: window)
         try await press("save.dest.\(dir.lastPathComponent)", in: window)
         // The new file name is chosen off the main actor.
-        await waitUntil("the save") { !client.files.saved.isEmpty }
-        try await window.runUntilIdle()
+        try await window.runUntil { !client.files.saved.isEmpty }
         #expect(client.files.saved.map(\.url) == [expected])
         #expect(client.files.saved.first?.flow == FlowCatalog.prepareForSave(
             BuiltinFlows.fixGitHubIssue, destination: .of(file: expected), origin: nil).0)
@@ -366,7 +364,7 @@ import Testing
         #expect(model.draft?.isDirty == false)
         // Saving again writes the same file.
         try await press("studio.save", in: window)
-        await waitUntil("the second save") { client.files.saved.count == 2 }
+        try await window.runUntil { client.files.saved.count == 2 }
         #expect(client.files.saved.map(\.url) == [expected, expected])
     }
 
@@ -381,7 +379,7 @@ import Testing
         let (model, client, window) = try await fixture(repos: [dir])
         try await showStudio(model, window)
         let saving = Task { await model.saveDraft() }
-        await waitUntil("the panel") { model.isSavePanelVisible }
+        try await window.runUntil { model.isSavePanelVisible }
         model.chooseSaveDestination(.repo(dir))
         #expect(await saving.value)
         #expect(client.files.saved.map(\.url) == [flows.appendingPathComponent("fix-github-issue-3.flow")])
