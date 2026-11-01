@@ -745,6 +745,8 @@ struct KindMismatch: Error {}
         try await press("save.dest.add", in: window)
         #expect(model.isSavePanelVisible, "the save waits for the folder")
         #expect(model.addRepoRequest == .saveDestination)
+        #expect(window.presentedFileDialog?.prompt == "Add Repository")
+        #expect(window.presentedFileDialog?.message == "Choose the git repository to save this flow in")
         try window.respondToFileDialog(choosing: [dir.path])
         #expect(await saving.value)
         let expected = dir.standardizedFileURL.appendingPathComponent(".flows/fix-github-issue.flow")
@@ -790,6 +792,8 @@ struct KindMismatch: Error {}
         let steps = draft.undoStack.count
         try await press("inspector.repo.add", in: window)
         #expect(model.addRepoRequest == .repoNode("repo"))
+        #expect(window.presentedFileDialog?.prompt == "Add Repository")
+        #expect(window.presentedFileDialog?.message == "Choose the git repository this flow runs on")
         try window.respondToFileDialog(choosing: [dir.path])
         try await window.runUntil {
             if case .repo(let c)? = draft.flow.node("repo")?.kind { return c.mode == .fixed(path: path) }
