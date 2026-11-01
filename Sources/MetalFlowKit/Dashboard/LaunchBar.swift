@@ -25,10 +25,10 @@ struct LaunchBar: Component {
                         .accessibilityIdentifier("launch.flow")
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 ForEach(Array(model.launchFields.enumerated()), id: \.element.name) { index, field in
                     labelled(field.name) { controls.control(for: field, focus: index == model.launchFields.firstIndex { $0.kind != .repo } ? $issueFocused : nil) }
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .frame(minWidth: Pixels(field.kind == .repo ? 140 : 200))
                 }
                 if let resolved = model.launchResolvedRepo {
@@ -80,6 +80,7 @@ struct LaunchBar: Component {
     private func labelled<Content: ElementGroup>(_ title: String, @ElementBuilder content: () -> Content) -> some ElementGroup {
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: title).font(size: 12).foregroundColor(Palette.muted)
+                .accessibilityIdentifier("launch.label.\(title)")
             content()
         }
     }

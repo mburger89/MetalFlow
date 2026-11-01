@@ -225,6 +225,16 @@ import Testing
         return url
     }
 
+    @Test func launchColumnsStartAtTheirLeftEdge() async throws {
+        let (_, _, window) = try await catalogFixture()
+        let left = { (id: String) in try window.element(identifier: id).frame.origin.x.value }
+        let flowLabel = try left("launch.label.Flow")
+        let issueLabel = try left("launch.label.issue")
+        let issueField = try left("launch.field.issue")
+        #expect(issueLabel == issueField, "the label sits on the field's left edge")
+        #expect(flowLabel < 60, "not centred in its column: \(flowLabel)")
+    }
+
     @Test func addRepoOpensFolderDialog() async throws {
         let (model, _, window) = try await catalogFixture()
         #expect((try? window.element(identifier: "launch.addrepo")) == nil, "only the repo field's button adds a repo")
