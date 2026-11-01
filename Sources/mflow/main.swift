@@ -3,15 +3,11 @@ import MetalFlowCore
 
 func run() async -> Int32 {
     let argv = Array(CommandLine.arguments.dropFirst())
-    guard let command = argv.first else {
-        stderrPrint(usageText)
+    if let message = commandLineProblem(argv) {
+        stderrPrint(message)
         return 64
     }
-    let known: Set<String> = ["init-flow", "launch", "list", "show", "answer", "resume", "pick", "discard", "branch"]
-    guard known.contains(command) else {
-        stderrPrint("mflow: unknown command '\(command)'\n\n\(usageText)")
-        return 64
-    }
+    let command = argv[0]
     do {
         let args = try parseArguments(Array(argv.dropFirst()))
         let resolver = ExecutableResolver()
@@ -46,45 +42,9 @@ func run() async -> Int32 {
             if args.repo != nil { cwdRepo = try await resolveRepo(args.repo, runner: runner) } else {
                 do { cwdRepo = try await resolveRepo(nil, runner: runner) } catch { cwdRepo = nil; cwdError = error }
             }
-            let flow: Flow
-            let location: FlowLocation
-            if let arg = args.flow {
-                let url = URL(fileURLWithPath: arg)
-                var isDir: ObjCBool = false
-                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue {
-                    (flow, location) = (try loadFlow(url), FlowLocation.of(file: url))
-                } else {
-                    let entries = FlowCatalog.entries(library: store.flowsDirectory, repos: store.knownRepos())
-                    let entry = try FlowCatalog.resolve(flowArgument: arg, entries: entries)
-                    if let file = entry.file {
-                        (flow, location) = (try loadFlow(file), entry.location)
-                    } else {
-                        (flow, location) = (BuiltinFlows.fixGitHubIssue, .builtin)
-                    }
-                }
-            } else {
-                let file = cwdRepo?.appendingPathComponent(FlowFile.directoryName).appendingPathComponent("fix-issue.flow")
-                if let file, FileManager.default.fileExists(atPath: file.path) {
-                    (flow, location) = (try loadFlow(file), FlowLocation.of(file: file))
-                } else {
-                    (flow, location) = (BuiltinFlows.fixGitHubIssue, .builtin)
-                }
-            }
-            let fields: [LaunchField]
-            do { fields = try flow.launchFields(location: location) } catch {
-                throw CommandFailure(message: flow.message(for: error))
-            }
-            var values = try LaunchArguments.values(fields: fields, positional: args.positionals.first, sets: args.sets)
-            // An exposed repo is filled from --repo or the current directory; a bound flow only checks an explicit --repo.
-            if fields.contains(where: { $0.kind == .repo }) {
-                if let cwdRepo, values["repo"] == nil { values["repo"] = cwdRepo.path }
-                // Nothing names the repo and the current directory is not one: say why, not just that a value is missing.
-                if let cwdError, values["repo"] == nil, fields.first(where: { $0.kind == .repo })?.defaultValue == nil {
-                    throw cwdError
-                }
-            } else if args.repo != nil, let cwdRepo {
-                values["repo"] = cwdRepo.path
-            }
+            let (flow, location) = try selectFlow(
+                flowArgument: args.flow, cwdRepo: cwdRepo, library: store.flowsDirectory, repos: store.knownRepos())
+            let values = try launchValues(flow: flow, location: location, args: args, cwdRepo: cwdRepo, cwdError: cwdError)
             let id: RunID
             do { id = try await engine.launch(flow: flow, location: location, values: values) } catch let e as RunEngineError {
                 if case .launch(let le) = e { throw CommandFailure(message: flow.message(for: le)) }
@@ -153,22 +113,10 @@ func run() async -> Int32 {
             print("kept branch \(args.positionals[2])")
             return 0
         }
-    } catch let e as LaunchArgumentError {
-        if case .badSet = e {
-            stderrPrint("mflow: \(e.localizedDescription)\n\n\(usageText)")
-            return 64
-        }
-        stderrPrint("mflow: \(e.localizedDescription)")
-        return 1
-    } catch let e as UsageError {
-        stderrPrint("mflow: \(e.message)\n\n\(usageText)")
-        return 64
-    } catch let e as CommandFailure {
-        stderrPrint("mflow: \(e.message)")
-        return 1
     } catch {
-        stderrPrint("mflow: \(error.localizedDescription)")
-        return 1
+        let (code, message) = failureReport(error)
+        stderrPrint(message)
+        return code
     }
 }
 
