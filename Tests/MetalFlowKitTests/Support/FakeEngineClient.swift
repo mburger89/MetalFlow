@@ -126,7 +126,7 @@ actor FakeEngineClient: EngineClient {
     nonisolated func flows(in repo: URL) -> [URL] { flowFiles }
     /// What `flowCatalog()` returns, and `libraryDirectory`.
     nonisolated let catalog = CatalogBox()
-    nonisolated func flowCatalog() -> [FlowEntry] { catalog.entries }
+    nonisolated func flowCatalog() -> [FlowEntry] { catalog.scan() }
     nonisolated var libraryDirectory: URL { catalog.library }
     func isGitRepo(_ url: URL) async -> Bool { gitRepoPaths.contains(url.path) }
     /// Every `saveFlow` call, and whether `loadFlow` fails.
@@ -249,6 +249,22 @@ final class CatalogBox: @unchecked Sendable {
     var entries: [FlowEntry] {
         get { lock.withLock { _entries } }
         set { lock.withLock { _entries = newValue } }
+    }
+    private let gate = LoadGate()
+    private let gateURL = URL(fileURLWithPath: "/catalog-gate")
+    private var holdNext = false
+    /// Makes the next `scan` return what the catalog holds now, but only once `release()` is called.
+    func holdNextScan() { lock.withLock { holdNext = true }; gate.hold(gateURL) }
+    /// Lets a held `scan` return.
+    func release() { gate.release() }
+    /// Returns once a held `scan` has started.
+    func waitForHeldScan() async { await gate.waitForEntry() }
+    /// The entries now; a held scan returns this snapshot after it is released.
+    func scan() -> [FlowEntry] {
+        let snapshot = entries
+        let hold = lock.withLock { () -> Bool in defer { holdNext = false }; return holdNext }
+        if hold { gate.pass(gateURL) }
+        return snapshot
     }
     var library: URL {
         get { lock.withLock { _library } }

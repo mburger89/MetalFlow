@@ -130,6 +130,8 @@ public final class AppModel {
     /// The flow `launchFields` was derived from.
     var launchFlow: Flow?
     var launchGeneration = 0
+    /// Bumped by every catalog refresh, so an older scan finishing late is dropped.
+    var catalogGeneration = 0
     /// The repo folder name shown for a flow whose Repo node is This repo or Fixed.
     public internal(set) var launchResolvedRepo: String?
     /// Unsent answer text, keyed by `AppModel.draftKey(_:_:)`.

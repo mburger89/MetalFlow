@@ -27,6 +27,23 @@ import Testing
 
     let builtinID = "builtin:Fix GitHub issue"
 
+    @Test func staleCatalogScanIsDropped() async throws {
+        let (model, client, _) = try await fixture()
+        let old = client.catalog.entries
+        client.catalog.holdNextScan()
+        let first = Task { await model.refreshCatalog() }
+        await client.catalog.waitForHeldScan()
+        // A newer refresh starts and finishes while the first scan is still running.
+        let extra = FlowEntry(id: "/repo/.flows/new.flow", name: "new", location: .of(file: URL(fileURLWithPath: "/repo/.flows/new.flow")),
+                              file: URL(fileURLWithPath: "/repo/.flows/new.flow"))
+        client.catalog.entries = old + [extra]
+        await model.refreshCatalog()
+        #expect(model.catalog.map(\.id) == old.map(\.id) + [extra.id])
+        client.catalog.release()
+        await first.value
+        #expect(model.catalog.map(\.id) == old.map(\.id) + [extra.id], "the older scan must not overwrite the newer one")
+    }
+
     /// A fixture whose catalog and flow files are scripted: built-in first, then `extra` entries (loaded from `flows`).
     func catalogFixture(repos: [URL]? = nil, extra: [(FlowEntry, Flow)] = [], gitRepos: Set<String> = []) async throws
         -> (AppModel, FakeEngineClient, TestWindow) {

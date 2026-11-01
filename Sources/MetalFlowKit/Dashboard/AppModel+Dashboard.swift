@@ -84,8 +84,11 @@ extension AppModel {
     }
 
     /// Re-reads the catalog (off the main actor) and keeps the selected flow, or selects the first entry. Repos
-    /// added by path but not yet known to the client are scanned too.
+    /// added by path but not yet known to the client are scanned too. A scan that finishes after a newer refresh
+    /// has started is dropped.
     public func refreshCatalog() async {
+        catalogGeneration += 1
+        let generation = catalogGeneration
         let client = client
         let added = addedRepos
         let found = await Task.detached { () -> [FlowEntry] in
@@ -98,6 +101,7 @@ extension AppModel {
             }
             return entries
         }.value
+        guard generation == catalogGeneration else { return }
         catalog = found
         if let id = launchForm.flow, found.contains(where: { $0.id == id }) {
             await loadLaunchFields()
