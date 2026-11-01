@@ -91,6 +91,7 @@ struct StudioToolbar: Component {
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
             .frame(width: Pixels(260))
             .accessibilityIdentifier("studio.runPicker")
             Button("Save") { Task { await model.saveDraft() } }

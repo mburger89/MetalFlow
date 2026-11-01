@@ -59,11 +59,13 @@ import MetalUI
         } else if let width = repoWidth {
             Picker("", selection: value(field)) { repoRows }
                 .pickerStyle(.menu)
+                .labelsHidden()
                 .frame(width: width)
                 .accessibilityIdentifier("\(idPrefix).field.repo")
         } else {
             Picker("", selection: value(field)) { repoRows }
                 .pickerStyle(.menu)
+                .labelsHidden()
                 .accessibilityIdentifier("\(idPrefix).field.repo")
         }
     }

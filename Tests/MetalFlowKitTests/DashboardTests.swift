@@ -232,6 +232,8 @@ import Testing
         let issueLabel = try left("launch.label.issue")
         let issueField = try left("launch.field.issue")
         #expect(issueLabel == issueField, "the label sits on the field's left edge")
+        #expect(try left("launch.flow") == flowLabel, "the picker sits on its label's left edge")
+        #expect(try left("launch.field.repo") == left("launch.label.repo"), "the picker sits on its label's left edge")
         #expect(flowLabel < 60, "not centred in its column: \(flowLabel)")
     }
 

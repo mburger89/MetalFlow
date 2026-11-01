@@ -22,6 +22,7 @@ struct LaunchBar: Component {
                             }
                         }
                         .pickerStyle(.menu)
+                        .labelsHidden()
                         .accessibilityIdentifier("launch.flow")
                     }
                 }

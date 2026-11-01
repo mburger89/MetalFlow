@@ -222,6 +222,7 @@ struct InputRow: Component {
                 Text("Exposed").accessibilityIdentifier("inspector.input.\(name).mode.exposed").tag(InputMode.exposed)
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .accessibilityIdentifier("inspector.input.\(name)")
             switch binding {
             case nil:
@@ -298,6 +299,7 @@ struct RepoFields: Component {
             Text(verbatim: "Exposed").tag(Choice.exposed)
         }
         .pickerStyle(.menu)
+        .labelsHidden()
         .accessibilityIdentifier("inspector.repo.mode")
         if mode != .thisRepo {
             Text(verbatim: { if case .fixed = mode { "Path" } else { "Default path" } }())
@@ -309,6 +311,7 @@ struct RepoFields: Component {
                     ForEach(repos, id: \.path) { url in Text(verbatim: url.lastPathComponent).tag(url.path) }
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
                 .accessibilityIdentifier("inspector.repo.path")
             }
             TextField("/path/to/repo", text: Binding(
@@ -357,6 +360,7 @@ struct FlowInputFields: Component {
             Text(verbatim: "Text").tag(InputSource.text)
         }
         .pickerStyle(.menu)
+        .labelsHidden()
         .accessibilityIdentifier("inspector.inputSource")
         Text(verbatim: "Value").font(size: 11).foregroundColor(Palette.muted)
         Picker("", selection: Binding(
@@ -370,6 +374,7 @@ struct FlowInputFields: Component {
             Text("Exposed").accessibilityIdentifier("inspector.flowInput.mode.exposed").tag(Mode.exposed)
         }
         .pickerStyle(.segmented)
+        .labelsHidden()
         .accessibilityIdentifier("inspector.flowInput.mode")
         switch Self.config(draft, id)?.binding {
         case .fixed(let v)?:
@@ -468,6 +473,7 @@ struct PromptFields: Component {
             ForEach(inspectorModels, id: \.self) { Text(verbatim: $0).tag($0) }
         }
         .pickerStyle(.menu)
+        .labelsHidden()
         .accessibilityIdentifier(identifier)
     }
 }
