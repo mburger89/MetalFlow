@@ -9,6 +9,8 @@ public enum AddRepoPurpose: Equatable, Sendable {
     case launchField
     /// Add it, then save the pending draft into `<it>/.flows`.
     case saveDestination
+    /// Add it, then copy the draft into `<it>/.flows`.
+    case copyDestination
     /// Add it, then set that Repo node's Fixed path or Exposed default.
     case repoNode(NodeID)
 
@@ -17,6 +19,7 @@ public enum AddRepoPurpose: Equatable, Sendable {
         switch self {
         case .dashboard, .launchField: "Choose a git repository folder"
         case .saveDestination: "Choose the git repository to save this flow in"
+        case .copyDestination: "Choose the git repository to copy this flow into"
         case .repoNode: "Choose the git repository this flow runs on"
         }
     }
@@ -69,8 +72,8 @@ extension AppModel {
             } else {
                 launchForm.values["repo"] = added.path
             }
-        case .saveDestination:
-            // A folder that is not a repo leaves the panel up (addRepo has set the notice); only a cancel ends the save.
+        case .saveDestination, .copyDestination:
+            // A folder that is not a repo leaves the panel up (addRepo has set the notice); only a cancel ends the save or copy.
             if let added { chooseSaveDestination(.repo(added)) } else if folder == nil { chooseSaveDestination(nil) }
         case .repoNode(let id):
             if let added, let draft { RepoFields.setPath(draft, id, added.path, coalescing: false) }

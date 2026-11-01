@@ -66,6 +66,8 @@ public final class AppModel {
     public var studioValues: [String: String] = [:]
     /// True while the save-destination panel is showing.
     public internal(set) var isSavePanelVisible = false
+    /// What the destination panel is for: a first save, or a copy that leaves out the flow's current location.
+    public internal(set) var savePanelMode = SavePanelMode.save
     /// Non-nil while the folder dialog is up.
     public internal(set) var addRepoRequest: AddRepoPurpose?
     /// The purpose of a dialog that has just ended, until its result (or its cancel) is handled.

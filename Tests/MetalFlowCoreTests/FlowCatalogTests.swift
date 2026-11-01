@@ -108,6 +108,35 @@ private func mode(_ flow: Flow) -> RepoMode? {
         }
     }
 
+    @Test func copyToRepoMakesEveryRepoModeThisRepo() {
+        let root = URL(fileURLWithPath: "/work/r")
+        let dest = FlowLocation.repo(root: root, file: root.appendingPathComponent(".flows/a.flow"))
+        for m: RepoMode in [.fixed(path: "/p"), .exposed(default: "x"), .exposed(default: nil), .thisRepo] {
+            let (out, _) = FlowCatalog.prepareForCopy(flow(m), destination: dest, origin: nil)
+            #expect(mode(out) == .thisRepo)
+        }
+    }
+
+    @Test func copyToLibraryExposesThisRepoWithOriginDefault() {
+        let origin = URL(fileURLWithPath: "/work/myrepo")
+        let dest = FlowLocation.library(file: URL(fileURLWithPath: "/lib/a.flow"))
+        let (out, notice) = FlowCatalog.prepareForCopy(flow(.thisRepo), destination: dest, origin: origin)
+        #expect(mode(out) == .exposed(default: "/work/myrepo"))
+        #expect(notice == "Saved to the library: the repo is now asked at launch (defaults to myrepo).")
+        let (fixed, fixedNotice) = FlowCatalog.prepareForCopy(flow(.fixed(path: "/p")), destination: dest, origin: origin)
+        #expect(mode(fixed) == .fixed(path: "/p") && fixedNotice == nil)
+    }
+
+    @Test func copyDropsOrphanBindings() {
+        var f = flow(.thisRepo)
+        f.nodes.append(Node(id: "a", title: "A", kind: .prompt(PromptConfig(model: "sonnet", prompt: "{x}", candidates: [], allowedTools: [], maxTurns: nil)),
+                            position: Point(x: 0, y: 0), inputs: ["x": .fixed("v"), "gone": .exposed(default: nil)]))
+        let root = URL(fileURLWithPath: "/work/r")
+        for d in [FlowLocation.library(file: URL(fileURLWithPath: "/lib/a.flow")), .repo(root: root, file: root.appendingPathComponent(".flows/a.flow"))] {
+            #expect(FlowCatalog.prepareForCopy(f, destination: d, origin: root).0.node("a")?.inputs == ["x": .fixed("v")])
+        }
+    }
+
     @Test func newFileURLNeverOverwrites() throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
