@@ -978,8 +978,8 @@ struct KindMismatch: Error {}
         #expect(try node(draft, "plan").inputs["issue"] == .exposed(default: nil))
     }
 
-    @Test func renamingPlaceholderPrunesBinding() async throws {
-        let (model, _, _) = try await fixture()
+    @Test func bindingSurvivesMidEditPlaceholder() async throws {
+        let (model, _, window) = try await fixture()
         let draft = try #require(model.draft)
         planWithTopic(draft)
         draft.edit("test.bind") { flow in
@@ -987,13 +987,18 @@ struct KindMismatch: Error {}
                 flow.nodes[i].inputs["topic"] = .exposed(default: "x")
             }
         }
+        try await window.runUntil { (try? window.element(identifier: "node.plan.exposed")) != nil }
         let steps = draft.undoStack.count
-        draft.editPrompt("plan", "prompt") { $0.prompt = $0.prompt.replacingOccurrences(of: "{topic}", with: "{subject}") }
-        #expect(try node(draft, "plan").inputs["topic"] == nil, "the stale binding is gone")
-        #expect(!(try node(draft, "plan").hasExposedInput), "and no longer counts as exposed")
+        draft.editPrompt("plan", "prompt") { $0.prompt = $0.prompt.replacingOccurrences(of: "{topic}", with: "{topi") }
+        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: "x"), "kept while orphaned")
+        #expect(!(try node(draft, "plan").hasExposedInput), "but inactive")
         #expect(draft.undoStack.count == steps + 1)
-        draft.undo()
-        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: "x"), "one undo step brings it back")
+        try await window.runUntil { (try? window.element(identifier: "node.plan.exposed")) == nil }
+        draft.editPrompt("plan", "prompt") { $0.prompt = $0.prompt.replacingOccurrences(of: "{topi", with: "{topic}") }
+        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: "x"))
+        #expect((try? draft.validation.get()) != nil, "no unbound input after retyping")
+        try await window.runUntil { (try? window.element(identifier: "node.plan.exposed")) != nil }
+        #expect(try draft.flow.launchFields(location: draft.location).map(\.name).contains("topic"))
     }
 
     @Test func wireOntoBoundInputClearsBinding() async throws {

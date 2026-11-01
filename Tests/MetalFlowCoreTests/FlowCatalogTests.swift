@@ -88,6 +88,16 @@ private func mode(_ flow: Flow) -> RepoMode? {
         #expect(mode(kept) == .exposed(default: "/x"))
     }
 
+    @Test func orphanBindingsDroppedOnSave() {
+        var f = flow(.thisRepo)
+        f.nodes.append(Node(id: "a", title: "A", kind: .prompt(PromptConfig(model: "sonnet", prompt: "{x}", candidates: [], allowedTools: [], maxTurns: nil)),
+                            position: Point(x: 0, y: 0), inputs: ["x": .fixed("v"), "gone": .exposed(default: nil)]))
+        let root = URL(fileURLWithPath: "/work/r")
+        let dest = FlowLocation.repo(root: root, file: root.appendingPathComponent(".flows/a.flow"))
+        let (out, _) = FlowCatalog.prepareForSave(f, destination: dest, origin: nil)
+        #expect(out.node("a")?.inputs == ["x": .fixed("v")])
+    }
+
     @Test func fixedUnchangedOnSave() {
         let root = URL(fileURLWithPath: "/work/r")
         let dests: [FlowLocation] = [.library(file: URL(fileURLWithPath: "/lib/a.flow")), .repo(root: root, file: root.appendingPathComponent(".flows/a.flow"))]

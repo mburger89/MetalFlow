@@ -216,6 +216,17 @@ public struct Flow: Codable, Hashable, Sendable {
     /// Wires that feed the given node.
     public func inputs(of id: NodeID) -> [Wire] { wires.filter { $0.to == id } }
 
+    /// The flow without bindings whose placeholder their node no longer has. Editing keeps these so retyping a
+    /// placeholder restores its binding; everything that reads bindings ignores them, and saving drops them.
+    public func droppingOrphanBindings() -> Flow {
+        var out = self
+        for i in out.nodes.indices where !out.nodes[i].inputs.isEmpty {
+            let names = Set(inputNames(of: out.nodes[i].id))
+            out.nodes[i].inputs = out.nodes[i].inputs.filter { names.contains($0.key) }
+        }
+        return out
+    }
+
     /// Distinct placeholder names of a node's prompt or command, in order of first appearance. A judge's `candidates` is excluded.
     public func inputNames(of id: NodeID) -> [String] {
         guard let n = node(id) else { return [] }

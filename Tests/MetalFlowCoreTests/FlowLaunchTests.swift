@@ -28,6 +28,18 @@ private let inLibrary = FlowLocation.library(file: URL(fileURLWithPath: "/tmp/li
         #expect(flow.message(for: .unboundInput("ghost", "x")) == "ghost: input {x} has no value — wire it, give it a value, or expose it")
     }
 
+    @Test func orphanBindingIsIgnored() throws {
+        let flow = Flow(name: "f", nodes: [prompt("a", "go {x}", inputs: ["x": .fixed("v"), "old": .exposed(default: "d")]),
+                                           prompt("s", "go"), prompt("b", "{y}", inputs: ["z": .fixed("v")]),
+                                           repoNode(.fixed(path: "/p"))],
+                        wires: [Wire(from: "s", to: "b", input: "y")])
+        _ = try flow.validate()
+        #expect(try flow.launchFields(location: inLibrary).isEmpty)
+        let dropped = flow.droppingOrphanBindings()
+        #expect(dropped.node("a")?.inputs == ["x": .fixed("v")])
+        #expect(dropped.node("b")?.inputs == [:])
+    }
+
     @Test func inputBoundTwiceRejected() {
         let flow = Flow(name: "f", nodes: [prompt("s", "go"), prompt("a", "{x}", inputs: ["x": .fixed("v")])],
                         wires: [Wire(from: "s", to: "a", input: "x")])
