@@ -123,7 +123,6 @@ actor FakeEngineClient: EngineClient {
         try record("addKnownRepo(\(url.path))")
         repoList.add(url)
     }
-    nonisolated func flows(in repo: URL) -> [URL] { flowFiles }
     /// What `flowCatalog()` returns, and `libraryDirectory`.
     nonisolated let catalog = CatalogBox()
     nonisolated func flowCatalog() -> [FlowEntry] { catalog.scan() }
