@@ -44,10 +44,12 @@ public enum LaunchArguments {
 }
 
 extension FlowCatalog {
-    /// The entry whose name equals `flowArgument`, ignoring case. Throws when none or several match.
+    /// The entry whose name, or file name without `.flow`, equals `flowArgument`, ignoring case. Throws when none or several match.
     public static func resolve(flowArgument: String, entries: [FlowEntry]) throws -> FlowEntry {
         let wanted = flowArgument.lowercased()
-        let matches = entries.filter { $0.name.lowercased() == wanted }
+        let matches = entries.filter {
+            $0.name.lowercased() == wanted || $0.file?.deletingPathExtension().lastPathComponent.lowercased() == wanted
+        }
         guard let first = matches.first else { throw LaunchArgumentError.noFlowNamed(flowArgument) }
         if matches.count > 1 {
             throw LaunchArgumentError.ambiguousFlow(flowArgument, matches.map { $0.file?.path ?? "(built-in)" })
