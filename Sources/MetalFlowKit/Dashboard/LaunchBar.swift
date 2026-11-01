@@ -27,7 +27,7 @@ struct LaunchBar: Component {
                 }
                 .frame(maxWidth: .infinity)
                 ForEach(Array(model.launchFields.enumerated()), id: \.element.name) { index, field in
-                    labelled(field.name) { control(for: field, isFirstText: index == model.launchFields.firstIndex { $0.kind != .repo }) }
+                    labelled(field.name) { controls.control(for: field, focus: index == model.launchFields.firstIndex { $0.kind != .repo } ? $issueFocused : nil) }
                         .frame(maxWidth: .infinity)
                         .frame(minWidth: Pixels(field.kind == .repo ? 140 : 200))
                 }
@@ -72,44 +72,8 @@ struct LaunchBar: Component {
         }
     }
 
-    @ElementBuilder
-    private func control(for field: LaunchField, isFirstText: Bool) -> some ElementGroup {
-        if field.kind == .repo {
-            if model.repos.isEmpty {
-                HStack(spacing: Spacing.sm) {
-                    Text("No repos yet").foregroundColor(Palette.muted).accessibilityIdentifier("launch.field.repo")
-                    addButton
-                }
-            } else {
-                HStack(spacing: Spacing.sm) {
-                    Picker("", selection: Binding(
-                        get: { model.launchForm.values["repo"] ?? "" },
-                        set: { model.launchForm.values["repo"] = $0 })) {
-                        ForEach(model.repos, id: \.path) { url in
-                            Text(verbatim: url.lastPathComponent).tag(url.path)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("launch.field.repo")
-                    addButton
-                }
-            }
-        } else if isFirstText {
-            TextField(field.name, text: textBinding(field))
-                .onSubmit { launch() }
-                .focused($issueFocused)
-                .accessibilityIdentifier("launch.field.\(field.name)")
-        } else {
-            TextField(field.name, text: textBinding(field))
-                .onSubmit { launch() }
-                .accessibilityIdentifier("launch.field.\(field.name)")
-        }
-    }
-
-    private var addButton: some Element {
-        Button("Add\u{2026}") { model.requestAddRepo(.launchField) }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("launch.field.repo.add")
+    private var controls: LaunchFieldControls {
+        LaunchFieldControls(model: model, idPrefix: "launch", value: textBinding, submit: { launch() }, groupsAddButton: true)
     }
 
     private func textBinding(_ field: LaunchField) -> Binding<String> {

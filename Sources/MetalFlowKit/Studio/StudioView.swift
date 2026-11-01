@@ -100,7 +100,7 @@ struct StudioToolbar: Component {
                 .disabled(!valid)
             let launch = model.studioLaunch
             ForEach(launch.fields, id: \.name) { field in
-                studioControl(field)
+                controls.control(for: field)
             }
             if let resolved = model.studioResolvedRepo {
                 VStack(alignment: .leading, spacing: 4) {
@@ -118,36 +118,11 @@ struct StudioToolbar: Component {
         .background(Palette.chrome)
     }
 
-    @ElementBuilder
-    private func studioControl(_ field: LaunchField) -> some ElementGroup {
-        let binding = Binding(
-            get: { model.studioValue(field) }, set: { model.studioValues[field.name] = $0 })
-        if field.kind == .repo {
-            if model.repos.isEmpty {
-                Text("No repos yet").foregroundColor(Palette.muted).accessibilityIdentifier("studio.field.repo")
-            } else {
-                Picker("", selection: binding) {
-                    ForEach(model.repos, id: \.path) { url in
-                        Text(verbatim: url.lastPathComponent).tag(url.path)
-                    }
-                }
-                .pickerStyle(.menu)
-                .frame(width: Pixels(140))
-                .accessibilityIdentifier("studio.field.repo")
-            }
-            studioAddButton
-        } else {
-            TextField(field.name, text: binding)
-                .onSubmit { Task { await model.launchFromStudio() } }
-                .frame(width: Pixels(160))
-                .accessibilityIdentifier("studio.field.\(field.name)")
-        }
-    }
-
-    private var studioAddButton: some Element {
-        Button("Add\u{2026}") { model.requestAddRepo(.launchField) }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("studio.field.repo.add")
+    private var controls: LaunchFieldControls {
+        LaunchFieldControls(
+            model: model, idPrefix: "studio",
+            value: { field in Binding(get: { model.studioValue(field) }, set: { model.studioValues[field.name] = $0 }) },
+            submit: { Task { await model.launchFromStudio() } }, repoWidth: Pixels(140), textWidth: Pixels(160))
     }
 
     static func fileText(_ draft: FlowDraft) -> String {
