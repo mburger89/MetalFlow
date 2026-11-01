@@ -6,7 +6,7 @@ let usageText = """
 usage: mflow <command> [options]
 
 commands:
-  init-flow [--repo DIR]                          write .flows/fix-issue.flow (refuses to overwrite)
+  init-flow [--repo DIR] [--force]                write .flows/fix-issue.flow (--force replaces an existing one)
   launch [VALUE] [--flow FILE|NAME] [--repo DIR] [--set name=value]...
                                                   start a run and follow it
   list                                            id  status  title, newest first ("running in another mflow" if locked)
@@ -40,10 +40,11 @@ struct Arguments {
     var repo: String?
     var flow: String?
     var allow: [String] = []
+    var force = false
     var sets: [(String, String)] = []
 }
 
-/// Splits `--repo`, `--flow` and repeatable `--set` and `--allow` from positionals; they may appear anywhere.
+/// Splits `--repo`, `--flow`, `--force` and repeatable `--set` and `--allow` from positionals; they may appear anywhere.
 func parseArguments(_ args: [String]) throws -> Arguments {
     var out = Arguments()
     var i = 0
@@ -54,6 +55,9 @@ func parseArguments(_ args: [String]) throws -> Arguments {
             break
         }
         switch a {
+        case "--force":
+            out.force = true
+            i += 1
         case "--repo", "--flow", "--allow", "--set":
             guard i + 1 < args.count else { throw UsageError(message: "\(a) needs a value") }
             let v = args[i + 1]
@@ -74,6 +78,13 @@ func parseArguments(_ args: [String]) throws -> Arguments {
         }
     }
     return out
+}
+
+/// Throws unless `init-flow` may write `file`: it must not exist, or `force` must be set.
+func checkInitFlowTarget(_ file: URL, force: Bool) throws {
+    if !force, FileManager.default.fileExists(atPath: file.path) {
+        throw CommandFailure(message: "\(file.path) already exists; not overwriting (pass --force to replace it)")
+    }
 }
 
 func requirePositionals(_ a: Arguments, min: Int, max: Int? = nil, name: String) throws {
