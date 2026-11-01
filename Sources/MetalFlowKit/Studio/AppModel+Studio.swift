@@ -175,8 +175,9 @@ extension AppModel {
     }
 
     /// Shows the destination panel and waits for its answer: nil when cancelled.
-    func askSaveDestination() async -> SaveDestination? {
+    func askSaveDestination(_ mode: SavePanelMode = .save) async -> SaveDestination? {
         guard !isSavePanelVisible else { return nil }
+        savePanelMode = mode
         isSavePanelVisible = true
         return await withCheckedContinuation { saveDestinationWaiter = $0 }
     }
@@ -188,6 +189,51 @@ extension AppModel {
         let waiter = saveDestinationWaiter
         saveDestinationWaiter = nil
         waiter?.resume(returning: destination)
+    }
+
+    /// Copies the draft, with its unsaved edits, to a place chosen in the destination panel (the draft's own location
+    /// is left out): the library, or a repo's `.flows`. The original file is never written. Into a repo the Repo node
+    /// becomes This repo; into the library a This repo node is exposed with the origin repo as default. On success the
+    /// Studio switches to the copy, with a fresh undo history. Cancelling the panel does nothing; a failed write sets
+    /// a notice and leaves the draft as it was.
+    public func copyDraft() async {
+        guard let draft, draft.url != nil else { return }
+        guard draftIsValid else {
+            notice = Notice("Fix the flow's errors before copying it.")
+            return
+        }
+        let origin: URL?
+        let excluded: SaveDestination?
+        switch draft.location {
+        case .library: (origin, excluded) = (nil, .library)
+        case .repo(let root, _): (origin, excluded) = (root, .repo(root))
+        case .builtin, .unsaved: (origin, excluded) = (nil, nil)
+        }
+        guard let choice = await askSaveDestination(.copy(excluding: excluded)), self.draft === draft else { return }
+        // The draft can change while the panel is up.
+        if case .failure(let error) = draft.validation {
+            notice = Notice("Not copied: \(draft.flow.message(for: error))")
+            return
+        }
+        let directory: URL
+        switch choice {
+        case .library: directory = client.libraryDirectory
+        case .repo(let root): directory = root.appendingPathComponent(FlowFile.directoryName, isDirectory: true)
+        }
+        let name = draft.flow.name
+        let target = await Task.detached { FlowCatalog.newFileURL(name: name, in: directory) }.value
+        guard self.draft === draft else { return }
+        let location: FlowLocation
+        if case .library = choice { location = .library(file: target) } else { location = .of(file: target) }
+        let (prepared, note) = FlowCatalog.prepareForCopy(draft.flow, destination: location, origin: origin)
+        do { try client.saveFlow(prepared, to: target) } catch {
+            notice = Notice(error.localizedDescription)
+            return
+        }
+        self.draft = FlowDraft(flow: prepared, location: location)
+        if !workingOn.contains(.flow(target)) { workingOn.append(.flow(target)) }
+        notice = Notice(["Copied to \(target.path)", note].compactMap { $0 }.joined(separator: ". "), kind: .info)
+        await refreshCatalog()
     }
 
     /// The Studio launch row's fields for the draft at its location, or the message for why it cannot be launched.
@@ -252,6 +298,14 @@ public enum SaveDestination: Sendable, Equatable {
     case library
     /// This repo's `.flows` folder.
     case repo(URL)
+}
+
+/// What the destination panel is asking for.
+public enum SavePanelMode: Sendable, Equatable {
+    /// Where a flow with no file yet is saved.
+    case save
+    /// Where to copy a saved flow; `excluding` is its current location, which is not offered.
+    case copy(excluding: SaveDestination?)
 }
 
 extension AppModel {

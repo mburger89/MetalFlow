@@ -779,6 +779,174 @@ struct KindMismatch: Error {}
         #expect(client.files.saved.isEmpty)
     }
 
+    // MARK: Copy to...
+
+    /// The built-in flow with its Repo node in `mode`.
+    func flow(repoMode mode: RepoMode) -> Flow {
+        var flow = BuiltinFlows.fixGitHubIssue
+        for i in flow.nodes.indices where flow.nodes[i].id == "repo" { flow.nodes[i].kind = .repo(RepoConfig(mode: mode)) }
+        return flow
+    }
+
+    func repoMode(_ flow: Flow?) -> RepoMode? {
+        if case .repo(let config)? = flow?.node("repo")?.kind { return config.mode }
+        return nil
+    }
+
+    func startCopy(_ model: AppModel, _ window: TestWindow) async throws -> Task<Void, Never> {
+        let copying = Task { await model.copyDraft() }
+        try await window.runUntil { model.isSavePanelVisible }
+        return copying
+    }
+
+    /// A library with a saved flow open in the Studio.
+    func libraryFixture(repos: [URL]? = nil, gitRepos: Set<String> = [], mode: RepoMode = .fixed(path: "/p"))
+        async throws -> (AppModel, FakeEngineClient, TestWindow, URL, URL, FlowDraft) {
+        let library = try tempRepo()
+        let (model, client, window) = try await fixture(repos: repos, gitRepos: gitRepos)
+        client.catalog.library = library
+        let file = library.appendingPathComponent("mine.flow")
+        let draft = FlowDraft(flow: flow(repoMode: mode), location: .library(file: file))
+        model.draft = draft
+        try await window.runUntilIdle()
+        return (model, client, window, library, file, draft)
+    }
+
+    @Test func copyToButtonNeedsAFile() async throws {
+        let (model, _, window) = try await fixture()
+        #expect(try window.element(identifier: "studio.copyTo").isEnabled == false, "the built-in")
+        await model.newFlow()
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.copyTo").isEnabled == false, "unsaved")
+        model.draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .library(file: URL(fileURLWithPath: "/lib/a.flow")))
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.copyTo").isEnabled)
+    }
+
+    @Test func copyLibraryFlowToRepo() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window, library, file, original) = try await libraryFixture(repos: [dir])
+        defer { try? FileManager.default.removeItem(at: library) }
+        try await press("studio.copyTo", in: window)
+        _ = try window.element(identifier: "save.panel")
+        #expect((try? window.element(identifier: "save.dest.library")) == nil, "the current location is not offered")
+        _ = try window.element(identifier: "save.dest.\(dir.lastPathComponent)")
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
+        let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
+        try await window.runUntil { model.draft?.url == expected }
+        #expect(client.files.saved.map(\.url) == [expected], "the original is never written")
+        #expect(repoMode(client.files.saved.first?.flow) == .thisRepo)
+        let copy = try #require(model.draft)
+        #expect(copy !== original && copy.location == .of(file: expected))
+        #expect(copy.isDirty == false && copy.undoStack.isEmpty)
+        #expect(repoMode(copy.flow) == .thisRepo)
+        #expect(model.notice == Notice("Copied to \(expected.path)", kind: .info))
+        #expect(model.workingOn.contains(.flow(expected)) && !model.workingOn.contains(.flow(file)))
+        #expect(!model.isSavePanelVisible)
+    }
+
+    @Test func copyRepoFlowToLibraryExposesTheRepo() async throws {
+        let (model, client, window, library, _, _) = try await libraryFixture(repos: [repo])
+        defer { try? FileManager.default.removeItem(at: library) }
+        let file = repo.appendingPathComponent(".flows/a.flow")
+        model.draft = FlowDraft(flow: flow(repoMode: .thisRepo), location: .of(file: file))
+        try await window.runUntilIdle()
+        let copying = try await startCopy(model, window)
+        #expect((try? window.element(identifier: "save.dest.repo")) == nil, "the draft's repo is not offered")
+        _ = try window.element(identifier: "save.dest.library")
+        try await press("save.dest.library", in: window)
+        await copying.value
+        let expected = library.appendingPathComponent("fix-github-issue.flow")
+        #expect(client.files.saved.map(\.url) == [expected])
+        #expect(repoMode(client.files.saved.first?.flow) == .exposed(default: "/repo"))
+        #expect(model.draft?.location == .library(file: expected))
+        #expect(model.notice?.text.hasPrefix("Copied to \(expected.path). Saved to the library") == true)
+    }
+
+    @Test func copyKeepsUnsavedEditsWithoutAsking() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window, library, _, original) = try await libraryFixture(repos: [dir])
+        defer { try? FileManager.default.removeItem(at: library) }
+        original.edit("rename") { $0.name = "Edited" }
+        let copying = try await startCopy(model, window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
+        await copying.value
+        let expected = dir.appendingPathComponent(".flows/edited.flow")
+        #expect(client.files.saved.map(\.url) == [expected])
+        #expect(client.files.saved.first?.flow.name == "Edited")
+        #expect(model.draft?.flow.name == "Edited" && model.draft?.isDirty == false)
+        #expect(window.presentedAlert == nil && model.pendingAction == nil)
+    }
+
+    @Test func copyNeverOverwrites() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let flows = dir.appendingPathComponent(".flows")
+        try FileManager.default.createDirectory(at: flows, withIntermediateDirectories: true)
+        try Data().write(to: flows.appendingPathComponent("fix-github-issue.flow"))
+        let (model, client, window, library, _, _) = try await libraryFixture(repos: [dir])
+        defer { try? FileManager.default.removeItem(at: library) }
+        let copying = try await startCopy(model, window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
+        await copying.value
+        #expect(client.files.saved.map(\.url) == [flows.appendingPathComponent("fix-github-issue-2.flow")])
+    }
+
+    @Test func copyFailureKeepsTheDraft() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window, library, _, original) = try await libraryFixture(repos: [dir])
+        defer { try? FileManager.default.removeItem(at: library) }
+        original.edit("rename") { $0.name = "Edited" }
+        client.files.failSave = true
+        let copying = try await startCopy(model, window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
+        await copying.value
+        #expect(model.notice != nil)
+        #expect(model.draft === original && original.isDirty)
+        #expect(client.files.saved.isEmpty)
+    }
+
+    @Test func copyCancelDoesNothing() async throws {
+        let (model, client, window, library, _, original) = try await libraryFixture()
+        defer { try? FileManager.default.removeItem(at: library) }
+        let copying = try await startCopy(model, window)
+        try await press("save.cancel", in: window)
+        await copying.value
+        #expect(!model.isSavePanelVisible && model.draft === original && model.notice == nil)
+        #expect(client.files.saved.isEmpty)
+    }
+
+    @Test func copyDestinationAddCopiesIntoNewRepo() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window, library, _, _) = try await libraryFixture(gitRepos: [dir.standardizedFileURL.path])
+        defer { try? FileManager.default.removeItem(at: library) }
+        let copying = try await startCopy(model, window)
+        try await press("save.dest.add", in: window)
+        #expect(model.isSavePanelVisible, "the copy waits for the folder")
+        #expect(model.addRepoRequest == .copyDestination)
+        #expect(window.presentedFileDialog?.message == "Choose the git repository to copy this flow into")
+        try window.respondToFileDialog(choosing: [dir.path])
+        await copying.value
+        let expected = dir.standardizedFileURL.appendingPathComponent(".flows/fix-github-issue.flow")
+        #expect(client.files.saved.map(\.url) == [expected])
+        #expect(model.draft?.location == .of(file: expected))
+        #expect(model.repos.map(\.path).contains(dir.standardizedFileURL.path))
+    }
+
+    @Test func copyDestinationAddCancelCancelsTheCopy() async throws {
+        let (model, client, window, library, _, original) = try await libraryFixture()
+        defer { try? FileManager.default.removeItem(at: library) }
+        let copying = try await startCopy(model, window)
+        try await press("save.dest.add", in: window)
+        try window.cancelFileDialog()
+        await copying.value
+        #expect(!model.isSavePanelVisible && model.draft === original && client.files.saved.isEmpty)
+    }
+
     @Test func inspectorChooseFolderSetsFixedPath() async throws {
         let dir = try tempRepo()
         defer { try? FileManager.default.removeItem(at: dir) }

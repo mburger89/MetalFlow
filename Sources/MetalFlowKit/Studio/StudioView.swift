@@ -98,6 +98,10 @@ struct StudioToolbar: Component {
                 .keyboardShortcut("s")
                 .accessibilityIdentifier("studio.save")
                 .disabled(!valid)
+            Button("Copy to\u{2026}") { Task { await model.copyDraft() } }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("studio.copyTo")
+                .disabled(draft.url == nil)
             let launch = model.studioLaunch
             ForEach(launch.fields, id: \.name) { field in
                 controls.control(for: field)

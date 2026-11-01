@@ -65,6 +65,20 @@ public enum FlowCatalog {
         return (out, notice)
     }
 
+    /// Prepares `flow` for a "Copy to..." at `destination`, like `prepareForSave` but a repo copy is made for that
+    /// repo: every Repo node becomes `.thisRepo`, whatever its mode. A library copy follows `prepareForSave`'s rule
+    /// (`.thisRepo` becomes `.exposed(default: origin?.path)`); `origin` is the repo the flow came from.
+    public static func prepareForCopy(_ flow: Flow, destination: FlowLocation, origin: URL?) -> (Flow, String?) {
+        var (out, notice) = prepareForSave(flow, destination: destination, origin: origin)
+        guard case .repo = destination else { return (out, notice) }
+        for i in out.nodes.indices {
+            guard case .repo(var config) = out.nodes[i].kind, config.mode != .thisRepo else { continue }
+            config.mode = .thisRepo
+            out.nodes[i].kind = .repo(config)
+        }
+        return (out, notice)
+    }
+
     /// The file to write a new flow named `name` into `directory`: `<slug>.flow`, or `-2`, `-3`... when taken.
     /// Never overwrites.
     public static func newFileURL(name: String, in directory: URL) -> URL {
