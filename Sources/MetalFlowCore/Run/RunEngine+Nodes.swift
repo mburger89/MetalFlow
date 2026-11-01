@@ -60,6 +60,12 @@ extension RunEngine {
                 }.joined(separator: "\n\n")
             }
         }
+        for (name, binding) in run.flow.node(key.node)?.inputs ?? [:] {
+            switch binding {
+            case .fixed(let v): values[name] = v
+            case .exposed(let d): values[name] = run.inputs[name] ?? d ?? ""
+            }
+        }
         return values
     }
 

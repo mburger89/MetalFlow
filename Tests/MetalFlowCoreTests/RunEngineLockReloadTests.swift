@@ -17,7 +17,7 @@ import Testing
         }, events: [.started(sessionID: "sb"), .finished(AgentResult(
             sessionID: "sb", text: "done", isError: false, deniedTools: [], costUSD: 0, turns: 1))])
 
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         for await run in h.engine.updates where run.id == id && run.nodes[NodeKey(node: "plan")]?.state == .running { break }
 
         // Engine B restores while A holds the lock, so it sees plan still running.
@@ -52,7 +52,7 @@ import Testing
 
     @Test func reloadDoesNotRollBackNewerMemory() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         await h.engine.waitForPass(id)
         let stored = try #require(h.store.load(id))

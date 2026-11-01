@@ -11,8 +11,8 @@ import Testing
     func makeRun(created: TimeInterval = 1_000_000, status: RunStatus = .running,
                  nodes: [NodeKey: NodeRun] = [:]) -> Run {
         let flow = Flow(name: "f", nodes: [
-            Node(id: "plan", title: "Plan", kind: .repo, position: Point(x: 0, y: 0)),
-            Node(id: "implement", title: "Impl", kind: .repo, position: Point(x: 1, y: 0)),
+            Node(id: "plan", title: "Plan", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 0)),
+            Node(id: "implement", title: "Impl", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 1, y: 0)),
         ], wires: [])
         return Run(flow: flow, title: "t", repo: URL(fileURLWithPath: "/tmp/repo"),
                    baseBranch: "main", branch: "flow/1-x", worktree: URL(fileURLWithPath: "/tmp/wt"),

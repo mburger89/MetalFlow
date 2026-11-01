@@ -14,7 +14,7 @@ import Testing
     @Test func retryFailedLaneReRunsIt() async throws {
         let h = try Harness()
         failLaneC(h)
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let first = await h.settled(id)
         let key = NodeKey(node: "implement", lane: "c")
         #expect(first.nodes[key]?.state == .failed("boom"))
@@ -41,7 +41,7 @@ import Testing
     @Test func retryRejectsNonFailedNode() async throws {
         let h = try Harness()
         failLaneC(h)
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         let ok = NodeKey(node: "implement", lane: "a")
         await #expect(throws: RunEngineError.notRetryable(ok)) { try await h.engine.retry(id, node: ok) }
@@ -54,7 +54,7 @@ import Testing
         let (hold, cont) = AsyncStream<Void>.makeStream()
         defer { cont.finish() }
         let h = try Harness(planHold: hold)
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         for await run in h.engine.updates where run.id == id && run.nodes[NodeKey(node: "plan")]?.state == .running { break }
         let key = NodeKey(node: "plan")
         await h.engine.setDirect(id) { $0.nodes[key]?.state = .failed("x") }
@@ -68,7 +68,7 @@ import Testing
 
     @Test func retryJudgeResetsPick() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         await h.engine.waitForPass(id)
         let judge = NodeKey(node: "judge"), pick = NodeKey(node: "pick")

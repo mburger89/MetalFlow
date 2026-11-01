@@ -5,14 +5,16 @@ import MetalUITesting
 import Testing
 @testable import MetalFlowKit
 
+struct KindMismatch: Error {}
+
 @MainActor
 @Suite struct FlowEditingTests {
     let repo = URL(fileURLWithPath: "/repo")
 
-    func fixture(runs: [Run] = [], repos: [URL]? = nil) async throws -> (AppModel, FakeEngineClient, TestWindow) {
-        let client = FakeEngineClient(restored: runs, repos: repos ?? [repo])
+    func fixture(runs: [Run] = [], repos: [URL]? = nil, gitRepos: Set<String> = []) async throws -> (AppModel, FakeEngineClient, TestWindow) {
+        let client = FakeEngineClient(restored: runs, repos: repos ?? [repo], gitRepoPaths: gitRepos)
         let model = AppModel(client: client, notifier: NoopNotifier())
-        let window = try appWindow(model: model)
+        let window = try appWindow(model: model, size: metalFlowWindowSize)
         try await window.runUntilIdle()
         await model.waitUntilReady()
         model.screen = .studio
@@ -282,7 +284,7 @@ import Testing
     }
 
     @Test func undoToSavedStateIsClean() async throws {
-        let draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, url: nil, repo: repo)
+        let draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .unsaved)
         #expect(draft.isDirty == false)
         draft.edit("rename") { $0.name = "Renamed" }
         #expect(draft.isDirty)
@@ -290,7 +292,7 @@ import Testing
         #expect(draft.isDirty == false, "undone back to the saved state")
         draft.redo()
         #expect(draft.isDirty)
-        draft.didSave(to: URL(fileURLWithPath: "/repo/.flows/x.flow"))
+        draft.didSave(draft.flow, at: .of(file: URL(fileURLWithPath: "/repo/.flows/x.flow")))
         #expect(draft.isDirty == false)
         draft.undo()
         #expect(draft.isDirty, "undoing past the save is an edit")
@@ -371,10 +373,19 @@ import Testing
 
     // MARK: Validation
 
+    @Test func validationBannerNamesNodesByTitle() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("bind") { $0.nodes[$0.nodes.firstIndex { $0.id == "plan" }!].inputs["issue"] = .fixed("x") }
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.validation").value == "Plan: input {issue} is both wired and set — choose one")
+        _ = model
+    }
+
     @Test func invalidDraftCannotSaveOrLaunch() async throws {
         let (model, client, window) = try await fixture()
         let draft = try #require(model.draft)
-        model.studioIssue = "42"
+        model.studioValues["issue"] = "42"
         try await window.runUntilIdle()
         #expect((try? window.element(identifier: "studio.validation")) == nil)
         #expect(try window.element(identifier: "studio.save").isEnabled)
@@ -382,7 +393,8 @@ import Testing
         draft.edit("unwire") { $0.wires.removeAll() }
         try await window.runUntilIdle()
         guard case .failure(let error) = draft.validation else { Issue.record("should be invalid"); return }
-        #expect(try window.element(identifier: "studio.validation").value == error.errorDescription)
+        let shown = try window.element(identifier: "studio.validation").value
+        #expect(shown == draft.flow.message(for: error))
         #expect((try? window.element(identifier: "studio.error")) == nil, "no duplicate toolbar error")
         #expect(try window.element(identifier: "studio.save").isEnabled == false)
         #expect(try window.element(identifier: "studio.launch").isEnabled == false)
@@ -425,12 +437,16 @@ import Testing
         #expect(draft.isDirty)
         let edited = draft.flow
         try await press("studio.save", in: window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
         // The new file name is chosen off the main actor.
         await waitUntil("the save") { !client.files.saved.isEmpty }
         try await window.runUntilIdle()
         let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
         #expect(client.files.saved.map(\.url) == [expected])
-        #expect(client.files.saved.first?.flow == edited)
+        // A repo save turns the unset Exposed repo into This repo.
+        let written = FlowCatalog.prepareForSave(edited, destination: .of(file: expected), origin: nil).0
+        #expect(client.files.saved.first?.flow == written)
+        #expect(draft.flow == written)
         #expect(draft.isDirty == false)
         #expect(draft.url == expected)
         #expect(model.workingOn.contains(.flow(expected)))
@@ -624,5 +640,469 @@ import Testing
         #expect(model.notice?.text == "engine said no")
         #expect(model.pendingOpen == nil)
         #expect(!model.workingOn.contains(.flow(b)))
+    }
+
+    // MARK: Destination, new flows, Open Flow (Task 6)
+
+    /// Starts a save and waits for the destination panel.
+    func startSave(_ model: AppModel, _ window: TestWindow) async throws -> Task<Bool, Never> {
+        let saving = Task { await model.saveDraft() }
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        return saving
+    }
+
+    @Test func firstSaveAsksDestination() async throws {
+        let (model, client, window) = try await fixture(repos: [URL(fileURLWithPath: "/work/alpha"), URL(fileURLWithPath: "/work/beta")])
+        let draft = try #require(model.draft)
+        #expect(draft.location == .builtin)
+        try await press("studio.save", in: window)
+        _ = try window.element(identifier: "save.panel")
+        for id in ["save.dest.library", "save.dest.alpha", "save.dest.beta", "save.cancel"] {
+            _ = try window.element(identifier: id)
+        }
+        #expect(client.files.saved.isEmpty, "nothing is written before a destination is chosen")
+        // Escape cancels.
+        window.typeKey(.escape)
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "save.panel")) == nil)
+        #expect(client.files.saved.isEmpty && draft.location == .builtin)
+        // The built-in asks too.
+        model.loadBuiltinDraft()
+        try await press("studio.save", in: window)
+        _ = try window.element(identifier: "save.panel")
+    }
+
+    @Test func saveToLibraryWritesThere() async throws {
+        let library = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: library) }
+        let (model, client, window) = try await fixture()
+        client.catalog.library = library
+        let draft = try #require(model.draft)
+        let saving = try await startSave(model, window)
+        try await press("save.dest.library", in: window)
+        #expect(await saving.value)
+        let expected = library.appendingPathComponent("fix-github-issue.flow")
+        #expect(client.files.saved.map(\.url) == [expected])
+        #expect(draft.location == .library(file: expected))
+        #expect(draft.isDirty == false)
+        #expect(model.workingOn.contains(.flow(expected)))
+        // The built-in's Repo node is already Exposed, so there is nothing to say.
+        #expect(model.notice == nil)
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.file").value == "fix-github-issue.flow")
+        // Saving again writes the same file, without asking.
+        #expect(await model.saveDraft())
+        #expect(client.files.saved.map(\.url) == [expected, expected])
+        #expect(!model.isSavePanelVisible)
+    }
+
+    @Test func saveToLibraryNoticeForThisRepo() async throws {
+        let (model, client, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("this repo") { flow in
+            for i in flow.nodes.indices where flow.nodes[i].id == "repo" { flow.nodes[i].kind = .repo(RepoConfig(mode: .thisRepo)) }
+        }
+        let saving = try await startSave(model, window)
+        model.chooseSaveDestination(.library)
+        #expect(await saving.value)
+        guard case .repo(let config)? = client.files.saved.first?.flow.node("repo")?.kind else { Issue.record("no repo"); return }
+        #expect(config.mode == .exposed(default: nil))
+        #expect(model.notice == Notice("Saved to the library: the repo is now asked at launch (no default).", kind: .info))
+    }
+
+    @Test func saveToRepoMakesThisRepo() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window) = try await fixture(repos: [dir])
+        let draft = try #require(model.draft)
+        let saving = try await startSave(model, window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
+        #expect(await saving.value)
+        let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
+        guard case .repo(let config)? = client.files.saved.first?.flow.node("repo")?.kind else { Issue.record("no repo"); return }
+        #expect(config.mode == .thisRepo)
+        #expect(draft.location == .of(file: expected))
+        guard case .repo(let shown)? = draft.flow.node("repo")?.kind else { return }
+        #expect(shown.mode == .thisRepo, "the draft shows what the file holds")
+        #expect(draft.isDirty == false)
+        #expect(draft.lastSavedFlow == draft.flow)
+    }
+
+    @Test func saveDestinationAddSavesIntoNewRepo() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (model, client, window) = try await fixture(gitRepos: [dir.standardizedFileURL.path])
+        let draft = try #require(model.draft)
+        let saving = try await startSave(model, window)
+        try await press("save.dest.add", in: window)
+        #expect(model.isSavePanelVisible, "the save waits for the folder")
+        #expect(model.addRepoRequest == .saveDestination)
+        try window.respondToFileDialog(choosing: [dir.path])
+        #expect(await saving.value)
+        let expected = dir.standardizedFileURL.appendingPathComponent(".flows/fix-github-issue.flow")
+        #expect(client.files.saved.first?.url == expected)
+        #expect(draft.location == .of(file: expected))
+        #expect(model.repos.map(\.path).contains(dir.standardizedFileURL.path))
+        #expect(!model.isSavePanelVisible)
+    }
+
+    @Test func saveRechecksValidityAfterTheDestinationAnswers() async throws {
+        let (model, client, window) = try await fixture()
+        let draft = try #require(model.draft)
+        let saving = try await startSave(model, window)
+        draft.edit("unwire") { $0.wires.removeAll() }
+        try await window.runUntilIdle()
+        model.chooseSaveDestination(.library)
+        #expect(await saving.value == false)
+        #expect(client.files.saved.isEmpty)
+        #expect(model.notice != nil)
+        #expect(draft.location == .builtin)
+    }
+
+    @Test func saveDestinationAddCancelCancelsTheSave() async throws {
+        let (model, client, window) = try await fixture()
+        let saving = try await startSave(model, window)
+        try await press("save.dest.add", in: window)
+        try window.cancelFileDialog()
+        #expect(await saving.value == false)
+        #expect(!model.isSavePanelVisible)
+        #expect(client.files.saved.isEmpty)
+    }
+
+    @Test func inspectorChooseFolderSetsFixedPath() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.standardizedFileURL.path
+        let (model, _, window) = try await fixture(gitRepos: [path])
+        let draft = try #require(model.draft)
+        try await press("node.repo", in: window)
+        try window.click(window.element(identifier: "inspector.repo.mode"))
+        try window.chooseMenuItem("Fixed")
+        try await window.runUntilIdle()
+        let steps = draft.undoStack.count
+        try await press("inspector.repo.add", in: window)
+        #expect(model.addRepoRequest == .repoNode("repo"))
+        try window.respondToFileDialog(choosing: [dir.path])
+        await waitUntil("the path") {
+            if case .repo(let c)? = draft.flow.node("repo")?.kind { return c.mode == .fixed(path: path) }
+            return false
+        }
+        #expect(draft.undoStack.count == steps + 1)
+        #expect(model.repos.map(\.path).contains(path))
+        draft.undo()
+        guard case .repo(let c)? = draft.flow.node("repo")?.kind else { throw KindMismatch() }
+        #expect(c.mode == .fixed(path: "/repo"))
+    }
+
+    @Test func studioAddSelectsNewRepo() async throws {
+        let dir = try tempRepo()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.standardizedFileURL.path
+        let (model, _, window) = try await fixture(gitRepos: [path])
+        try await press("studio.field.repo.add", in: window)
+        #expect(model.addRepoRequest == .launchField)
+        try window.respondToFileDialog(choosing: [dir.path])
+        await waitUntil("the field") { model.studioValues["repo"] == path }
+    }
+
+    @Test func saveCancelKeepsDraftUnsaved() async throws {
+        let (model, client, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        let saving = try await startSave(model, window)
+        try await press("save.cancel", in: window)
+        #expect(await saving.value == false)
+        #expect(!model.isSavePanelVisible)
+        #expect(draft.location == .builtin && draft.isDirty)
+        #expect(client.files.saved.isEmpty)
+        #expect(model.notice == nil)
+    }
+
+    @Test func dirtySwitchSaveOnUnsavedAsksDestination() async throws {
+        let (model, client, window) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("rename") { $0.name = "Edited" }
+        let target = repo.appendingPathComponent(".flows/b.flow")
+        model.open(flow: target)
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        #expect(model.pendingAction == nil, "the alert's answer was taken first")
+        #expect(model.draft === draft, "not switched yet")
+        try await press("save.dest.library", in: window)
+        await waitUntil("the switch") { model.draft?.url == target }
+        #expect(client.files.saved.count == 1)
+        // Cancelling the panel cancels the switch.
+        let again = try #require(model.draft)
+        again.edit("rename") { $0.name = "Edited 2" }
+        model.draft = FlowDraft(flow: again.flow, location: .unsaved)
+        let other = try #require(model.draft)
+        other.edit("rename") { $0.name = "Edited 3" }
+        model.open(flow: repo.appendingPathComponent(".flows/c.flow"))
+        try await window.runUntilIdle()
+        try window.respondToAlert(button: "Save")
+        await waitUntil("the destination panel") { model.isSavePanelVisible }
+        try await window.runUntilIdle()
+        try await press("save.cancel", in: window)
+        await waitUntil("the panel to go") { !model.isSavePanelVisible }
+        #expect(model.draft === other && other.isDirty && other.location == .unsaved)
+        #expect(client.files.saved.count == 1)
+        #expect(model.pendingAction == nil)
+    }
+
+    @Test func newFlowLaunchesWithFields() async throws {
+        let (model, client, window) = try await fixture()
+        await model.newFlow()
+        try await window.runUntilIdle()
+        let draft = try #require(model.draft)
+        #expect(draft.flow.nodes.map(\.id) == ["repo"])
+        // The repo field is the one launch field.
+        #expect(model.studioLaunch.fields.map(\.name) == ["repo"])
+        model.studioValues["repo"] = "/repo"
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.launch").isEnabled)
+        #expect(await model.launchFromStudio() != nil)
+        #expect(await client.launches.first?.values == ["repo": "/repo"])
+        #expect(await client.launches.first?.location == .unsaved)
+    }
+
+    @Test func paletteRepoDefaultsToExposed() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("palette.repo", in: window)
+        guard case .repo(let config)? = draft.flow.node(try #require(draft.selection))?.kind else { Issue.record("not a repo"); return }
+        #expect(config.mode == .exposed(default: nil))
+    }
+
+    @Test func openFlowListsCatalog() async throws {
+        let (model, client, window) = try await fixture()
+        let lib = URL(fileURLWithPath: "/lib/mine.flow"), inRepo = URL(fileURLWithPath: "/repo/.flows/theirs.flow")
+        client.catalog.entries = [
+            FlowEntry(id: "builtin:Fix GitHub issue", name: "Fix GitHub issue", location: .builtin, file: nil),
+            FlowEntry(id: lib.path, name: "Mine", location: .library(file: lib), file: lib),
+            FlowEntry(id: inRepo.path, name: "Theirs", location: .of(file: inRepo), file: inRepo),
+        ]
+        await model.refreshCatalog()
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "openFlow.builtin").label == "Fix GitHub issue \u{2014} Built-in")
+        #expect(try window.element(identifier: "openFlow.mine.flow").label == "Mine \u{2014} Library")
+        #expect(try window.element(identifier: "openFlow.theirs.flow").label == "Theirs \u{2014} repo")
+        try await press("openFlow.mine.flow", in: window)
+        #expect(model.draft?.location == .library(file: lib))
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        try await press("openFlow.builtin", in: window)
+        #expect(model.draft?.location == .builtin)
+        #expect(model.screen == .studio)
+        #expect(!model.isOpenFlowVisible)
+    }
+
+    // MARK: Input bindings and the Repo node
+
+    /// Gives the plan prompt a third placeholder, `{topic}`, that nothing wires.
+    func planWithTopic(_ draft: FlowDraft) {
+        draft.edit("test.topic") { flow in
+            guard let i = flow.nodes.firstIndex(where: { $0.id == "plan" }), case .prompt(var c) = flow.nodes[i].kind else { return }
+            c.prompt += "\n{topic}"
+            flow.nodes[i].kind = .prompt(c)
+        }
+    }
+
+    /// Scrolls the inspector to its end, where the Inputs rows are.
+    func scrollInspectorToEnd(_ window: TestWindow) async throws {
+        try window.scroll(window.element(identifier: "inspector.id"), byDeltaX: 0, deltaY: -2000)
+        window.advance(by: 5)  // the scroll's momentum decays with the clock; runUntilIdle alone never advances it
+        try await window.runUntilIdle()
+    }
+
+    func planWires(_ draft: FlowDraft, _ input: String) -> [Wire] {
+        draft.flow.wires.filter { $0.to == "plan" && $0.input == input }
+    }
+
+    @Test func inspectorListsInputs() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
+        for name in ["issue", "repo", "topic"] {
+            _ = try window.element(identifier: "inspector.input.\(name)")
+            _ = try window.element(identifier: "inspector.input.\(name).mode.wire")
+            _ = try window.element(identifier: "inspector.input.\(name).mode.value")
+            _ = try window.element(identifier: "inspector.input.\(name).mode.exposed")
+        }
+        #expect(try window.element(identifier: "inspector.input.issue.source").value == "Issue")
+        #expect(try window.element(identifier: "inspector.input.topic.source").value == "not wired")
+        // A pick node has no inputs section.
+        try await press("node.pick", in: window)
+        #expect((try? window.element(identifier: "inspector.input.recommendation")) == nil)
+    }
+
+    @Test func switchToValueRemovesWire() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
+        #expect(planWires(draft, "issue").count == 1)
+        try await press("inspector.input.issue.mode.value", in: window)
+        #expect(planWires(draft, "issue").isEmpty)
+        #expect(try node(draft, "plan").inputs["issue"] == .fixed(""))
+        try typeAtEnd(window, "inspector.input.issue.value", "abc")
+        try await window.runUntilIdle()
+        #expect(try node(draft, "plan").inputs["issue"] == .fixed("abc"))
+        try await press("inspector.input.issue.mode.wire", in: window)
+        #expect(try node(draft, "plan").inputs["issue"] == nil)
+    }
+
+    @Test func switchToExposedSetsBinding() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
+        try await press("inspector.input.topic.mode.exposed", in: window)
+        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: nil))
+        try typeAtEnd(window, "inspector.input.topic.default", "x")
+        try await window.runUntilIdle()
+        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: "x"))
+        // Exposed over a wire removes the wire.
+        try await press("inspector.input.issue.mode.exposed", in: window)
+        #expect(planWires(draft, "issue").isEmpty)
+        #expect(try node(draft, "plan").inputs["issue"] == .exposed(default: nil))
+    }
+
+    @Test func renamingPlaceholderPrunesBinding() async throws {
+        let (model, _, _) = try await fixture()
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        draft.edit("test.bind") { flow in
+            if let i = flow.nodes.firstIndex(where: { $0.id == "plan" }) {
+                flow.nodes[i].inputs["topic"] = .exposed(default: "x")
+            }
+        }
+        let steps = draft.undoStack.count
+        draft.editPrompt("plan", "prompt") { $0.prompt = $0.prompt.replacingOccurrences(of: "{topic}", with: "{subject}") }
+        #expect(try node(draft, "plan").inputs["topic"] == nil, "the stale binding is gone")
+        #expect(!(try node(draft, "plan").hasExposedInput), "and no longer counts as exposed")
+        #expect(draft.undoStack.count == steps + 1)
+        draft.undo()
+        #expect(try node(draft, "plan").inputs["topic"] == .exposed(default: "x"), "one undo step brings it back")
+    }
+
+    @Test func wireOntoBoundInputClearsBinding() async throws {
+        let (model, _, _) = try await fixture()
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        draft.edit("test.bind") { flow in
+            if let i = flow.nodes.firstIndex(where: { $0.id == "plan" }) { flow.nodes[i].inputs["topic"] = .fixed("x") }
+        }
+        let steps = draft.undoStack.count
+        draft.connect(from: "issue", to: "plan", input: "topic")
+        #expect(try node(draft, "plan").inputs["topic"] == nil)
+        #expect(planWires(draft, "topic").count == 1)
+        #expect(draft.undoStack.count == steps + 1)
+        draft.undo()
+        #expect(try node(draft, "plan").inputs["topic"] == .fixed("x"))
+        #expect(planWires(draft, "topic").isEmpty)
+    }
+
+    @Test func bindingSwitchIsOneUndoStep() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
+        let before = draft.flow
+        let steps = draft.undoStack.count
+        try await press("inspector.input.issue.mode.value", in: window)
+        #expect(draft.undoStack.count == steps + 1)
+        draft.undo()
+        #expect(draft.flow == before)
+    }
+
+    @Test func repoModePickerSetsMode() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.repo", in: window)
+        try window.click(window.element(identifier: "inspector.repo.mode"))
+        let menu = try #require(window.presentedMenu)
+        #expect(menu.items.map(\.title) == ["This repo", "Fixed", "Exposed"])
+        #expect(menu.items.first { $0.isOn }?.title == "Exposed")
+        try window.chooseMenuItem("Fixed")
+        try await window.runUntilIdle()
+        guard case .repo(let fixed) = try node(draft, "repo").kind else { throw KindMismatch() }
+        #expect(fixed.mode == .fixed(path: "/repo"))
+        try window.click(window.element(identifier: "inspector.repo.path"))
+        #expect(window.presentedMenu?.items.map(\.title) == ["repo"])
+        try window.chooseMenuItem("repo")
+        try await window.runUntilIdle()
+        try typeAtEnd(window, "inspector.repo.pathField", "2")
+        try await window.runUntilIdle()
+        guard case .repo(let typed) = try node(draft, "repo").kind else { throw KindMismatch() }
+        #expect(typed.mode == .fixed(path: "/repo2"))
+        try window.click(window.element(identifier: "inspector.repo.mode"))
+        try window.chooseMenuItem("This repo")
+        try await window.runUntilIdle()
+        guard case .repo(let here) = try node(draft, "repo").kind else { throw KindMismatch() }
+        #expect(here.mode == .thisRepo)
+        #expect((try? window.element(identifier: "inspector.repo.path")) == nil)
+    }
+
+    @Test func flowInputValueRow() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.issue", in: window)
+        _ = try window.element(identifier: "inspector.flowInput.mode")
+        try await press("inspector.flowInput.mode.fixed", in: window)
+        guard case .flowInput(let c) = try node(draft, "issue").kind else { throw KindMismatch() }
+        #expect(c.binding == .fixed(""))
+        try typeAtEnd(window, "inspector.flowInput.value", "7")
+        try await window.runUntilIdle()
+        guard case .flowInput(let d) = try node(draft, "issue").kind else { throw KindMismatch() }
+        #expect(d.binding == .fixed("7"))
+    }
+
+    @Test func exposedTagShowsOnCard() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        planWithTopic(draft)
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "node.plan.exposed")) == nil)
+        try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
+        try await press("inspector.input.topic.mode.exposed", in: window)
+        #expect(try window.element(identifier: "node.plan.exposed").value == "\u{21E2} launch")
+        try await press("inspector.input.topic.mode.wire", in: window)
+        #expect((try? window.element(identifier: "node.plan.exposed")) == nil)
+    }
+
+    @Test func reselectingSameModeIsNoUndoStep() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.plan", in: window)
+        try await scrollInspectorToEnd(window)
+        let steps = draft.undoStack.count
+        try await press("inspector.input.issue.mode.wire", in: window)
+        #expect(draft.undoStack.count == steps, "wired input, Wire again")
+        try await press("inspector.input.issue.mode.value", in: window)
+        try await press("inspector.input.issue.mode.value", in: window)
+        #expect(draft.undoStack.count == steps + 1)
+        try await press("inspector.input.issue.mode.exposed", in: window)
+        try await press("inspector.input.issue.mode.exposed", in: window)
+        #expect(draft.undoStack.count == steps + 2)
+    }
+
+    @Test func launchErrorShowsInBanner() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        #expect((try? window.element(identifier: "studio.validation")) == nil)
+        draft.addNode(.repo)
+        try await window.runUntilIdle()
+        #expect(draft.plan != nil)
+        #expect(try window.element(identifier: "studio.validation").value == "A flow can have only one Repo node")
+        let shown = try window.elements(where: { $0.value == "A flow can have only one Repo node" })
+        #expect(shown.count == 1, "the message appears once")
     }
 }

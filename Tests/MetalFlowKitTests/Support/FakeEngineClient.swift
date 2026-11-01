@@ -16,16 +16,22 @@ actor FakeEngineClient: EngineClient {
     /// What `pick` returns.
     var pickResult: MergeResult = .merged(commit: "abc")
 
-    nonisolated let repos: [URL]
+    nonisolated let repoList: URLList
+    /// The known repos: those given at init plus any added through `addKnownRepo`.
+    nonisolated var repos: [URL] { repoList.urls }
     nonisolated let flowFiles: [URL]
     nonisolated let gitRepoPaths: Set<String>
 
     init(restored: [Run] = [], repos: [URL] = [], flowFiles: [URL] = [], gitRepoPaths: Set<String> = []) {
         self.restored = restored
-        self.repos = repos
+        self.repoList = URLList(repos)
         self.flowFiles = flowFiles
         self.gitRepoPaths = gitRepoPaths
         (updates, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .unbounded)
+        // The built-in plus each flow file, so tests that only name files still see them in the catalog.
+        catalog.entries = [FlowEntry(id: "builtin:\(BuiltinFlows.fixGitHubIssue.name)", name: BuiltinFlows.fixGitHubIssue.name,
+                                     location: .builtin, file: nil)]
+            + flowFiles.map { FlowEntry(id: $0.path, name: $0.deletingPathExtension().lastPathComponent, location: .of(file: $0), file: $0) }
     }
 
     /// Pushes a snapshot onto `updates`.
@@ -52,9 +58,13 @@ actor FakeEngineClient: EngineClient {
         held = []
     }
 
-    func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
+    /// The location and values of every `launch` received.
+    var launches: [(location: FlowLocation, values: [String: String])] = []
+    func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID {
         if holding { await withCheckedContinuation { held.append($0) } }
-        try record("launch(\(flow.name), \(repo.path), \(input))")
+        launches.append((location, values))
+        let input = values.filter { $0.key != "repo" }.values.first ?? ""
+        try record("launch(\(flow.name), \(values["repo"] ?? ""), \(input))")
         return RunID()
     }
     func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
@@ -109,15 +119,22 @@ actor FakeEngineClient: EngineClient {
         try record("branch(\(lane), \(name))")
     }
     nonisolated func knownRepos() -> [URL] { repos }
-    /// Holds `flows(in:)` (called off the main actor) until released.
-    nonisolated let scanGate = ScanGate()
-    nonisolated func flows(in repo: URL) -> [URL] { scanGate.pass(); return flowFiles }
+    func addKnownRepo(_ url: URL) async throws {
+        try record("addKnownRepo(\(url.path))")
+        repoList.add(url)
+    }
+    nonisolated func flows(in repo: URL) -> [URL] { flowFiles }
+    /// What `flowCatalog()` returns, and `libraryDirectory`.
+    nonisolated let catalog = CatalogBox()
+    nonisolated func flowCatalog() -> [FlowEntry] { catalog.entries }
+    nonisolated var libraryDirectory: URL { catalog.library }
     func isGitRepo(_ url: URL) async -> Bool { gitRepoPaths.contains(url.path) }
     /// Every `saveFlow` call, and whether `loadFlow` fails.
     nonisolated let files = FileLog()
     nonisolated func loadFlow(_ url: URL) throws -> Flow {
+        files.gate.pass(url)
         if files.failLoad { throw FakeFailure() }
-        var flow = BuiltinFlows.fixGitHubIssue
+        var flow = files.flows[url] ?? BuiltinFlows.fixGitHubIssue
         if let name = files.names[url] { flow.name = name }
         return flow
     }
@@ -164,31 +181,29 @@ func makeRun(_ title: String = "run", status: RunStatus = .running, revision: In
         createdAt: createdAt, status: status, nodes: nodes, revision: revision)
 }
 
-/// Lets a test hold the flow scan and learn that it has been entered, with no sleeping.
-final class ScanGate: @unchecked Sendable {
+/// Lets a test hold `loadFlow` for one file and learn that it has been entered, with no sleeping.
+final class LoadGate: @unchecked Sendable {
     private let condition = NSCondition()
-    private var held = false
+    private var held: URL?
     private var entered = false
     private var waiter: CheckedContinuation<Void, Never>?
 
-    /// Makes the next scans block.
-    func hold() { condition.lock(); held = true; entered = false; condition.unlock() }
-    /// Unblocks scans.
-    func release() { condition.lock(); held = false; condition.broadcast(); condition.unlock() }
-    /// Returns once a scan is blocked in the gate.
+    func hold(_ url: URL) { condition.lock(); held = url; entered = false; condition.unlock() }
+    func release() { condition.lock(); held = nil; condition.broadcast(); condition.unlock() }
     func waitForEntry() async {
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
             condition.lock()
             if entered { condition.unlock(); c.resume() } else { waiter = c; condition.unlock() }
         }
     }
-    func pass() {
+    func pass(_ url: URL) {
         condition.lock()
+        defer { condition.unlock() }
+        guard held == url else { return }
         entered = true
         waiter?.resume()
         waiter = nil
-        while held { condition.wait() }
-        condition.unlock()
+        while held == url { condition.wait() }
     }
 }
 
@@ -210,6 +225,13 @@ final class FileLog: @unchecked Sendable {
         get { lock.withLock { _names } }
         set { lock.withLock { _names = newValue } }
     }
+    private var _flows: [URL: Flow] = [:]
+    /// The flow `loadFlow` returns for a file (the built-in for the others).
+    var flows: [URL: Flow] {
+        get { lock.withLock { _flows } }
+        set { lock.withLock { _flows = newValue } }
+    }
+    let gate = LoadGate()
     private var _failSave = false
     /// When true, `saveFlow` throws.
     var failSave: Bool {
@@ -217,4 +239,28 @@ final class FileLog: @unchecked Sendable {
         set { lock.withLock { _failSave = newValue } }
     }
     func record(_ flow: Flow, _ url: URL) { lock.withLock { _saved.append((flow, url)) } }
+}
+
+/// Seedable catalog state for `FakeEngineClient`.
+final class CatalogBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _entries: [FlowEntry] = []
+    private var _library = URL(fileURLWithPath: "/tmp/fake-library", isDirectory: true)
+    var entries: [FlowEntry] {
+        get { lock.withLock { _entries } }
+        set { lock.withLock { _entries = newValue } }
+    }
+    var library: URL {
+        get { lock.withLock { _library } }
+        set { lock.withLock { _library = newValue } }
+    }
+}
+
+/// A lock-guarded URL list for `FakeEngineClient`.
+final class URLList: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _urls: [URL]
+    init(_ urls: [URL]) { _urls = urls }
+    var urls: [URL] { lock.withLock { _urls } }
+    func add(_ url: URL) { lock.withLock { if !_urls.contains(url) { _urls.append(url) } } }
 }

@@ -3,14 +3,10 @@ import MetalFlowCore
 
 /// What the launch bar has selected and typed.
 public struct LaunchForm: Sendable, Equatable {
-    /// The chosen repository.
-    public var repo: URL?
-    /// The chosen `.flow` file.
-    public var flow: URL?
-    /// The issue number or URL.
-    public var issue = ""
-    /// The "Add repo..." field's text.
-    public var newRepoPath = ""
+    /// The chosen catalog entry.
+    public var flow: FlowEntry.ID?
+    /// Typed values, keyed by launch field name.
+    public var values: [String: String] = [:]
     /// Creates an empty form.
     public init() {}
 }
@@ -73,48 +69,118 @@ extension AppModel {
     /// The text with surrounding whitespace and newlines removed: the one trim used by buttons and actions.
     public static func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// Re-reads the known repos, merges the added ones, and keeps the selection valid.
+    /// Re-reads the known repos, merges the added ones, keeps the selection valid and refreshes the catalog.
     public func refreshRepos() async {
         var merged = client.knownRepos()
         for url in addedRepos where !merged.contains(url) { merged.append(url) }
         repos = merged
-        if launchForm.repo == nil || !merged.contains(launchForm.repo!) { await selectRepo(merged.first) }
+        if selectedRepo == nil || !merged.contains(selectedRepo!) { selectRepo(merged.first) }
+        await refreshCatalog()
     }
 
-    /// Selects a repo and loads its flows (scanned off the main actor), choosing the first. A result for a
-    /// repo that is no longer selected is dropped.
-    public func selectRepo(_ url: URL?) async {
-        if launchForm.repo != url {
-            // The old repo's flows do not belong to the new one: nothing launches until its scan returns.
-            repoFlows = []
-            launchForm.flow = nil
+    /// Selects the repo new drafts default to.
+    public func selectRepo(_ url: URL?) {
+        selectedRepo = url
+    }
+
+    /// Re-reads the catalog (off the main actor) and keeps the selected flow, or selects the first entry. Repos
+    /// added by path but not yet known to the client are scanned too.
+    public func refreshCatalog() async {
+        let client = client
+        let added = addedRepos
+        let found = await Task.detached { () -> [FlowEntry] in
+            var entries = client.flowCatalog()
+            let known = Set(client.knownRepos())
+            let extra = added.filter { !known.contains($0) }
+            if !extra.isEmpty {
+                let have = Set(entries.map(\.id))
+                entries += FlowCatalog.entries(library: client.libraryDirectory, repos: extra).filter { !have.contains($0.id) }
+            }
+            return entries
+        }.value
+        catalog = found
+        if let id = launchForm.flow, found.contains(where: { $0.id == id }) {
+            await loadLaunchFields()
+        } else {
+            await selectFlow(found.first?.id)
         }
-        launchForm.repo = url
-        retargetPristineDraft()
-        guard let url else {
-            repoFlows = []
-            launchForm.flow = nil
+    }
+
+    /// The catalog entry the launch form has selected.
+    public var selectedEntry: FlowEntry? { catalog.first { $0.id == launchForm.flow } }
+
+    /// Selects a catalog entry: clears the typed values and fills in the fields' defaults.
+    public func selectFlow(_ id: FlowEntry.ID?) async {
+        launchForm.flow = id
+        launchForm.values = [:]
+        launchFields = []
+        launchError = nil
+        launchResolvedRepo = nil
+        launchFlow = nil
+        await loadLaunchFields()
+    }
+
+    /// Loads the selected flow to derive its launch fields. Typed values are kept for fields that remain; new
+    /// fields get their defaults, and the repo field the default repo when it is a known one.
+    /// The file is read off the main actor; a result for a selection that has since changed is dropped, and
+    /// Launch is disabled until it arrives.
+    func loadLaunchFields() async {
+        launchGeneration += 1
+        let generation = launchGeneration
+        launchFields = []
+        launchError = nil
+        launchResolvedRepo = nil
+        launchFlow = nil
+        guard let entry = selectedEntry else { isLoadingLaunch = false; return }
+        isLoadingLaunch = true
+        let client = client
+        let loaded = await Task.detached { () -> Result<Flow, Error> in
+            Result { try entry.file.map { try client.loadFlow($0) } ?? BuiltinFlows.fixGitHubIssue }
+        }.value
+        guard generation == launchGeneration else { return }
+        isLoadingLaunch = false
+        let flow: Flow
+        switch loaded {
+        case .success(let f): flow = f
+        case .failure(let error):
+            launchError = error.localizedDescription
             return
         }
-        let client = client
-        let found = await Task.detached { client.flows(in: url) }.value
-        guard launchForm.repo == url else { return }
-        repoFlows = found
-        if launchForm.flow == nil || !found.contains(launchForm.flow!) { launchForm.flow = found.first }
+        launchFlow = flow
+        do { launchFields = try flow.launchFields(location: entry.location) } catch {
+            launchError = flow.message(for: error)
+            return
+        }
+        let names = Set(launchFields.map(\.name))
+        launchForm.values = launchForm.values.filter { names.contains($0.key) }
+        for field in launchFields where launchForm.values[field.name] == nil {
+            switch field.kind {
+            case .text, .githubIssue: launchForm.values[field.name] = field.defaultValue ?? ""
+            case .repo:
+                if let def = field.defaultValue {
+                    if let known = repos.first(where: { $0.standardizedFileURL.path == def }) { launchForm.values["repo"] = known.path }
+                } else if let selectedRepo {
+                    launchForm.values["repo"] = selectedRepo.path
+                }
+            }
+        }
+        for node in flow.nodes {
+            guard case .repo(let config) = node.kind else { continue }
+            switch (config.mode, entry.location) {
+            case (.thisRepo, .repo(let root, _)): launchResolvedRepo = root.lastPathComponent
+            case (.fixed(let path), _): launchResolvedRepo = URL(fileURLWithPath: path).lastPathComponent
+            default: break
+            }
+        }
     }
 
-    /// Selects a flow file.
-    public func selectFlow(_ url: URL?) { launchForm.flow = url }
-
-    /// Whether the launch bar has a repo, a flow and a non-empty issue.
+    /// Whether the launch bar has a launchable flow and every required field is filled (trimmed).
     public var canLaunch: Bool {
-        !isLaunching && launchForm.repo != nil && launchForm.flow != nil && !Self.trimmed(launchForm.issue).isEmpty
+        !isLaunching && !isLoadingLaunch && selectedEntry != nil && launchError == nil
+            && launchFields.allSatisfy { !$0.isRequired || !Self.trimmed(launchForm.values[$0.name] ?? "").isEmpty }
     }
 
-    /// Whether the "Add repo..." field holds a path.
-    public var canAddRepo: Bool { !Self.trimmed(launchForm.newRepoPath).isEmpty }
-
-    /// Adds the repo at `path` if it is a git repo top level, and selects it. Otherwise sets a notice.
+    /// Adds the repo at `path` if it is a git repo top level, and makes it the default for new drafts. Otherwise sets a notice.
     @discardableResult
     public func addRepo(path: String) async -> Bool {
         let trimmed = Self.trimmed(path)
@@ -125,31 +191,34 @@ extension AppModel {
             return false
         }
         if !addedRepos.contains(url) { addedRepos.append(url) }
+        do { try await client.addKnownRepo(url) } catch {
+            notice = Notice("Added \(url.lastPathComponent) for this session only: \(error.localizedDescription)")
+        }
         await refreshRepos()
-        await selectRepo(url)
-        if launchForm.newRepoPath == path { launchForm.newRepoPath = "" }
+        selectRepo(url)
         return true
     }
 
-    /// Launches the selected flow in the selected repo on the typed issue, then clears the issue field.
+    /// Launches the selected flow with the typed values, then resets the fields whose text was not changed meanwhile.
     @discardableResult
     public func launchFromForm() async -> RunID? {
-        guard canLaunch, let repo = launchForm.repo, let file = launchForm.flow else { return nil }
-        let typed = launchForm.issue
-        let flow: Flow
-        do { flow = try client.loadFlow(file) } catch {
-            notice = Notice(error.localizedDescription)
-            return nil
+        guard canLaunch, let entry = selectedEntry, let flow = launchFlow else { return nil }
+        let typed = launchForm.values
+        let id = await launchGuarded(flow: flow, location: entry.location, values: typed)
+        if id != nil {
+            for field in launchFields where field.kind != .repo && launchForm.values[field.name] == typed[field.name] {
+                launchForm.values[field.name] = field.defaultValue ?? ""
+            }
         }
-        let id = await launchGuarded(flow: flow, repo: repo, typed: typed)
-        if id != nil, launchForm.issue == typed { launchForm.issue = "" }
         return id
     }
 
-    /// The one launch path: marks the launch in flight and sends the trimmed issue text.
-    func launchGuarded(flow: Flow, repo: URL, typed: String) async -> RunID? {
+    /// The one launch path: marks the launch in flight and sends the trimmed, non-empty values.
+    func launchGuarded(flow: Flow, location: FlowLocation, values: [String: String]) async -> RunID? {
         isLaunching = true
         defer { isLaunching = false }
-        return await launch(flow: flow, repo: repo, input: Self.trimmed(typed))
+        var sent: [String: String] = [:]
+        for (name, value) in values where !Self.trimmed(value).isEmpty { sent[name] = Self.trimmed(value) }
+        return await launch(flow: flow, location: location, values: sent)
     }
 }

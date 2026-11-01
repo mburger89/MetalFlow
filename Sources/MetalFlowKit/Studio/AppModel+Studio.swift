@@ -8,58 +8,20 @@ extension AppModel {
         return run
     }
 
-    /// Runs of the draft's flow in the draft's repo, newest first. Discarded runs have no worktrees left, so
+    /// Runs of the draft's flow, newest first (matched on the flow's name). Discarded runs have no worktrees left, so
     /// nothing can be shown or branched from them.
     public var studioRuns: [Run] {
         guard let draft else { return [] }
-        return order.compactMap { runs[$0] }.filter {
-            $0.flow.name == draft.flow.name && $0.repo == draft.repo && $0.status != .discarded
-        }
+        return order.compactMap { runs[$0] }.filter { $0.flow.name == draft.flow.name && $0.status != .discarded }
     }
 
     /// The text a unsaved flow's file name is made of: lowercase letters and digits joined by dashes.
-    nonisolated static func slug(_ name: String) -> String {
-        var out = ""
-        var dash = false
-        for ch in name.lowercased() {
-            if ch.isASCII, ch.isLetter || ch.isNumber {
-                if dash, !out.isEmpty { out.append("-") }
-                out.append(ch)
-                dash = false
-            } else {
-                dash = true
-            }
-        }
-        return out.isEmpty ? "flow" : out
-    }
+    nonisolated static func slug(_ name: String) -> String { FlowCatalog.slug(name) }
 
-    /// Where an unsaved flow goes: `<repo>/.flows/<slug>.flow`, or `-2`, `-3`... when taken.
-    /// Reads the directory, so it runs off the main actor.
-    nonisolated static func newFlowURL(name: String, repo: URL) -> URL {
-        let dir = repo.appendingPathComponent(FlowFile.directoryName, isDirectory: true)
-        let base = slug(name)
-        var candidate = dir.appendingPathComponent("\(base).flow")
-        var n = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = dir.appendingPathComponent("\(base)-\(n).flow")
-            n += 1
-        }
-        return candidate
-    }
-
-    /// Opens the Studio with the built-in flow when it has nothing open and a repo is selected.
+    /// Opens the Studio with the built-in flow, unsaved, when it has nothing open. No repo is needed.
     func ensureDraft() {
-        guard screen == .studio, draft == nil, let repo = launchForm.repo else { return }
-        draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, url: nil, repo: repo)
-    }
-
-    /// The known repo that contains `url`, falling back to the selected repo, then to the folder above `.flows`.
-    func repo(containing url: URL) -> URL {
-        let path = url.standardizedFileURL.path
-        let known = (repos + [launchForm.repo].compactMap { $0 })
-            .filter { path.hasPrefix($0.standardizedFileURL.path + "/") }
-            .max { $0.path.count < $1.path.count }
-        return known ?? launchForm.repo ?? url.deletingLastPathComponent().deletingLastPathComponent()
+        guard screen == .studio, draft == nil else { return }
+        draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .builtin)
     }
 
     /// Loads a flow file into the Studio. A load error becomes a notice and leaves the screen alone.
@@ -71,24 +33,28 @@ extension AppModel {
         }
         do {
             let flow = try client.loadFlow(url)
-            draft = FlowDraft(flow: flow, url: url, repo: repo(containing: url))
+            draft = FlowDraft(flow: flow, location: .of(file: url))
             screen = .studio
         } catch {
             notice = Notice(error.localizedDescription)
         }
     }
 
-    /// Keeps a pristine, untitled draft pointed at the selected repo.
-    func retargetPristineDraft() {
-        if let draft, draft.url == nil, !draft.isDirty, let repo = launchForm.repo { draft.repo = repo }
-        ensureDraft()
+    /// Shows the built-in flow in the Studio (saving it asks where to). The built-in already open keeps its draft.
+    func loadBuiltinDraft() {
+        if draft?.location != .builtin {
+            draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .builtin)
+        }
+        screen = .studio
     }
 
     /// What waits behind the unsaved-edits alert.
     public enum PendingAction: Sendable, Equatable {
         /// Open this flow file.
         case open(URL)
-        /// Start a new, empty flow.
+        /// Open the built-in flow.
+        case openBuiltin
+        /// Start a new flow.
         case newFlow
         /// Quit the app, or close its window (the same thing: it is the only one).
         case quit
@@ -144,6 +110,7 @@ extension AppModel {
     private func perform(_ action: PendingAction) async {
         switch action {
         case .open(let url): openWithoutAsking(url)
+        case .openBuiltin: loadBuiltinDraft()
         case .newFlow: await newFlowWithoutAsking()
         case .quit:
             if continueQuit() == .now { replyToTerminate(true) }
@@ -156,47 +123,135 @@ extension AppModel {
         return false
     }
 
-    /// Saves the draft: to its file, or into `<repo>/.flows/` under a fresh name. Sets a notice on failure.
+    /// Saves the draft. One that already has a file is written there. One that has none (unsaved, or the built-in)
+    /// first asks where to go, in the destination panel; cancelling the panel is not saving (false, no notice).
+    /// Sets a notice on failure.
     @discardableResult
     public func saveDraft() async -> Bool {
         guard let draft, draftIsValid else { return false }
-        let target: URL
+        let flow: Flow
+        let location: FlowLocation
         if let url = draft.url {
-            target = url
+            flow = draft.flow
+            location = draft.location
+            do { try client.saveFlow(flow, to: url) } catch {
+                notice = Notice(error.localizedDescription)
+                return false
+            }
         } else {
-            let (name, repo) = (draft.flow.name, draft.repo)
-            target = await Task.detached { Self.newFlowURL(name: name, repo: repo) }.value
+            guard let choice = await askSaveDestination(), self.draft === draft else { return false }
+            // The draft can change while the panel is up.
+            if case .failure(let error) = draft.validation {
+                notice = Notice("Not saved: \(draft.flow.message(for: error))")
+                return false
+            }
+            let directory: URL
+            switch choice {
+            case .library: directory = client.libraryDirectory
+            case .repo(let root): directory = root.appendingPathComponent(FlowFile.directoryName, isDirectory: true)
+            }
+            let name = draft.flow.name
+            let target = await Task.detached { FlowCatalog.newFileURL(name: name, in: directory) }.value
+            guard self.draft === draft else { return false }
+            if case .library = choice { location = .library(file: target) } else { location = .of(file: target) }
+            let (prepared, note) = FlowCatalog.prepareForSave(draft.flow, destination: location, origin: nil)
+            flow = prepared
+            do { try client.saveFlow(flow, to: target) } catch {
+                notice = Notice(error.localizedDescription)
+                return false
+            }
+            if let note { notice = Notice(note, kind: .info) }
         }
-        do {
-            try client.saveFlow(draft.flow, to: target)
-        } catch {
-            notice = Notice(error.localizedDescription)
-            return false
-        }
-        draft.didSave(to: target)
-        if !workingOn.contains(.flow(target)) { workingOn.append(.flow(target)) }
-        if launchForm.repo == draft.repo { await selectRepo(draft.repo) }
+        draft.didSave(flow, at: location)
+        if let url = draft.url, !workingOn.contains(.flow(url)) { workingOn.append(.flow(url)) }
+        await refreshCatalog()
         return true
     }
 
-    /// Launches the draft's flow in its repo on the issue typed in the Studio, then clears that field.
+    /// Shows the destination panel and waits for its answer: nil when cancelled.
+    func askSaveDestination() async -> SaveDestination? {
+        guard !isSavePanelVisible else { return nil }
+        isSavePanelVisible = true
+        return await withCheckedContinuation { saveDestinationWaiter = $0 }
+    }
+
+    /// The destination panel's answer: a destination, or nil to cancel the save.
+    public func chooseSaveDestination(_ destination: SaveDestination?) {
+        guard isSavePanelVisible else { return }
+        isSavePanelVisible = false
+        let waiter = saveDestinationWaiter
+        saveDestinationWaiter = nil
+        waiter?.resume(returning: destination)
+    }
+
+    /// The Studio launch row's fields for the draft at its location, or the message for why it cannot be launched.
+    /// A draft that is not valid says so in the Studio's validation banner, so it has no message here.
+    public var studioLaunch: (fields: [LaunchField], error: String?, canLaunch: Bool) {
+        guard let draft else { return ([], nil, false) }
+        do {
+            let fields = try draft.flow.launchFields(location: draft.location)
+            let filled = fields.allSatisfy { !$0.isRequired || !Self.trimmed(studioValue($0)).isEmpty }
+            return (fields, nil, filled && !isLaunching)
+        } catch {
+            if case .invalid = error { return ([], nil, false) }
+            return ([], draft.flow.message(for: error), false)
+        }
+    }
+
+    /// The repo folder name shown read-only for a This repo or Fixed draft; nil for Exposed.
+    public var studioResolvedRepo: String? {
+        guard let draft else { return nil }
+        for node in draft.flow.nodes {
+            guard case .repo(let config) = node.kind else { continue }
+            switch (config.mode, draft.location) {
+            case (.thisRepo, .repo(let root, _)): return root.lastPathComponent
+            case (.fixed(let path), _): return URL(fileURLWithPath: path).lastPathComponent
+            default: break
+            }
+        }
+        return nil
+    }
+
+    /// What the Studio row shows for `field`: the typed text, else its default (a repo field: the selected repo).
+    public func studioValue(_ field: LaunchField) -> String {
+        if let typed = studioValues[field.name] { return typed }
+        switch field.kind {
+        case .text, .githubIssue: return field.defaultValue ?? ""
+        case .repo:
+            if let def = field.defaultValue { return repos.first { $0.standardizedFileURL.path == def }?.path ?? "" }
+            return selectedRepo?.path ?? repos.first?.path ?? ""
+        }
+    }
+
+    /// Launches the draft's flow at its location with the Studio row's values, then clears the text fields whose
+    /// text was not changed meanwhile.
     @discardableResult
     public func launchFromStudio() async -> RunID? {
-        guard let draft, draftIsValid, !isLaunching, !Self.trimmed(studioIssue).isEmpty else { return nil }
-        let typed = studioIssue
-        let id = await launchGuarded(flow: draft.flow, repo: draft.repo, typed: typed)
-        if id != nil, studioIssue == typed { studioIssue = "" }
+        guard let draft, draftIsValid, studioLaunch.canLaunch else { return nil }
+        let fields = studioLaunch.fields
+        let typed = Dictionary(uniqueKeysWithValues: fields.map { ($0.name, studioValue($0)) })
+        let id = await launchGuarded(flow: draft.flow, location: draft.location, values: typed)
+        if id != nil, self.draft === draft {
+            for field in fields where field.kind != .repo && studioValue(field) == typed[field.name] {
+                studioValues[field.name] = nil
+            }
+        }
         return id
     }
 }
 
+/// Where the destination panel can send a first save.
+public enum SaveDestination: Sendable, Equatable {
+    /// The library folder.
+    case library
+    /// This repo's `.flows` folder.
+    case repo(URL)
+}
+
 extension AppModel {
-    /// File > New Flow: an empty "Untitled flow" in the selected repo. With unsaved edits it asks first.
+    /// File > New Flow: a new flow with one Repo node, "Untitled flow" or the first "Untitled flow N" the catalog
+    /// does not use. With unsaved edits it asks first.
     public func newFlow() async {
-        guard launchForm.repo != nil else {
-            notice = Notice("Add a repo on the dashboard first.")
-            return
-        }
         if let draft, draft.isDirty {
             pendingAction = .newFlow
             screen = .studio
@@ -206,24 +261,17 @@ extension AppModel {
     }
 
     func newFlowWithoutAsking() async {
-        guard let repo = launchForm.repo else { return }
-        let name = await untitledName(in: repo)
-        // The scan took a moment: drop the result if the repo changed meanwhile.
-        guard launchForm.repo == repo else { return }
-        draft = FlowDraft(flow: Flow(name: name, nodes: [], wires: []), url: nil, repo: repo)
+        let name = untitledName()
+        let repo = Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .exposed(default: nil))),
+                        position: Point(x: 24, y: 24))
+        draft = FlowDraft(flow: Flow(name: name, nodes: [repo], wires: []), location: .unsaved)
         screen = .studio
     }
 
-    /// "Untitled flow", or "Untitled flow 2", "Untitled flow 3"... when the repo's flows already use the name, so
+    /// "Untitled flow", or "Untitled flow 2", "Untitled flow 3"... when the catalog's flows already use the name, so
     /// the run overlay (which matches runs by flow name) never mixes up two new flows.
-    /// Scans and loads the repo's flow files, so it runs off the main actor.
-    func untitledName(in repo: URL) async -> String {
-        let client = client
-        return await Task.detached { Self.untitledName(client: client, in: repo) }.value
-    }
-
-    nonisolated static func untitledName(client: EngineClient, in repo: URL) -> String {
-        let taken = Set(client.flows(in: repo).compactMap { try? client.loadFlow($0).name })
+    func untitledName() -> String {
+        let taken = Set(catalog.map(\.name))
         var name = "Untitled flow"
         var n = 2
         while taken.contains(name) {
@@ -233,16 +281,29 @@ extension AppModel {
         return name
     }
 
-    /// File > Open Flow...: shows the repo / flow panel.
+    /// File > Open Flow...: shows the panel listing the catalog.
     public func showOpenFlow() { isOpenFlowVisible = true }
 
     /// Closes the Open Flow panel.
     public func hideOpenFlow() { isOpenFlowVisible = false }
 
-    /// Opens a flow from the panel and closes it.
-    public func chooseFlow(_ url: URL) {
+    /// Opens a catalog entry from the panel and closes it.
+    public func chooseEntry(_ entry: FlowEntry) {
         isOpenFlowVisible = false
-        open(flow: url)
+        if let file = entry.file {
+            open(flow: file)
+        } else {
+            openBuiltin()
+        }
+    }
+
+    /// Shows the built-in flow in the Studio; with unsaved edits it asks first.
+    public func openBuiltin() {
+        if let draft, draft.isDirty, draft.location != .builtin {
+            pendingAction = .openBuiltin
+            return
+        }
+        loadBuiltinDraft()
     }
 
     /// Whether File > Save is enabled: the Studio shows a valid draft.

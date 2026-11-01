@@ -24,7 +24,9 @@ func run() async -> Int32 {
             guard !FileManager.default.fileExists(atPath: file.path) else {
                 throw CommandFailure(message: "\(file.path) already exists; not overwriting")
             }
-            try FlowFile.save(BuiltinFlows.fixGitHubIssue, to: file)
+            let (prepared, _) = FlowCatalog.prepareForSave(
+                BuiltinFlows.fixGitHubIssue, destination: FlowLocation.of(file: file), origin: repo)
+            try FlowFile.save(prepared, to: file)
             print("wrote \(file.path)")
             return 0
         }
@@ -37,15 +39,57 @@ func run() async -> Int32 {
 
         switch command {
         case "launch":
-            try requirePositionals(args, min: 1, max: 1, name: command)
-            let repo = try await resolveRepo(args.repo, runner: runner)
-            let flowURL = args.flow.map { URL(fileURLWithPath: $0) }
-                ?? repo.appendingPathComponent(FlowFile.directoryName).appendingPathComponent("fix-issue.flow")
-            let flow: Flow
-            do { flow = try FlowFile.load(from: flowURL) } catch {
-                throw CommandFailure(message: "cannot load flow \(flowURL.path): \(error.localizedDescription)")
+            try requirePositionals(args, min: 0, max: 1, name: command)
+            let store = RunStore(root: storeRoot())
+            let cwdRepo: URL?
+            var cwdError: Error?
+            if args.repo != nil { cwdRepo = try await resolveRepo(args.repo, runner: runner) } else {
+                do { cwdRepo = try await resolveRepo(nil, runner: runner) } catch { cwdRepo = nil; cwdError = error }
             }
-            let id = try await engine.launch(flow: flow, repo: repo, input: args.positionals[0])
+            let flow: Flow
+            let location: FlowLocation
+            if let arg = args.flow {
+                let url = URL(fileURLWithPath: arg)
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue {
+                    (flow, location) = (try loadFlow(url), FlowLocation.of(file: url))
+                } else {
+                    let entries = FlowCatalog.entries(library: store.flowsDirectory, repos: store.knownRepos())
+                    let entry = try FlowCatalog.resolve(flowArgument: arg, entries: entries)
+                    if let file = entry.file {
+                        (flow, location) = (try loadFlow(file), entry.location)
+                    } else {
+                        (flow, location) = (BuiltinFlows.fixGitHubIssue, .builtin)
+                    }
+                }
+            } else {
+                let file = cwdRepo?.appendingPathComponent(FlowFile.directoryName).appendingPathComponent("fix-issue.flow")
+                if let file, FileManager.default.fileExists(atPath: file.path) {
+                    (flow, location) = (try loadFlow(file), FlowLocation.of(file: file))
+                } else {
+                    (flow, location) = (BuiltinFlows.fixGitHubIssue, .builtin)
+                }
+            }
+            let fields: [LaunchField]
+            do { fields = try flow.launchFields(location: location) } catch {
+                throw CommandFailure(message: flow.message(for: error))
+            }
+            var values = try LaunchArguments.values(fields: fields, positional: args.positionals.first, sets: args.sets)
+            // An exposed repo is filled from --repo or the current directory; a bound flow only checks an explicit --repo.
+            if fields.contains(where: { $0.kind == .repo }) {
+                if let cwdRepo, values["repo"] == nil { values["repo"] = cwdRepo.path }
+                // Nothing names the repo and the current directory is not one: say why, not just that a value is missing.
+                if let cwdError, values["repo"] == nil, fields.first(where: { $0.kind == .repo })?.defaultValue == nil {
+                    throw cwdError
+                }
+            } else if args.repo != nil, let cwdRepo {
+                values["repo"] = cwdRepo.path
+            }
+            let id: RunID
+            do { id = try await engine.launch(flow: flow, location: location, values: values) } catch let e as RunEngineError {
+                if case .launch(let le) = e { throw CommandFailure(message: flow.message(for: le)) }
+                throw CommandFailure(message: e.localizedDescription)
+            }
             print(id.rawValue)
             return await follow(engine: engine, id: id, seed: nil)
 
@@ -109,6 +153,13 @@ func run() async -> Int32 {
             print("kept branch \(args.positionals[2])")
             return 0
         }
+    } catch let e as LaunchArgumentError {
+        if case .badSet = e {
+            stderrPrint("mflow: \(e.localizedDescription)\n\n\(usageText)")
+            return 64
+        }
+        stderrPrint("mflow: \(e.localizedDescription)")
+        return 1
     } catch let e as UsageError {
         stderrPrint("mflow: \(e.message)\n\n\(usageText)")
         return 64

@@ -1,7 +1,8 @@
 import Foundation
+import MetalFlowCore
 import MetalUI
 
-/// The Open Flow panel (⌘O): a layer over the window with a repo picker, the repo's flows and Cancel.
+/// The Open Flow panel (⌘O): a layer over the window with the catalog's flow files and Cancel.
 /// MetalUI has no sheet, so this is an in-window overlay. Clicking outside it, or Escape, cancels.
 struct OpenFlowPanel: Component {
     let model: AppModel
@@ -14,30 +15,14 @@ struct OpenFlowPanel: Component {
                 .onTapGesture { model.hideOpenFlow() }
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("Open flow").font(size: 15).foregroundColor(Palette.text)
-                HStack(spacing: Spacing.sm) {
-                    Text("Repo").font(size: 12).foregroundColor(Palette.muted)
-                    if model.repos.isEmpty {
-                        Text("No repos yet").foregroundColor(Palette.muted).accessibilityIdentifier("openFlow.repo")
-                    } else {
-                        Picker("", selection: Binding(
-                            get: { model.launchForm.repo ?? model.repos[0] },
-                            set: { url in let model = model; Task { await model.selectRepo(url) } })) {
-                            ForEach(model.repos, id: \.self) { url in
-                                Text(verbatim: url.lastPathComponent).tag(url)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .accessibilityIdentifier("openFlow.repo")
-                    }
-                }
-                if model.repoFlows.isEmpty {
-                    Text("No flows in this repo").foregroundColor(Palette.muted)
+                if model.catalog.isEmpty {
+                    Text("No flows").foregroundColor(Palette.muted)
                         .accessibilityIdentifier("openFlow.empty")
                 } else {
-                    ForEach(model.repoFlows, id: \.self) { url in
-                        Button(url.lastPathComponent) { model.chooseFlow(url) }
+                    ForEach(model.catalog, id: \.id) { entry in
+                        Button(LaunchBar.title(of: entry)) { model.chooseEntry(entry) }
                             .buttonStyle(.bordered)
-                            .accessibilityIdentifier("openFlow.\(url.lastPathComponent)")
+                            .accessibilityIdentifier(Self.identifier(of: entry))
                     }
                 }
                 Button("Cancel") { model.hideOpenFlow() }
@@ -57,5 +42,12 @@ struct OpenFlowPanel: Component {
         .focused($focused)
         .onKeyPress(.escape) { model.hideOpenFlow(); return .handled }
         .task { focused = true }
+    }
+}
+
+extension OpenFlowPanel {
+    /// `openFlow.builtin` for the built-in, otherwise `openFlow.<file name>`.
+    static func identifier(of entry: FlowEntry) -> String {
+        entry.file.map { "openFlow.\($0.lastPathComponent)" } ?? "openFlow.builtin"
     }
 }

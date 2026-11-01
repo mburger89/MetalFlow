@@ -57,13 +57,21 @@ public final class AppModel {
         didSet {
             guard draft !== oldValue else { return }
             studioRun = nil
-            draft?.onRetarget = { [weak self] in self?.studioRun = nil }
+            studioValues = [:]
         }
     }
     /// The run overlaid on the Studio canvas; nil shows the definition only.
     public var studioRun: RunID?
-    /// The issue typed in the Studio's launch field.
-    public var studioIssue = ""
+    /// What was typed in the Studio's launch row, by field name.
+    public var studioValues: [String: String] = [:]
+    /// True while the save-destination panel is showing.
+    public internal(set) var isSavePanelVisible = false
+    /// Non-nil while the folder dialog is up.
+    public internal(set) var addRepoRequest: AddRepoPurpose?
+    /// The purpose of a dialog that has just ended, until its result (or its cancel) is handled.
+    var addRepoClaim: AddRepoPurpose?
+    /// The save waiting for the destination panel's answer.
+    var saveDestinationWaiter: CheckedContinuation<SaveDestination?, Never>?
     /// The run shown in detail, if any.
     public var selectedRun: RunID? {
         didSet { if selectedRun != oldValue { detailMayHaveOpened() } }
@@ -108,8 +116,22 @@ public final class AppModel {
     public var launchForm = LaunchForm()
     /// Repositories offered by the launch bar: the client's known repos plus ones added by path.
     public internal(set) var repos: [URL] = []
-    /// The `.flow` files of the selected repo, cached when the repo changes.
-    public internal(set) var repoFlows: [URL] = []
+    /// Every flow the app can open: built-ins, the library, then each known repo's `.flows`. Refreshed on start,
+    /// after "Add repo..." and after a save.
+    public internal(set) var catalog: [FlowEntry] = []
+    /// The repo that seeds the launch form's exposed repo field: the first known repo, or the last one added.
+    public internal(set) var selectedRepo: URL?
+    /// The selected flow's launch fields, in order; empty when the flow cannot be launched.
+    public internal(set) var launchFields: [LaunchField] = []
+    /// Why the selected flow cannot be launched, in the spec's wording.
+    public internal(set) var launchError: String?
+    /// True while the selected flow is being read; Launch stays disabled meanwhile.
+    public internal(set) var isLoadingLaunch = false
+    /// The flow `launchFields` was derived from.
+    var launchFlow: Flow?
+    var launchGeneration = 0
+    /// The repo folder name shown for a flow whose Repo node is This repo or Fixed.
+    public internal(set) var launchResolvedRepo: String?
     /// Unsent answer text, keyed by `AppModel.draftKey(_:_:)`.
     public var answerDrafts: [String: String] = [:]
     /// True while a launch from the launch bar is in flight.
@@ -398,8 +420,15 @@ public final class AppModel {
 
     /// Starts a run. Returns its id, or nil with a notice.
     @discardableResult
-    public func launch(flow: Flow, repo: URL, input: String) async -> RunID? {
-        do { return try await client.launch(flow: flow, repo: repo, input: input) } catch { fail(error); return nil }
+    public func launch(flow: Flow, location: FlowLocation, values: [String: String]) async -> RunID? {
+        do { return try await client.launch(flow: flow, location: location, values: values) } catch {
+            switch error as? RunEngineError {
+            case .launch(let e)?: notice = Notice(flow.message(for: e))
+            case .invalid(let e)?: notice = Notice(flow.message(for: e))
+            default: fail(error)
+            }
+            return nil
+        }
     }
 
     /// Answers a node's question. Returns false (with a notice) when the engine refuses.

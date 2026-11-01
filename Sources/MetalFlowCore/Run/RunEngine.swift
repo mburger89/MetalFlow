@@ -4,8 +4,6 @@ import Foundation
 public enum RunEngineError: Error, Equatable {
     /// The repository has a detached HEAD, so there is no base branch to start from.
     case detachedHead
-    /// The flow has more than one `flowInput` node.
-    case multipleFlowInputs
     /// No run with this ID is known to the engine.
     case unknownRun(RunID)
     /// The flow failed validation.
@@ -31,6 +29,12 @@ public enum RunEngineError: Error, Equatable {
     case invalidBranchName(String)
     /// The node has not failed, or the run is not in a state that can be retried.
     case notRetryable(NodeKey)
+    /// A launch field has no value and no default.
+    case missingInput(String)
+    /// The value given for the repo differs from the repo the flow is bound to.
+    case repoMismatch(expected: URL)
+    /// The flow cannot be launched from where it is.
+    case launch(LaunchError)
 }
 
 extension RunEngineError: LocalizedError {
@@ -38,7 +42,6 @@ extension RunEngineError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .detachedHead: return "the repository has a detached HEAD; check out a branch first"
-        case .multipleFlowInputs: return "the flow has more than one flow-input node"
         case .unknownRun(let id): return "no run \(id.rawValue)"
         case .invalid(let error): return "the flow is not valid: \(error.localizedDescription)"
         case .tooManyCandidates(let n): return "a fan-out lists \(n) candidates; at most 26 are supported"
@@ -51,6 +54,9 @@ extension RunEngineError: LocalizedError {
         case .runBusy(let id): return "run \(id.rawValue) is busy: running in another mflow, or still stopping"
         case .invalidBranchName(let name): return "'\(name)' is not a valid branch name"
         case .notRetryable(let key): return "\(key) cannot be retried: it has not failed, or the run is busy or over"
+        case .missingInput(let name): return "'\(name)' needs a value"
+        case .repoMismatch(let expected): return "this flow always runs on \(expected.path)"
+        case .launch(let error): return error.localizedDescription
         }
     }
 }
@@ -137,41 +143,82 @@ public actor RunEngine {
     /// The current state of a run.
     public func run(_ id: RunID) -> Run? { runs[id] }
 
-    /// Starts a run of `flow` in `repo` and returns immediately; execution continues in the background.
-    public func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
+    /// Starts a run of `flow` and returns immediately; execution continues in the background.
+    /// Fields with no value fall back to their default, then fail with `missingInput`.
+    public func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID {
+        let fields: [LaunchField]
+        do { fields = try flow.launchFields(location: location) } catch { throw RunEngineError.launch(error) }
         let plan: FlowPlan
-        do { plan = try flow.validate() } catch { throw RunEngineError.invalid(error) }
+        do { plan = try flow.validate() } catch { throw RunEngineError.launch(.invalid(error)) }
         if let fan = plan.fanOut, case .prompt(let c)? = flow.node(fan)?.kind, c.candidates.count > 26 {
             throw RunEngineError.tooManyCandidates(c.candidates.count)
         }
-        let inputNodes = flow.nodes.compactMap { node -> (Node, FlowInputConfig)? in
-            if case .flowInput(let c) = node.kind { return (node, c) }
-            return nil
+
+        guard case .repo(let repoConfig)? = flow.repoNodes.first?.kind else { throw RunEngineError.launch(.noRepoNode) }
+        let repoPath: String
+        switch repoConfig.mode {
+        case .thisRepo:
+            guard case .repo(let root, _) = location else { throw RunEngineError.launch(.thisRepoOutsideRepo) }
+            repoPath = root.path
+        case .fixed(let path):
+            repoPath = path
+        case .exposed(let d):
+            guard let chosen = values["repo"] ?? d else { throw RunEngineError.missingInput("repo") }
+            repoPath = chosen
         }
-        guard inputNodes.count <= 1 else { throw RunEngineError.multipleFlowInputs }
+        let repo = URL(fileURLWithPath: repoPath)
+        func resolved(_ path: String) -> String {
+            URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
+        }
+        if case .exposed = repoConfig.mode {} else if let given = values["repo"], resolved(given) != resolved(repoPath) {
+            throw RunEngineError.repoMismatch(expected: repo)
+        }
+
+        var inputs: [String: String] = [:]
+        for field in fields {
+            guard let value = values[field.name] ?? field.defaultValue else { throw RunEngineError.missingInput(field.name) }
+            inputs[field.name] = value
+        }
 
         let base = try await git.currentBranch(repo: repo)
         guard base != "HEAD" else { throw RunEngineError.detachedHead }
 
         var issue: Issue?
         var title = flow.name
-        var inputs: [String: String] = [:]
-        var firstNode: (NodeKey, NodeRun)?
-        if let (node, config) = inputNodes.first {
-            inputs[config.name] = input
+        var firstNodes: [(NodeKey, NodeRun)] = []
+        var isFirst = true
+        for id in plan.order {
+            guard let node = flow.node(id), case .flowInput(let config) = node.kind else { continue }
+            let input: String
+            switch config.binding {
+            case .fixed(let v):
+                input = v
+                inputs[config.name] = v
+            case .exposed:
+                input = inputs[config.name] ?? ""
+            }
             let output: String
+            let fetched: Issue?
             switch config.source {
             case .githubIssue:
-                let fetched = try await issues.fetch(input, repo: repo)
-                issue = fetched
-                title = "#\(fetched.number) \(fetched.title)"
-                output = fetched.promptText
+                let f = try await issues.fetch(input, repo: repo)
+                fetched = f
+                output = f.promptText
             case .text:
-                title = String(input.prefix(60))
+                fetched = nil
                 output = input
             }
+            if isFirst {
+                isFirst = false
+                if let fetched {
+                    issue = fetched
+                    title = "#\(fetched.number) \(fetched.title)"
+                } else {
+                    title = String(input.prefix(60))
+                }
+            }
             let now = Date()
-            firstNode = (NodeKey(node: node.id), NodeRun(state: .succeeded, output: output, startedAt: now, endedAt: now))
+            firstNodes.append((NodeKey(node: node.id), NodeRun(state: .succeeded, output: output, startedAt: now, endedAt: now)))
         }
 
         let branch = BranchNaming.runBranch(
@@ -185,7 +232,7 @@ public actor RunEngine {
 
         var run = Run(id: id, flow: flow, title: title, repo: repo, baseBranch: base, branch: branch,
                       worktree: worktree, inputs: inputs)
-        if let (key, node) = firstNode { run.nodes[key] = node }
+        for (key, node) in firstNodes { run.nodes[key] = node }
         runs[id] = run
         persist(run)
         requestPass(id)

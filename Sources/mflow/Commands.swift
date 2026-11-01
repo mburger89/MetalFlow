@@ -7,7 +7,8 @@ usage: mflow <command> [options]
 
 commands:
   init-flow [--repo DIR]                          write .flows/fix-issue.flow (refuses to overwrite)
-  launch <issue> [--repo DIR] [--flow FILE]       start a run for a GitHub issue and follow it
+  launch [VALUE] [--flow FILE|NAME] [--repo DIR] [--set name=value]...
+                                                  start a run and follow it
   list                                            id  status  title, newest first ("running in another mflow" if locked)
   show <id>                                       nodes, needs-you items, lanes, recommendation
   answer <id> <nodeKey> [--] <reply...> [--allow Tool]
@@ -22,8 +23,12 @@ stay alive until the run settles (needs you, completed, failed or cancelled).
 Press Ctrl-C (or send SIGTERM/SIGHUP) to cancel a running run (exit 130). pick, discard and branch
 ignore these signals until they finish.
 
---repo defaults to the git top-level of the current directory; --flow defaults to
-<repo>/.flows/fix-issue.flow. Set METALFLOW_HOME to use another run store.
+launch: VALUE fills the flow's first input (not the repo); --set name=value fills any input by name and
+can be repeated. --flow takes a flow file, or a flow name (case-insensitive) from the built-in, library and
+known-repo flows. Without --flow, <repo>/.flows/fix-issue.flow is used if it exists, else the built-in flow.
+--repo fills a flow whose repo is asked at launch; with no --repo the git top-level of the current directory is
+used. A flow bound to one repo (this repo or fixed) refuses a different --repo ("this flow always runs on <path>").
+--repo defaults to the git top-level of the current directory. Set METALFLOW_HOME to use another run store.
 Exit codes: 0 ok / needs you / completed / merged, 1 failed / cancelled / not merged, 64 usage error.
 """
 
@@ -35,9 +40,10 @@ struct Arguments {
     var repo: String?
     var flow: String?
     var allow: [String] = []
+    var sets: [(String, String)] = []
 }
 
-/// Splits `--repo`, `--flow` and repeatable `--allow` from positionals; they may appear anywhere.
+/// Splits `--repo`, `--flow` and repeatable `--set` and `--allow` from positionals; they may appear anywhere.
 func parseArguments(_ args: [String]) throws -> Arguments {
     var out = Arguments()
     var i = 0
@@ -48,10 +54,18 @@ func parseArguments(_ args: [String]) throws -> Arguments {
             break
         }
         switch a {
-        case "--repo", "--flow", "--allow":
+        case "--repo", "--flow", "--allow", "--set":
             guard i + 1 < args.count else { throw UsageError(message: "\(a) needs a value") }
             let v = args[i + 1]
-            if a == "--repo" { out.repo = v } else if a == "--flow" { out.flow = v } else { out.allow.append(v) }
+            switch a {
+            case "--repo": out.repo = v
+            case "--flow": out.flow = v
+            case "--set":
+                do { out.sets.append(try LaunchArguments.parseSet(v)) } catch {
+                    throw UsageError(message: "expected --set name=value, got '\(v)'")
+                }
+            default: out.allow.append(v)
+            }
             i += 2
         default:
             if a.hasPrefix("--") { throw UsageError(message: "unknown option \(a)") }
@@ -153,6 +167,12 @@ func resolveRepo(_ option: String?, runner: any CommandRunner) async throws -> U
         executable: "git", arguments: ["rev-parse", "--show-toplevel"], workingDirectory: dir))
     guard result.succeeded else { throw CommandFailure(message: "\(dir.path) is not inside a git repository") }
     return URL(fileURLWithPath: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+}
+
+func loadFlow(_ url: URL) throws -> Flow {
+    do { return try FlowFile.load(from: url) } catch {
+        throw CommandFailure(message: "cannot load flow \(url.path): \(error.localizedDescription)")
+    }
 }
 
 func storeRoot() -> URL {

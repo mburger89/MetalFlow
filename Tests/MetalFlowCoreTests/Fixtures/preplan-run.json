@@ -1,0 +1,234 @@
+{
+  "baseBranch": "main",
+  "branch": "flow/7-crash-on-launch",
+  "createdAt": "2026-10-31T18:30:50Z",
+  "flow": {
+    "name": "Fix GitHub issue",
+    "nodes": [
+      {
+        "id": "issue",
+        "kind": {
+          "flowInput": {
+            "_0": {
+              "name": "issue",
+              "source": {
+                "githubIssue": {}
+              }
+            }
+          }
+        },
+        "position": {
+          "x": 24,
+          "y": 60
+        },
+        "title": "Issue"
+      },
+      {
+        "id": "repo",
+        "kind": {
+          "repo": {}
+        },
+        "position": {
+          "x": 24,
+          "y": 300
+        },
+        "title": "Repo"
+      },
+      {
+        "id": "plan",
+        "kind": {
+          "prompt": {
+            "_0": {
+              "allowedTools": [
+                "Read",
+                "Grep",
+                "Glob",
+                "Bash(git ls-files:*)",
+                "Bash(git log:*)",
+                "Bash(git diff:*)",
+                "Bash(git show:*)",
+                "Bash(git status:*)"
+              ],
+              "candidates": [],
+              "model": "opus",
+              "prompt": "Read this GitHub issue and the code in this repository ({repo}), then write a short numbered plan to fix it. Do not edit files.\n\nIssue:\n{issue}"
+            }
+          }
+        },
+        "position": {
+          "x": 264,
+          "y": 140
+        },
+        "title": "Plan"
+      },
+      {
+        "id": "implement",
+        "kind": {
+          "prompt": {
+            "_0": {
+              "allowedTools": [
+                "Read",
+                "Edit",
+                "Write",
+                "Grep",
+                "Glob",
+                "Bash(swift build:*)",
+                "Bash(swift test:*)",
+                "Bash(git ls-files:*)",
+                "Bash(git log:*)",
+                "Bash(git diff:*)",
+                "Bash(git show:*)",
+                "Bash(git status:*)"
+              ],
+              "candidates": [
+                "sonnet",
+                "opus",
+                "haiku"
+              ],
+              "model": "sonnet",
+              "prompt": "Fix this GitHub issue by following the plan. Keep the public API unchanged, add a test that fails before your change, and stop when swift test passes.\n\nIssue:\n{issue}\n\nPlan:\n{plan}"
+            }
+          }
+        },
+        "position": {
+          "x": 504,
+          "y": 185
+        },
+        "title": "Implement"
+      },
+      {
+        "id": "gate",
+        "kind": {
+          "gate": {
+            "_0": {
+              "command": "test -f ok.txt"
+            }
+          }
+        },
+        "position": {
+          "x": 744,
+          "y": 185
+        },
+        "title": "swift test"
+      },
+      {
+        "id": "judge",
+        "kind": {
+          "judge": {
+            "_0": {
+              "allowedTools": [
+                "Read"
+              ],
+              "candidates": [],
+              "model": "opus",
+              "prompt": "You are judging candidate fixes for this issue. Prefer candidates whose tests pass, then the smallest correct diff. Explain briefly, then end with a final line `RECOMMEND: <lane>`.\n\nIssue:\n{issue}\n\nCandidates:\n{candidates}"
+            }
+          }
+        },
+        "position": {
+          "x": 984,
+          "y": 90
+        },
+        "title": "Recommend"
+      },
+      {
+        "id": "pick",
+        "kind": {
+          "pick": {}
+        },
+        "position": {
+          "x": 984,
+          "y": 330
+        },
+        "title": "Pick & merge"
+      }
+    ],
+    "wires": [
+      {
+        "from": "issue",
+        "input": "issue",
+        "to": "plan"
+      },
+      {
+        "from": "repo",
+        "input": "repo",
+        "to": "plan"
+      },
+      {
+        "from": "plan",
+        "input": "plan",
+        "to": "implement"
+      },
+      {
+        "from": "issue",
+        "input": "issue",
+        "to": "implement"
+      },
+      {
+        "from": "implement",
+        "input": "code",
+        "to": "gate"
+      },
+      {
+        "from": "gate",
+        "input": "results",
+        "to": "judge"
+      },
+      {
+        "from": "issue",
+        "input": "issue",
+        "to": "judge"
+      },
+      {
+        "from": "judge",
+        "input": "recommendation",
+        "to": "pick"
+      }
+    ]
+  },
+  "id": "__ID__",
+  "inputs": {
+    "issue": "7"
+  },
+  "keptBranches": [],
+  "lanes": [],
+  "nodes": {
+    "issue": {
+      "costUSD": 0,
+      "endedAt": "2026-10-31T18:30:50Z",
+      "extraAllowedTools": [],
+      "log": [],
+      "output": "#7 Crash on launch\n\nBoom",
+      "startedAt": "2026-10-31T18:30:50Z",
+      "state": {
+        "succeeded": {}
+      }
+    },
+    "plan": {
+      "costUSD": 0,
+      "extraAllowedTools": [],
+      "log": [],
+      "state": {
+        "interrupted": {}
+      }
+    },
+    "repo": {
+      "costUSD": 0,
+      "endedAt": "2026-10-31T18:30:50Z",
+      "extraAllowedTools": [],
+      "log": [],
+      "output": "__REPO__",
+      "startedAt": "2026-10-31T18:30:50Z",
+      "state": {
+        "succeeded": {}
+      }
+    }
+  },
+  "repo": "__REPO_URL__",
+  "revision": 4,
+  "status": {
+    "needsYou": {}
+  },
+  "title": "#7 Crash on launch",
+  "worktree": "__WORKTREE_URL__"
+}

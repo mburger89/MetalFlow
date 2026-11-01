@@ -8,7 +8,7 @@ public protocol EngineClient: Sendable {
     /// Loads persisted runs.
     func restore() async throws -> [Run]
     /// Starts a run of `flow` in `repo`.
-    func launch(flow: Flow, repo: URL, input: String) async throws -> RunID
+    func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID
     /// Answers a node that asked a question, optionally allowing more tools.
     func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws
     /// Resumes a run that was cut short.
@@ -33,8 +33,14 @@ public protocol EngineClient: Sendable {
     func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws
     /// Repositories runs were launched in.
     func knownRepos() -> [URL]
+    /// Remembers `url` as a known repo, so it is listed on the next start.
+    func addKnownRepo(_ url: URL) async throws
     /// The `.flow` files of a repository.
     func flows(in repo: URL) -> [URL]
+    /// Every flow the app can open: built-ins, the library, then each known repo's `.flows`.
+    func flowCatalog() -> [FlowEntry]
+    /// Where library flows live.
+    var libraryDirectory: URL { get }
     /// Whether `url` is the top level of a git repository (it has a `.git` entry).
     func isGitRepo(_ url: URL) async -> Bool
     /// Loads a flow file.
@@ -93,8 +99,8 @@ public struct LiveEngineClient: EngineClient {
     }
 
     public func restore() async throws -> [Run] { try await engine.value.restore() }
-    public func launch(flow: Flow, repo: URL, input: String) async throws -> RunID {
-        try await engine.value.launch(flow: flow, repo: repo, input: input)
+    public func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID {
+        try await engine.value.launch(flow: flow, location: location, values: values)
     }
     public func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
         try await engine.value.answer(id, node: node, reply: reply, allowTools: allowTools)
@@ -112,7 +118,13 @@ public struct LiveEngineClient: EngineClient {
         try await engine.value.branchFromHere(id, lane: lane, name: name)
     }
     public func knownRepos() -> [URL] { store.knownRepos() }
+    public func addKnownRepo(_ url: URL) async throws {
+        let store = store
+        try await Task.detached { try store.addKnownRepo(url) }.value
+    }
     public func flows(in repo: URL) -> [URL] { RunEngine.flows(in: repo) }
+    public func flowCatalog() -> [FlowEntry] { FlowCatalog.entries(library: store.flowsDirectory, repos: store.knownRepos()) }
+    public var libraryDirectory: URL { store.flowsDirectory }
     public func isGitRepo(_ url: URL) async -> Bool {
         FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
     }

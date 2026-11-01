@@ -43,6 +43,9 @@ import Testing
             return flow
         }
 
+        /// A location inside the harness repo, for flows whose Repo node is "This repo".
+        var repoLocation: FlowLocation { .repo(root: repo.url, file: repo.url.appendingPathComponent(".flows/test.flow")) }
+
         func settled(_ id: RunID) async -> Run {
             for await run in engine.updates where run.id == id && run.status != .running { return run }
             fatalError("updates ended")
@@ -51,7 +54,7 @@ import Testing
 
     @Test func fixIssueRunsToPickWinner() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.status == .needsYou)
         #expect(run.title == "#7 Crash on launch")
@@ -70,7 +73,7 @@ import Testing
         try h.repo.write("stale.txt", "stale\n")
         try h.repo.commit("unrelated stale commit")
         try h.repo.git(["checkout", "main"])
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.branch == "flow/7-crash-on-launch-2")
         let laneA = try #require(run.lanes.first { $0.id == "a" })
@@ -81,7 +84,7 @@ import Testing
 
     @Test func placeholdersReachPrompts() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         _ = await h.settled(id)
         let implement = h.agent.requests.filter { $0.prompt.contains("Fix this GitHub issue") }
         #expect(implement.count == 3)
@@ -97,7 +100,7 @@ import Testing
         h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "b" },
                        events: [.started(sessionID: "sb"), .finished(AgentResult(
                         sessionID: "sb", text: "hmm\nQUESTION: Keep the API?", isError: false, deniedTools: [], costUSD: 0, turns: 1))])
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.status == .needsYou)
         #expect(run.nodes[NodeKey(node: "implement", lane: "b")]?.state == .needsYou(.question("Keep the API?")))
@@ -113,7 +116,7 @@ import Testing
         h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "c" },
                        events: [.finished(AgentResult(
                         sessionID: "sc", text: "boom", isError: true, deniedTools: [], costUSD: 0, turns: 1))])
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.nodes[NodeKey(node: "implement", lane: "c")]?.state == .failed("boom"))
         #expect(run.nodes[NodeKey(node: "judge")]?.state == .succeeded)
@@ -126,7 +129,7 @@ import Testing
         let (hold, holdCont) = AsyncStream<Void>.makeStream()
         defer { holdCont.finish() }
         let h = try Harness(planHold: hold)
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         for await run in h.engine.updates where run.id == id && run.nodes[NodeKey(node: "plan")]?.state == .running { break }
         await h.engine.cancel(id)
         let run = await h.settled(id)
@@ -141,7 +144,7 @@ import Testing
 
     @Test func cancelOnSettledRunIsNoOp() async throws {
         let h = try Harness()
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.status == .needsYou)
         await h.engine.cancel(id)
@@ -162,12 +165,13 @@ import Testing
         h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "c" },
                        events: [.finished(AgentResult(sessionID: "c", text: "boom", isError: true, deniedTools: [], costUSD: 0, turns: 1))])
         let flow = Flow(name: "nopick", nodes: [
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .exposed(default: nil))), position: Point(x: 0, y: 1)),
             Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
                 model: "sonnet", prompt: "Fix this GitHub issue", candidates: ["a", "b", "c"],
                 allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0)),
             Node(id: "gate", title: "Gate", kind: .gate(ShellConfig(command: "test -f ok.txt")), position: Point(x: 1, y: 0)),
         ], wires: [Wire(from: "implement", to: "gate", input: "code")])
-        let id = try await h.engine.launch(flow: flow, repo: h.repo.url, input: "")
+        let id = try await h.engine.launch(flow: flow, location: .builtin, values: ["issue": "", "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.status == .completed)
         #expect(run.nodes[NodeKey(node: "implement", lane: "c")]?.state == .failed("boom"))
@@ -176,12 +180,13 @@ import Testing
     @Test func tooManyCandidatesRejectedAtLaunch() async throws {
         let h = try Harness()
         let flow = Flow(name: "many", nodes: [
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .exposed(default: nil))), position: Point(x: 0, y: 1)),
             Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
                 model: "sonnet", prompt: "x", candidates: (0..<27).map { "m\($0)" },
                 allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0)),
         ], wires: [])
         await #expect(throws: RunEngineError.tooManyCandidates(27)) {
-            _ = try await h.engine.launch(flow: flow, repo: h.repo.url, input: "")
+            _ = try await h.engine.launch(flow: flow, location: .builtin, values: ["issue": "", "repo": h.repo.url.path])
         }
         #expect(try h.repo.git(["worktree", "list"]).split(separator: "\n").count == 1)
     }
@@ -189,13 +194,13 @@ import Testing
     @Test func flowWithoutPickCompletes() async throws {
         let h = try Harness()
         let flow = Flow(name: "simple", nodes: [
-            Node(id: "repo", title: "Repo", kind: .repo, position: Point(x: 0, y: 0)),
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 0)),
             Node(id: "plan", title: "Plan", kind: .prompt(PromptConfig(
                 model: "opus", prompt: "Write a short numbered plan for {repo}", candidates: [],
                 allowedTools: [], maxTurns: nil)), position: Point(x: 1, y: 0)),
             Node(id: "show", title: "Show", kind: .shell(ShellConfig(command: "echo {plan}")), position: Point(x: 2, y: 0)),
         ], wires: [Wire(from: "repo", to: "plan", input: "repo"), Wire(from: "plan", to: "show", input: "plan")])
-        let id = try await h.engine.launch(flow: flow, repo: h.repo.url, input: "")
+        let id = try await h.engine.launch(flow: flow, location: h.repoLocation, values: ["issue": "", "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.status == .completed)
         #expect(run.title == "simple")
@@ -208,7 +213,7 @@ import Testing
             Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
                 model: "sonnet", prompt: "Fix this GitHub issue", candidates: ["sonnet", "opus"],
                 allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0)),
-            Node(id: "repo", title: "Repo", kind: .repo, position: Point(x: 0, y: 1)),
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 1)),
             Node(id: "setup", title: "Setup", kind: .shell(ShellConfig(command: "echo SETUPOUT")), position: Point(x: 1, y: 1)),
             Node(id: "gate", title: "Gate", kind: .gate(ShellConfig(command: "echo {setup}; test -f ok.txt")), position: Point(x: 2, y: 0)),
         ], wires: [
@@ -216,7 +221,7 @@ import Testing
             Wire(from: "implement", to: "gate", input: "code"),
             Wire(from: "setup", to: "gate", input: "setup"),
         ])
-        let id = try await h.engine.launch(flow: flow, repo: h.repo.url, input: "")
+        let id = try await h.engine.launch(flow: flow, location: h.repoLocation, values: ["issue": "", "repo": h.repo.url.path])
         let run = await h.settled(id)
         #expect(run.status == .completed)
         let out = run.nodes[NodeKey(node: "gate", lane: "a")]?.output ?? ""
@@ -234,7 +239,7 @@ import Testing
                            hold: hold, events: [.finished(AgentResult(
                             sessionID: lane, text: "done", isError: false, deniedTools: [], costUSD: 0, turns: 1))])
         }
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         func started() -> Int { h.agent.requests.filter { $0.prompt.contains("Fix this GitHub issue") }.count }
         await waitUntil("the first lane to start") { started() >= 1 }
         for _ in 0..<200 { await Task.yield() }
@@ -257,7 +262,7 @@ import Testing
     @Test func missingExecutableErrorIsReadable() async throws {
         let h = try Harness()
         h.agent.script({ $0.prompt.contains("short numbered plan") }, throwing: CommandError.executableNotFound("claude"))
-        let id = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         let run = await h.settled(id)
         guard case .failed(let message)? = run.nodes[NodeKey(node: "plan")]?.state else {
             Issue.record("plan did not fail"); return
@@ -271,7 +276,7 @@ import Testing
         let h = try Harness()
         h.gh.stub("gh", ["issue", "view"], result: CommandResult(exitCode: 1, stdout: "", stderr: "no such issue"))
         await #expect(throws: CommandError.self) {
-            _ = try await h.engine.launch(flow: h.flow(), repo: h.repo.url, input: "7")
+            _ = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
         }
         #expect(try h.repo.git(["worktree", "list"]).split(separator: "\n").count == 1)
     }

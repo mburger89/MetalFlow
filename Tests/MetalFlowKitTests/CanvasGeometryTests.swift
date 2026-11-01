@@ -42,7 +42,7 @@ import Testing
 
     @Test func nodeSizesAndPorts() {
         let g = CanvasGeometry()
-        let input = node("i", .repo, at: 10, 20)
+        let input = node("i", .repo(RepoConfig(mode: .thisRepo)), at: 10, 20)
         let step = node("p", prompt(), at: 300, 20)
         #expect(g.nodeRect(input) == CanvasRect(x: 10, y: 20, w: 200, h: 120))
         #expect(g.nodeRect(step) == CanvasRect(x: 300, y: 20, w: 200, h: 140))

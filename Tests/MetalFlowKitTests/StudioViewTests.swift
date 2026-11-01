@@ -59,7 +59,7 @@ import Testing
         for node in BuiltinFlows.fixGitHubIssue.nodes {
             #expect(try window.element(identifier: "node.\(node.id.rawValue).title").value == node.title)
         }
-        #expect(model.draft?.repo == repo)
+        #expect(model.draft?.location == .builtin)
         #expect(model.draft?.url == nil)
         #expect(model.draft?.flow.name == "Fix GitHub issue")
         #expect(try window.element(identifier: "studio.name").value == "Fix GitHub issue")
@@ -85,30 +85,37 @@ import Testing
         #expect(draft.flow.name == "Fix GitHub issue", "one typing session is one undo step")
     }
 
-    @Test func untitledFlowsGetUniqueNamesWithinTheRepo() async throws {
-        let a = URL(fileURLWithPath: "/repo/.flows/a.flow"), b = URL(fileURLWithPath: "/repo/.flows/b.flow")
-        let client = FakeEngineClient(repos: [repo], flowFiles: [a, b])
-        client.files.names = [a: "Untitled flow", b: "Untitled flow 2"]
-        let model = AppModel(client: client, notifier: NoopNotifier())
-        let window = try appWindow(model: model)
-        try await window.runUntilIdle()
-        await model.waitUntilReady()
+    func entry(_ name: String) -> FlowEntry {
+        let file = URL(fileURLWithPath: "/lib/\(name).flow")
+        return FlowEntry(id: file.path, name: name, location: .library(file: file), file: file)
+    }
+
+    @Test func untitledFlowsGetUniqueNamesAcrossTheCatalog() async throws {
+        let (model, client, _) = try await fixture()
+        client.catalog.entries += [entry("Untitled flow"), entry("Untitled flow 2")]
+        await model.refreshCatalog()
         await model.newFlow()
         #expect(model.draft?.flow.name == "Untitled flow 3")
-        client.files.names = [a: "Other"]
+        client.catalog.entries = [entry("Other")]
+        await model.refreshCatalog()
         await model.newFlow()
         #expect(model.draft?.flow.name == "Untitled flow")
-        client.files.names = [b: "Untitled flow"]
+        client.catalog.entries = [entry("Untitled flow")]
+        await model.refreshCatalog()
         await model.newFlow()
         #expect(model.draft?.flow.name == "Untitled flow 2")
     }
 
-    @Test func emptyStudioWithoutRepo() async throws {
+    @Test func studioOpensWithoutRepo() async throws {
         let (model, _, window) = try await fixture(repos: [])
         try await showStudio(model, window)
         _ = try window.element(identifier: "studio")
-        #expect(try window.element(identifier: "studio.empty").value == "Add a repo on the dashboard to open a flow.")
-        #expect(model.draft == nil)
+        #expect((try? window.element(identifier: "studio.empty")) == nil)
+        let draft = try #require(model.draft)
+        #expect(draft.location == .builtin)
+        #expect(draft.flow == BuiltinFlows.fixGitHubIssue)
+        _ = try window.element(identifier: "node.plan")
+        #expect(try window.element(identifier: "studio.file").value == "Unsaved")
     }
 
     @Test func clickSelectsNode() async throws {
@@ -235,15 +242,13 @@ import Testing
         let newest = laneRun()
         var older = makeRun("older", status: .completed, createdAt: Date(timeIntervalSince1970: 500))
         older.status = .completed
-        var otherRepo = makeRun("other repo", createdAt: Date(timeIntervalSince1970: 2_000))
-        otherRepo.repo = URL(fileURLWithPath: "/elsewhere")
         var otherFlow = makeRun("other flow", createdAt: Date(timeIntervalSince1970: 3_000))
         otherFlow.flow.name = "Something else"
-        let (model, _, window) = try await fixture(runs: [older, newest, otherRepo, otherFlow])
+        let (model, _, window) = try await fixture(runs: [older, newest, otherFlow])
         try await showStudio(model, window)
         _ = try window.element(identifier: "studio.runPicker")
         #expect(model.studioRuns.map(\.title) == ["#7 lanes", "older"])
-        // The rendered menu lists the definition and only the runs of this flow and repo, newest first.
+        // The rendered menu lists the definition and only the runs of this flow (by name), newest first.
         try window.click(window.element(identifier: "studio.runPicker"))
         let menu = try #require(window.presentedMenu)
         #expect(menu.items.map(\.title) == ["Definition only", "Showing #7 lanes", "Showing older"])
@@ -282,20 +287,13 @@ import Testing
         #expect(try window.element(identifier: "node.gate.status").value == "A ✓ B ● C ✕")
     }
 
-    @Test func studioRunClearsWhenDraftOrRepoChanges() async throws {
-        let other = URL(fileURLWithPath: "/other")
+    @Test func studioRunClearsWhenDraftChanges() async throws {
         let run = laneRun()
-        let (model, _, window) = try await fixture(runs: [run], repos: [repo, other])
+        let (model, _, window) = try await fixture(runs: [run])
         try await showStudio(model, window)
         model.studioRun = run.id
-        await model.selectRepo(other)
-        #expect(model.studioRun == nil, "retargeting the draft to another repo")
-        model.studioRun = run.id
-        model.draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, url: nil, repo: other)
+        model.draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .builtin)
         #expect(model.studioRun == nil, "replacing the draft")
-        model.studioRun = run.id
-        model.draft?.repo = repo
-        #expect(model.studioRun == nil, "changing the draft's repo")
     }
 
     @Test func fitButtonKeepsTheSelection() async throws {
@@ -314,7 +312,7 @@ import Testing
         try await window.runUntilIdle()
         #expect(model.screen == .studio)
         #expect(model.draft?.url == url)
-        #expect(model.draft?.repo == repo)
+        #expect(model.draft?.location == .of(file: url))
         _ = try window.element(identifier: "studio")
         #expect(try window.element(identifier: "studio.file").value == "fix.flow")
         // The same flow again keeps the draft and its history.
@@ -357,11 +355,13 @@ import Testing
         try await showStudio(model, window)
         let expected = dir.appendingPathComponent(".flows/fix-github-issue.flow")
         try await press("studio.save", in: window)
+        try await press("save.dest.\(dir.lastPathComponent)", in: window)
         // The new file name is chosen off the main actor.
         await waitUntil("the save") { !client.files.saved.isEmpty }
         try await window.runUntilIdle()
         #expect(client.files.saved.map(\.url) == [expected])
-        #expect(client.files.saved.first?.flow == BuiltinFlows.fixGitHubIssue)
+        #expect(client.files.saved.first?.flow == FlowCatalog.prepareForSave(
+            BuiltinFlows.fixGitHubIssue, destination: .of(file: expected), origin: nil).0)
         #expect(model.draft?.url == expected)
         #expect(model.draft?.isDirty == false)
         // Saving again writes the same file.
@@ -380,7 +380,10 @@ import Testing
         }
         let (model, client, window) = try await fixture(repos: [dir])
         try await showStudio(model, window)
-        #expect(await model.saveDraft())
+        let saving = Task { await model.saveDraft() }
+        await waitUntil("the panel") { model.isSavePanelVisible }
+        model.chooseSaveDestination(.repo(dir))
+        #expect(await saving.value)
         #expect(client.files.saved.map(\.url) == [flows.appendingPathComponent("fix-github-issue-3.flow")])
     }
 
@@ -397,7 +400,7 @@ import Testing
         #expect((try? window.element(identifier: "studio.validation")) == nil)
         let draft = try #require(model.draft)
         draft.edit("unwire") { $0.wires.removeAll() }
-        model.studioIssue = "42"
+        model.studioValues["issue"] = "42"
         try await window.runUntilIdle()
         #expect(try window.element(identifier: "studio.save").isEnabled == false)
         #expect(try window.element(identifier: "studio.launch").isEnabled == false)
@@ -408,20 +411,79 @@ import Testing
         #expect(await !client.calls.contains { $0.hasPrefix("launch") })
     }
 
-    @Test func launchFromStudioUsesDraftFlowAndRepo() async throws {
+    @Test func studioLaunchUsesFields() async throws {
         let (model, client, window) = try await fixture()
         try await showStudio(model, window)
+        // One control per launch field of the draft at its location: the issue, then the repo.
+        _ = try window.element(identifier: "studio.field.issue")
+        _ = try window.element(identifier: "studio.field.repo")
         #expect(try window.element(identifier: "studio.launch").isEnabled == false, "needs an issue")
-        model.studioIssue = "  #42 \n"
+        model.studioValues["issue"] = "  #42 \n"
         try await window.runUntilIdle()
         try await press("studio.launch", in: window)
         #expect(await client.calls.contains("launch(Fix GitHub issue, /repo, #42)"))
-        #expect(model.studioIssue == "")
+        let launched = await client.launches
+        #expect(launched.map(\.location) == [.builtin], "an unsaved draft launches at .builtin")
+        #expect(launched.first?.values == ["issue": "#42", "repo": "/repo"])
+        #expect(model.studioValues["issue"] == nil, "the typed text is cleared")
         #expect(model.isLaunching == false)
     }
 
+    func setRepoMode(_ draft: FlowDraft, _ mode: RepoMode) {
+        draft.edit("repo mode") { flow in
+            for i in flow.nodes.indices where flow.nodes[i].id == "repo" { flow.nodes[i].kind = .repo(RepoConfig(mode: mode)) }
+        }
+    }
+
+    @Test func studioShowsResolvedRepoForFixed() async throws {
+        let (model, _, window) = try await fixture()
+        try await showStudio(model, window)
+        let draft = try #require(model.draft)
+        #expect((try? window.element(identifier: "studio.repo.resolved")) == nil, "Exposed shows the repo field instead")
+        setRepoMode(draft, .fixed(path: "/somewhere/proj"))
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.repo.resolved").value == "proj")
+    }
+
+    @Test func studioShowsResolvedRepoForThisRepo() async throws {
+        let (model, _, window) = try await fixture()
+        model.open(flow: URL(fileURLWithPath: "/work/alpha/.flows/x.flow"))
+        try await window.runUntilIdle()
+        let draft = try #require(model.draft)
+        setRepoMode(draft, .thisRepo)
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.repo.resolved").value == "alpha")
+    }
+
+    @Test func studioLaunchRowFollowsTheFlowsFields() async throws {
+        let (model, client, window) = try await fixture()
+        try await showStudio(model, window)
+        let draft = try #require(model.draft)
+        draft.edit("fix the repo") { flow in
+            for i in flow.nodes.indices where flow.nodes[i].id == "repo" {
+                flow.nodes[i].kind = .repo(RepoConfig(mode: .fixed(path: "/somewhere")))
+            }
+        }
+        try await window.runUntilIdle()
+        #expect((try? window.element(identifier: "studio.field.repo")) == nil, "a fixed repo asks for nothing")
+        model.studioValues["issue"] = "7"
+        try await window.runUntilIdle()
+        try await press("studio.launch", in: window)
+        #expect(await client.launches.first?.values == ["issue": "7"])
+        // This repo is invalid for a draft that is not in a repo, and the row says why.
+        draft.edit("this repo") { flow in
+            for i in flow.nodes.indices where flow.nodes[i].id == "repo" {
+                flow.nodes[i].kind = .repo(RepoConfig(mode: .thisRepo))
+            }
+        }
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "studio.launch").isEnabled == false)
+        #expect(try window.element(identifier: "studio.validation").value
+            == draft.flow.message(for: .thisRepoOutsideRepo))
+    }
+
     @Test func draftUndoRedoAndValidation() {
-        let draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, url: nil, repo: URL(fileURLWithPath: "/r"))
+        let draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .unsaved)
         #expect(draft.plan != nil && !draft.isDirty)
         draft.edit("unwire") { $0.wires.removeAll() }
         #expect(draft.plan == nil && draft.isDirty && draft.undoStack.count == 1)

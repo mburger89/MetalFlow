@@ -12,10 +12,6 @@ public struct StudioView: Component {
         VStack(spacing: 0) {
             if let draft = model.draft {
                 StudioBody(model: model, draft: draft)
-            } else {
-                Text(verbatim: "Add a repo on the dashboard to open a flow.").foregroundColor(Palette.muted)
-                    .accessibilityIdentifier("studio.empty")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -33,8 +29,8 @@ struct StudioBody: Component {
         VStack(spacing: 0) {
             StudioToolbar(model: model, draft: draft)
             Divider()
-            if case .failure(let error) = draft.validation {
-                Text(verbatim: error.errorDescription ?? "\(error)").font(size: 12).foregroundColor(Palette.bad)
+            if let problem = Self.problem(draft, launchError: model.studioLaunch.error) {
+                Text(verbatim: problem).font(size: 12).foregroundColor(Palette.bad)
                     .accessibilityIdentifier("studio.validation")
                     .lineLimit(2)
                     .padding(insets(top: 6, right: 14, bottom: 6, left: 14))
@@ -53,7 +49,7 @@ struct StudioBody: Component {
                     }
                 }
                 .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-                InspectorView(draft: draft)
+                InspectorView(model: model, draft: draft, repos: model.repos)
                     .frame(minWidth: 240, idealWidth: 280, maxWidth: 420, maxHeight: .infinity)
             }
             .splitViewAutosaveName("studio.panes")
@@ -62,7 +58,15 @@ struct StudioBody: Component {
     }
 }
 
-/// Flow name, file, run picker, Save and Launch with issue.
+extension StudioBody {
+    /// Why the flow cannot run: it does not validate, or it validates but cannot be launched from where it is.
+    static func problem(_ draft: FlowDraft, launchError: String?) -> String? {
+        if case .failure(let error) = draft.validation { return draft.flow.message(for: error) }
+        return launchError
+    }
+}
+
+/// Flow name, file, run picker, Save, and the launch row: one control per launch field and Launch.
 struct StudioToolbar: Component {
     let model: AppModel
     let draft: FlowDraft
@@ -94,16 +98,56 @@ struct StudioToolbar: Component {
                 .keyboardShortcut("s")
                 .accessibilityIdentifier("studio.save")
                 .disabled(!valid)
-            TextField("Issue #68 or URL", text: Binding(get: { model.studioIssue }, set: { model.studioIssue = $0 }))
-                .frame(width: Pixels(180))
-                .accessibilityIdentifier("studio.issue")
-            Button("▶ Launch with issue…") { Task { await model.launchFromStudio() } }
+            let launch = model.studioLaunch
+            ForEach(launch.fields, id: \.name) { field in
+                studioControl(field)
+            }
+            if let resolved = model.studioResolvedRepo {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Repo").font(size: 12).foregroundColor(Palette.muted)
+                    Text(verbatim: resolved).foregroundColor(Palette.text)
+                        .accessibilityIdentifier("studio.repo.resolved")
+                }
+            }
+            Button("▶ Launch") { Task { await model.launchFromStudio() } }
                 .buttonStyle(.glassProminent)
                 .accessibilityIdentifier("studio.launch")
-                .disabled(!valid || model.isLaunching || AppModel.trimmed(model.studioIssue).isEmpty)
+                .disabled(!valid || !launch.canLaunch)
         }
         .padding(insets(top: 8, right: 14, bottom: 8, left: 14))
         .background(Palette.chrome)
+    }
+
+    @ElementBuilder
+    private func studioControl(_ field: LaunchField) -> some ElementGroup {
+        let binding = Binding(
+            get: { model.studioValue(field) }, set: { model.studioValues[field.name] = $0 })
+        if field.kind == .repo {
+            if model.repos.isEmpty {
+                Text("No repos yet").foregroundColor(Palette.muted).accessibilityIdentifier("studio.field.repo")
+            } else {
+                Picker("", selection: binding) {
+                    ForEach(model.repos, id: \.path) { url in
+                        Text(verbatim: url.lastPathComponent).tag(url.path)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: Pixels(140))
+                .accessibilityIdentifier("studio.field.repo")
+            }
+            studioAddButton
+        } else {
+            TextField(field.name, text: binding)
+                .onSubmit { Task { await model.launchFromStudio() } }
+                .frame(width: Pixels(160))
+                .accessibilityIdentifier("studio.field.\(field.name)")
+        }
+    }
+
+    private var studioAddButton: some Element {
+        Button("Add\u{2026}") { model.requestAddRepo(.launchField) }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("studio.field.repo.add")
     }
 
     static func fileText(_ draft: FlowDraft) -> String {
