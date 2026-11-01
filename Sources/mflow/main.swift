@@ -2,6 +2,8 @@ import Foundation
 import MetalFlowCore
 
 func run() async -> Int32 {
+    // Line-buffer stdout so a run id reaches a pipe or file as soon as it is printed.
+    setvbuf(stdout, nil, _IOLBF, 0)
     let argv = Array(CommandLine.arguments.dropFirst())
     if let message = commandLineProblem(argv) {
         stderrPrint(message)
