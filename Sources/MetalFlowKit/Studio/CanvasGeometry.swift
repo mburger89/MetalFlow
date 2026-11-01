@@ -77,7 +77,7 @@ struct CanvasGeometry: Equatable {
     func nodeRect(_ n: Node) -> CanvasRect {
         let height: Double
         switch n.kind {
-        case .flowInput, .repo, .pick: height = 120
+        case .flowInput, .repo, .pick, .openPR: height = 120
         default: height = 140
         }
         return CanvasRect(x: n.position.x, y: n.position.y, w: Self.nodeWidth, h: height)

@@ -41,6 +41,13 @@ struct DetailBody: Component {
                     Text(verbatim: model.statusText(run)).font(size: 12).foregroundColor(Palette.muted)
                         .accessibilityIdentifier("detail.status")
                     Spacer()
+                    if case .prOpened(_, let url) = run.status {
+                        Text(verbatim: url).font(Theme.mono(12)).foregroundColor(Palette.muted)
+                            .accessibilityIdentifier("run.pr.url")
+                        Button("Open PR") { model.openPullRequest(runID) }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("run.pr.open")
+                    }
                     if run.status == .running {
                         // A running run cannot be discarded; cancel it first. One another process drives is not ours.
                         if !model.runningElsewhere.contains(runID) {

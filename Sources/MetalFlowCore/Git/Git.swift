@@ -8,6 +8,8 @@ public enum MergeResult: Equatable, Sendable {
     case blockedDirty(checkout: URL)
     /// The merge conflicted in these files and was aborted.
     case conflict(files: [String])
+    /// Nothing was merged: the flow opens a pull request for the chosen candidate, and the run carries on to do so.
+    case handedToPullRequest
 }
 
 /// Failures of git operations that are not ordinary merge conflicts.
@@ -16,6 +18,8 @@ public enum GitError: Error, Equatable {
     case mergeFailed(stderr: String)
     /// A conflicted merge could not be aborted, so `checkout` is still mid-merge.
     case abortFailed(checkout: URL, stderr: String)
+    /// `git push` failed (no remote, not authenticated, network down, rejected).
+    case pushFailed(stderr: String)
 }
 
 extension GitError: LocalizedError {
@@ -26,8 +30,20 @@ extension GitError: LocalizedError {
             return "git merge failed: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
         case .abortFailed(let checkout, let stderr):
             return "git merge --abort failed; \(checkout.path) may still be mid-merge: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+        case .pushFailed(let stderr):
+            return "git push failed: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
         }
     }
+}
+
+/// How many commits of a base branch are missing from its counterpart on `origin`.
+public enum UnpublishedCommits: Equatable, Sendable {
+    /// `origin/<base>` exists and `<base>` is this many commits ahead of it (possibly 0).
+    case count(Int)
+    /// There is no `origin/<base>` to compare with.
+    case remoteBranchMissing
+    /// The comparison itself failed for another reason.
+    case unknown
 }
 
 /// Git operations used for run and candidate worktrees.
@@ -143,6 +159,24 @@ public struct Git: Sendable {
             }
         }
         return nil
+    }
+
+    /// Pushes `branch` to `origin` and makes it track the remote branch. Never forces.
+    public func push(repo: URL, branch: String) async throws {
+        let result = try await runner.run(command(repo, ["push", "-u", "origin", branch]))
+        guard result.succeeded else { throw GitError.pushFailed(stderr: result.stderr) }
+    }
+
+    /// How far `base` is ahead of `origin/<base>`, going by what is already fetched. Never throws.
+    public func unpublishedCommits(repo: URL, base: String) async -> UnpublishedCommits {
+        let list = try? await runner.run(command(repo, ["rev-list", "--count", "origin/\(base)..\(base)"]))
+        if let list, list.succeeded, let count = Int(list.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return .count(count)
+        }
+        // The count failed: either there is no origin/<base>, or something else is wrong.
+        let probe = try? await runner.run(command(repo, ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(base)"]))
+        if let probe, !probe.succeeded { return .remoteBranchMissing }
+        return .unknown
     }
 
     /// Merges `branch` into `target` with a merge commit. Uses the target's checkout when it has one,

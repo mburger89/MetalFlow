@@ -92,7 +92,14 @@ func run() async -> Int32 {
         case "pick":
             try requirePositionals(args, min: 2, max: 2, name: command)
             let id = try parseRunID(args.positionals[0])
+            let seed = await engine.run(id)
             let result = try await uninterruptible { try await engine.pick(id, lane: args.positionals[1]) }
+            if case .handedToPullRequest = result {
+                // The run carries on to open the pull request: follow it (Ctrl-C cancels), then say where it is.
+                let code = await follow(engine: engine, id: id, seed: seed)
+                if let line = pullRequestLine(await engine.run(id)) { print(line) }
+                return code
+            }
             print(mergeResultText(result))
             if case .merged = result { return 0 }
             return 1

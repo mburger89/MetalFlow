@@ -195,6 +195,8 @@ public enum RunStatus: Codable, Hashable, Sendable {
     case failed(String)
     /// Cancelled by the user.
     case cancelled
+    /// The chosen candidate's branch was pushed and a pull request opened at `url`.
+    case prOpened(LaneID, url: String)
     /// Every node finished successfully and no step is left for the user.
     case completed
 }
@@ -229,6 +231,8 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
     public var lanes: [Lane]
     /// Lane recommended by the judge.
     public var recommendation: LaneID?
+    /// The candidate the user picked, when the flow opens a pull request instead of merging; nil until then.
+    public var pickedLane: LaneID?
     /// Branches created with "branch from here"; cleanup never deletes them.
     public var keptBranches: [String]
     /// Monotonic counter the engine increments on every save, so consumers can order snapshots.
@@ -239,7 +243,8 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         id: RunID = RunID(), flow: Flow, title: String, repo: URL, baseBranch: String,
         branch: String, worktree: URL, inputs: [String: String] = [:], createdAt: Date = Date(),
         status: RunStatus = .running, nodes: [NodeKey: NodeRun] = [:], lanes: [Lane] = [],
-        recommendation: LaneID? = nil, keptBranches: [String] = [], revision: Int = 0, flowFile: URL? = nil
+        recommendation: LaneID? = nil, keptBranches: [String] = [], revision: Int = 0, flowFile: URL? = nil,
+        pickedLane: LaneID? = nil
     ) {
         self.id = id
         self.flow = flow
@@ -257,6 +262,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         self.recommendation = recommendation
         self.keptBranches = keptBranches
         self.revision = revision
+        self.pickedLane = pickedLane
     }
 
     /// The run as it should appear when nothing is driving it: running nodes become interrupted and a running
@@ -318,7 +324,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, flow, title, repo, baseBranch, branch, worktree, inputs, createdAt
-        case status, nodes, lanes, recommendation, keptBranches, revision, flowFile
+        case status, nodes, lanes, recommendation, keptBranches, revision, flowFile, pickedLane
     }
 
     /// Decodes a run; `nodes` is a JSON object keyed by `NodeKey.description`.
@@ -338,6 +344,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         recommendation = try c.decodeIfPresent(LaneID.self, forKey: .recommendation)
         keptBranches = try c.decodeIfPresent([String].self, forKey: .keptBranches) ?? []
         revision = try c.decodeIfPresent(Int.self, forKey: .revision) ?? 0
+        pickedLane = try c.decodeIfPresent(LaneID.self, forKey: .pickedLane)
         flowFile = try c.decodeIfPresent(URL.self, forKey: .flowFile)
         let raw = try c.decode([String: NodeRun].self, forKey: .nodes)
         var parsed: [NodeKey: NodeRun] = [:]
@@ -369,6 +376,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         try c.encode(keptBranches, forKey: .keptBranches)
         try c.encode(revision, forKey: .revision)
         try c.encodeIfPresent(flowFile, forKey: .flowFile)
+        try c.encodeIfPresent(pickedLane, forKey: .pickedLane)
         var raw: [String: NodeRun] = [:]
         for (k, v) in nodes { raw[k.description] = v }
         try c.encode(raw, forKey: .nodes)

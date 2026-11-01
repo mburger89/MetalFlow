@@ -99,6 +99,7 @@ func deriveActivity(old: Run?, new: Run, now: Date) -> [ActivityItem] {
     if let before = old, before.status != new.status {
         switch new.status {
         case .merged(let lane): add("merged candidate \(lane)", .ok)
+        case .prOpened(let lane, let url): add("opened a pull request for candidate \(lane): \(url)", .ok)
         case .completed: add("completed", .ok)
         case .failed(let message): add("failed: \(clipped(message))", .bad)
         case .cancelled: add("cancelled", .info)

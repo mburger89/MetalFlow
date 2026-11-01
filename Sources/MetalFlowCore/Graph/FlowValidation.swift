@@ -22,6 +22,10 @@ public enum FlowError: Error, Equatable, Sendable {
     case unboundInput(NodeID, String)
     /// A placeholder has both a wire and a binding.
     case inputBoundTwice(NodeID, String)
+    /// An Open PR node has no You pick node upstream of it.
+    case openPRWithoutPick(NodeID)
+    /// The flow has more than one Open PR node; this is the second.
+    case multipleOpenPRs(NodeID)
 }
 
 extension FlowError: LocalizedError {
@@ -38,6 +42,8 @@ extension FlowError: LocalizedError {
         case .judgeWithoutFanOut(let id): return "judge '\(id.rawValue)' has no fan-out upstream"
         case .unboundInput(let id, let name): return FlowError.unboundMessage(title: id.rawValue, name: name)
         case .inputBoundTwice(let id, let name): return "node '\(id.rawValue)' has both a wire and a value for {\(name)}"
+        case .openPRWithoutPick: return "Open PR needs a You pick before it."
+        case .multipleOpenPRs: return "A flow can have only one Open PR node."
         }
     }
 }
@@ -79,7 +85,7 @@ extension Node {
     }
     fileprivate var isJudgeOrPick: Bool {
         switch kind {
-        case .judge, .pick: return true
+        case .judge, .pick, .openPR: return true
         default: return false
         }
     }
@@ -120,6 +126,17 @@ extension Flow {
             if let n = node(id), case .judge = n.kind, !downstreamOfFan.contains(id) {
                 throw .judgeWithoutFanOut(id)
             }
+        }
+
+        // An Open PR publishes a candidate, so it needs the user's pick before it, however many wires away.
+        let openPRs = order.filter { if case .openPR? = node($0)?.kind { true } else { false } }
+        if openPRs.count > 1 { throw .multipleOpenPRs(openPRs[1]) }
+        var parents: [NodeID: [NodeID]] = [:]
+        for w in wires { parents[w.to, default: []].append(w.from) }
+        for open in openPRs {
+            var upstream = Set<NodeID>(), stack = parents[open] ?? []
+            while let n = stack.popLast(), upstream.insert(n).inserted { stack += parents[n] ?? [] }
+            if !upstream.contains(where: { node($0)?.kind == .pick }) { throw .openPRWithoutPick(open) }
         }
 
         for id in order {

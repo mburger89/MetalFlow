@@ -1,3 +1,4 @@
+import AppKit
 import MetalFlowKit
 import MetalUI
 
@@ -21,5 +22,7 @@ model.activateApp = {
     app.activate()
     window.makeKeyAndOrderFront()
 }
+// "Open PR" on a finished run's detail opens the pull request in the user's browser.
+model.openURL = { NSWorkspace.shared.open($0) }
 Task { await notifier.requestAuthorization() }
 app.run()

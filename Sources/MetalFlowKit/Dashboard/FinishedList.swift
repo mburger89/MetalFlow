@@ -63,6 +63,7 @@ struct FinishedRow: Component {
     static func result(_ status: RunStatus) -> (String, Color) {
         switch status {
         case .merged(let lane): ("Merged \(lane.uppercased())", Palette.ok)
+        case .prOpened(let lane, _): ("PR opened (\(lane.uppercased()))", Palette.ok)
         case .discarded: ("Discarded", Palette.muted)
         case .completed: ("Completed", Palette.ok)
         case .failed: ("Failed", Palette.bad)

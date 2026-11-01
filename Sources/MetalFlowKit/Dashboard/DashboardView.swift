@@ -105,6 +105,7 @@ struct WorkingChip: Component {
         case .running: NodeStateStyle(.running).label
         case .needsYou: NodeStateStyle.needsYouLabel
         case .merged(let lane): "Merged \(lane.uppercased())"
+        case .prOpened(let lane, _): "PR opened (\(lane.uppercased()))"
         case .discarded: "Discarded"
         case .failed: NodeStateStyle(.failed("")).label
         case .cancelled: NodeStateStyle(.cancelled).label

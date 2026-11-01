@@ -18,7 +18,7 @@ public enum RunEngineError: Error, Equatable {
     case notDiscardable
     /// The run has no lane with this ID.
     case unknownLane(LaneID)
-    /// The run is already merged or discarded, so no branch can be made from it.
+    /// The run is already merged, discarded or has a pull request, so no branch can be made from it.
     case notBranchable
     /// Nothing is interrupted and nothing is waiting, so there is nothing to resume.
     case nothingToResume
@@ -49,7 +49,7 @@ extension RunEngineError: LocalizedError {
         case .notPickable: return "the run is not waiting for a winner, the lane does not exist, or a pick is in progress"
         case .notDiscardable: return "the run is still running; cancel it first"
         case .unknownLane(let lane): return "the run has no lane '\(lane)'"
-        case .notBranchable: return "the run is already merged or discarded"
+        case .notBranchable: return "the run is already merged, discarded or has a pull request"
         case .nothingToResume: return "nothing to resume: no node is interrupted or waiting"
         case .runBusy(let id): return "run \(id.rawValue) is busy: running in another mflow, or still stopping"
         case .invalidBranchName(let name): return "'\(name)' is not a valid branch name"
@@ -74,6 +74,7 @@ public actor RunEngine {
     let runner: any CommandRunner
     let agent: any AgentSession
     let issues: GitHubIssues
+    let pullRequests: GitHubPullRequests
     let git: Git
     let limiter: SessionLimiter
     let shellEnvironment: [String: String]
@@ -98,6 +99,7 @@ public actor RunEngine {
         self.runner = runner
         self.agent = agent
         self.issues = issues
+        self.pullRequests = GitHubPullRequests(runner: runner)
         self.git = Git(runner: runner)
         self.limiter = SessionLimiter(max: maxSessions)
         self.shellEnvironment = shellEnvironment
@@ -106,14 +108,14 @@ public actor RunEngine {
 
     /// Loads persisted runs into memory and returns them; does not start any run.
     ///
-    /// A merged or discarded run whose worktree folder still exists (the process died during cleanup) has its
+    /// A merged, discarded or pull-request run whose worktree folder still exists (the process died during cleanup) has its
     /// cleanup finished in the background; that work is not cancellable.
     public func restore() throws -> [Run] {
         let loaded = try store.loadAll()
         for run in loaded {
             runs[run.id] = run
             switch run.status {
-            case .merged, .discarded:
+            case .merged, .discarded, .prOpened:
                 let directory = store.worktreesDirectory.appendingPathComponent(run.id.rawValue)
                 if FileManager.default.fileExists(atPath: directory.path) {
                     let id = run.id
@@ -367,11 +369,11 @@ public actor RunEngine {
         continuation.yield(run)
     }
 
-    /// Applies a change and saves it. Ignored once the run is cancelled, merged or discarded, so work finishing late cannot undo it.
+    /// Applies a change and saves it. Ignored once the run is cancelled, merged, discarded or has a pull request, so work finishing late cannot undo it.
     func mutate(_ id: RunID, _ body: (inout Run) -> Void) {
         guard var run = runs[id], !suspended.contains(id) else { return }
         switch run.status {
-        case .cancelled, .merged, .discarded: return
+        case .cancelled, .merged, .discarded, .prOpened: return
         default: break
         }
         body(&run)

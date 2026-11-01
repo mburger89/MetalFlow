@@ -66,7 +66,7 @@ struct CandidateCard: Component {
             }
             if let outcome {
                 Text(verbatim: outcome.message).font(size: 12)
-                    .foregroundColor(outcome == .merged ? Palette.ok : Palette.warn)
+                    .foregroundColor(outcome == .merged ? Palette.ok : outcome == .openingPullRequest ? Palette.muted : Palette.warn)
                     .accessibilityIdentifier("\(id).result")
             }
         }
@@ -82,13 +82,14 @@ struct CandidateCard: Component {
     private func pickButton(canPick: Bool, recommended: Bool, id: String) -> some ElementGroup {
         let runID = run.id
         let laneID = lane.id
+        let title = run.flow.hasOpenPR ? "Pick & open PR" : "Pick & merge"
         if recommended {
-            Button("Pick & merge") { Task { await model.pick(runID, lane: laneID) } }
+            Button(title) { Task { await model.pick(runID, lane: laneID) } }
                 .buttonStyle(.glassProminent)
                 .accessibilityIdentifier("\(id).pick")
                 .disabled(!canPick)
         } else {
-            Button("Pick & merge") { Task { await model.pick(runID, lane: laneID) } }
+            Button(title) { Task { await model.pick(runID, lane: laneID) } }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("\(id).pick")
                 .disabled(!canPick)

@@ -8,6 +8,7 @@ import Testing
         let root: URL
         let agent = FakeAgent()
         let gh = FakeCommandRunner()
+        let hooks = CommandHooks()
         let engine: RunEngine
         let store: RunStore
 
@@ -18,7 +19,7 @@ import Testing
             gh.stub("gh", ["issue", "view"], result: CommandResult(exitCode: 0, stdout: """
                 {"number":7,"title":"Crash on launch","body":"Boom","url":"https://x/7","labels":[]}
                 """, stderr: ""))
-            let runner = RoutingRunner(gh: gh)
+            let runner = RoutingRunner(gh: gh, hooks: hooks)
             engine = RunEngine(store: store, runner: runner, agent: agent, issues: GitHubIssues(runner: runner),
                                 maxSessions: maxSessions)
 

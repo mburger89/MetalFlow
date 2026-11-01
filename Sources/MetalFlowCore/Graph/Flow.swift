@@ -126,6 +126,22 @@ public struct ShellConfig: Codable, Hashable, Sendable {
     }
 }
 
+/// Configuration of an Open PR node.
+public struct OpenPRConfig: Codable, Hashable, Sendable {
+    /// Whether the pull request is opened as a draft.
+    public var draft: Bool
+    /// Creates a configuration; pull requests are drafts unless said otherwise.
+    public init(draft: Bool = true) { self.draft = draft }
+
+    private enum CodingKeys: String, CodingKey { case draft }
+
+    /// Decodes a configuration; a missing `draft` means a draft.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        draft = try c.decodeIfPresent(Bool.self, forKey: .draft) ?? true
+    }
+}
+
 /// What a node does.
 public enum NodeKind: Codable, Hashable, Sendable {
     case flowInput(FlowInputConfig)
@@ -135,8 +151,10 @@ public enum NodeKind: Codable, Hashable, Sendable {
     case gate(ShellConfig)
     case judge(PromptConfig)
     case pick
+    /// Pushes the picked candidate's branch and opens a GitHub pull request for it instead of merging locally.
+    case openPR(OpenPRConfig)
 
-    private enum CodingKeys: String, CodingKey { case flowInput, repo, prompt, shell, gate, judge, pick }
+    private enum CodingKeys: String, CodingKey { case flowInput, repo, prompt, shell, gate, judge, pick, openPR }
     private enum PayloadKey: String, CodingKey { case _0 }
 
     /// Decodes the synthesized shape; a `repo` without payload (written before Repo had config) means `.thisRepo`.
@@ -158,6 +176,7 @@ public enum NodeKind: Codable, Hashable, Sendable {
         case .gate: self = .gate(try payload(ShellConfig.self))
         case .judge: self = .judge(try payload(PromptConfig.self))
         case .pick: self = .pick
+        case .openPR: self = .openPR(try payload(OpenPRConfig.self))
         }
     }
 
@@ -176,6 +195,7 @@ public enum NodeKind: Codable, Hashable, Sendable {
         case .gate(let v): try put(.gate, v)
         case .judge(let v): try put(.judge, v)
         case .pick: _ = c.nestedContainer(keyedBy: PayloadKey.self, forKey: .pick)
+        case .openPR(let v): try put(.openPR, v)
         }
     }
 }
@@ -258,10 +278,14 @@ public struct Flow: Codable, Hashable, Sendable {
         case .prompt(let c): texts = [c.prompt]
         case .judge(let c): texts = [c.prompt]; exempt = ["candidates"]
         case .shell(let c), .gate(let c): texts = [c.command]
-        case .flowInput, .repo, .pick: break
+        case .flowInput, .repo, .pick, .openPR: break
         }
         var seen = Set<String>()
         return texts.flatMap { Template.placeholders(in: $0) }.filter { !exempt.contains($0) && seen.insert($0).inserted }
+    }
+    /// True when the flow has an Open PR node, so picking a candidate opens a pull request instead of merging.
+    public var hasOpenPR: Bool {
+        nodes.contains { if case .openPR = $0.kind { true } else { false } }
     }
     /// The Repo nodes of the flow.
     public var repoNodes: [Node] {

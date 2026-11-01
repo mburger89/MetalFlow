@@ -26,6 +26,8 @@ extension RunEngine {
             await runShell(id, key, config: config, plan: plan, isGate: false)
         case .gate(let config):
             await runShell(id, key, config: config, plan: plan, isGate: true)
+        case .openPR(let config):
+            await runOpenPR(id, key, config: config, plan: plan)
         case .pick:
             let lanes = runs[id]?.lanes ?? []
             let allFailed = lanes.contains { $0.gatePassed != nil } && !lanes.contains { $0.gatePassed == true }
@@ -191,6 +193,79 @@ extension RunEngine {
         guard let line = lines.last(where: { $0.hasPrefix(marker) }) else { return nil }
         let name = line.dropFirst(marker.count).trimmingCharacters(in: junk)
         return lanes.contains { $0.id == name } ? name : nil
+    }
+
+    // MARK: - Open PR
+
+    /// Pushes the picked candidate's branch and opens a pull request for it. Any failure leaves the node failed
+    /// and the run exactly as it was, so retrying the node starts over (pushing again is safe).
+    func runOpenPR(_ id: RunID, _ key: NodeKey, config: OpenPRConfig, plan: FlowPlan) async {
+        guard let run = runs[id] else { return }
+        guard let laneID = run.pickedLane, let lane = run.lanes.first(where: { $0.id == laneID }) else {
+            finish(id, key, .failed("No candidate was picked, so there is no branch to open a pull request for."))
+            return
+        }
+        func fail(_ error: Error) {
+            finish(id, key, .failed(error is CancellationError ? "interrupted" : error.localizedDescription))
+        }
+        func note(_ line: String) { updateNode(id, key) { $0.appendLog(line) } }
+
+        let base = run.baseBranch
+        switch await git.unpublishedCommits(repo: run.repo, base: base) {
+        case .count(let n) where n > 0:
+            note("\(base) has \(n) commit\(n == 1 ? "" : "s") not on origin; they will appear in this PR.")
+        case .remoteBranchMissing:
+            note("origin/\(base) was not found; commits of \(base) that are not on origin will appear in this PR.")
+        default: break
+        }
+
+        note("Pushing \(lane.branch) to origin")
+        do { try await git.push(repo: run.repo, branch: lane.branch) } catch { return fail(error) }
+
+        let tests: String
+        switch lane.gatePassed {
+        case true?: tests = "tests passed"
+        case false?: tests = "tests failed"
+        case nil: tests = "no gate"
+        }
+        var body = "Candidate \(lane.id) (\(lane.model)), \(tests), chosen in MetalFlow."
+        if let issue = Self.closedIssue(of: run, plan: plan) { body = "Closes #\(issue)\n\n" + body }
+        var title = Self.pullRequestTitle(run.title)
+        if title.isEmpty { title = run.flow.name }
+
+        note("Opening pull request")
+        let url: String
+        do {
+            url = try await pullRequests.create(
+                repo: run.repo, base: base, head: lane.branch, title: title, body: body, draft: config.draft)
+        } catch { return fail(error) }
+
+        // Unstructured, and written even if the run was cancelled meanwhile: the pull request exists now.
+        await Task {
+            guard !self.suspended.contains(id) else { return }
+            self.setDirect(id) { run in
+                run.nodes[key]?.state = .succeeded
+                run.nodes[key]?.output = url
+                run.nodes[key]?.endedAt = Date()
+                // The pushed branch stays, as "branch from here" branches do.
+                if !run.keptBranches.contains(lane.branch) { run.keptBranches.append(lane.branch) }
+                run.status = .prOpened(lane.id, url: url)
+            }
+            await self.cleanup(id)
+        }.value
+    }
+
+    /// The run's title without a leading `#N `.
+    static func pullRequestTitle(_ title: String) -> String {
+        title.replacing(/^#\d+\s+/, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The issue number the run came from, when its first flow input is a GitHub issue (the title is `#N title`).
+    static func closedIssue(of run: Run, plan: FlowPlan) -> Int? {
+        let first = plan.order.compactMap { run.flow.node($0) }.first { if case .flowInput = $0.kind { true } else { false } }
+        guard case .flowInput(let config)? = first?.kind, config.source == .githubIssue,
+              let match = run.title.firstMatch(of: /^#(\d+)\s/) else { return nil }
+        return Int(match.1)
     }
 
     // MARK: - Shell and gate nodes

@@ -76,6 +76,8 @@ extension RunEngine {
                 }
             }
             run.recommendation = nil
+            // A pick that is reset must be made again.
+            if let pickNode = pickNodeKey(run), keys.contains(pickNode) { run.pickedLane = nil }
             run.status = .running
         }
         requestPass(id)

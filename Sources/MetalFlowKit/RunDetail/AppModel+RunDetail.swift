@@ -9,6 +9,8 @@ public enum PickOutcome: Equatable, Sendable {
     case blockedDirty(URL)
     /// The merge conflicted in these files and nothing was merged.
     case conflict([String])
+    /// The flow opens a pull request: nothing was merged, and the run is pushing the branch.
+    case openingPullRequest
     /// The pick threw; the error's description.
     case failed(String)
 
@@ -19,6 +21,7 @@ public enum PickOutcome: Equatable, Sendable {
         case .blockedDirty(let url):
             "Your checkout at \(url.path) has uncommitted changes — commit or stash, then pick again."
         case .conflict(let files): "Conflicts in: \(files.joined(separator: ", ")) — nothing was merged."
+        case .openingPullRequest: "Opening pull request\u{2026}"
         case .failed(let text): text
         }
     }
@@ -41,6 +44,12 @@ extension AppModel {
     /// Whether the run waits for a winner, so the pick buttons work.
     public func canPick(_ run: Run) -> Bool {
         run.nodes.values.contains { if case .needsYou(.pickWinner) = $0.state { true } else { false } }
+    }
+
+    /// Opens the run's pull request in the browser. Does nothing for a run that has none.
+    public func openPullRequest(_ run: RunID) {
+        guard case .prOpened(_, let url)? = runs[run]?.status, let target = URL(string: url) else { return }
+        openURL(target)
     }
 
     /// Opens the lane's diff (loading it), or closes it if it is the open one. One diff is open at a time.

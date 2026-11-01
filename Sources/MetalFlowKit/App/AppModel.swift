@@ -99,6 +99,8 @@ public final class AppModel {
     public var launchFocusRequested = false
     /// Brings the window forward. Called only in response to a notification click; the app sets it.
     public var activateApp: @MainActor () -> Void = {}
+    /// Opens a URL in the user's browser. The app sets it to `NSWorkspace.shared.open`; tests record it.
+    public var openURL: @MainActor (URL) -> Void = { _ in }
     /// Answers a pending termination request; the app sets it.
     public var replyToTerminate: @MainActor (Bool) -> Void = { _ in }
     /// Runs waiting for the user, newest first. Cached: updated by `apply`.
@@ -319,6 +321,9 @@ public final class AppModel {
             if let before { remove(run.id, from: before) }
             insert(run, into: after)
         }
+        if !restoring, old != nil, case .prOpened(_, let url) = run.status, old?.status != run.status {
+            notice = Notice("Opened \(url)", kind: .info)
+        }
         if !restoring {
             if before != after {
                 notifyTransition(run, enteredNeedsYou: after == .needsYou, leftNeedsYou: before == .needsYou)
@@ -343,7 +348,7 @@ public final class AppModel {
         case .failed:
             // A failed node can be retried, so such a run waits for the user instead of being history.
             run.hasFailedNode ? .needsYou : .finished
-        case .merged, .discarded, .cancelled, .completed: .finished
+        case .merged, .prOpened, .discarded, .cancelled, .completed: .finished
         }
     }
 
@@ -490,6 +495,9 @@ public final class AppModel {
             case .merged: outcome = .merged
             case .blockedDirty(let checkout): outcome = .blockedDirty(checkout)
             case .conflict(let files): outcome = .conflict(files)
+            case .handedToPullRequest:
+                outcome = .openingPullRequest
+                notice = Notice("Opening pull request\u{2026}", kind: .info)
             }
             pickOutcomes[id, default: [:]][lane] = outcome
             if outcome == .merged, selectedRun == id { selectedRun = nil }

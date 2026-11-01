@@ -12,7 +12,7 @@ extension RunEngine {
         defer { releaseLockIfIdle(id) }
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         switch run.status {
-        case .cancelled, .merged, .discarded, .failed: throw RunEngineError.notAnswerable(node)
+        case .cancelled, .merged, .discarded, .failed, .prOpened: throw RunEngineError.notAnswerable(node)
         default: break
         }
         guard !picking.contains(id) else { throw RunEngineError.notAnswerable(node) }
@@ -59,6 +59,10 @@ extension RunEngine {
 
     /// Merges a candidate into the base branch. Only a successful merge changes the run; otherwise the
     /// result (blocked by local changes, or conflicting files) is returned for the UI to show.
+    ///
+    /// When the flow has an Open PR node nothing is merged: the choice is recorded in `Run.pickedLane`, the pick
+    /// node succeeds, the run carries on to push the branch and open the pull request, and `.handedToPullRequest`
+    /// is returned straight away. Follow the run (`waitUntilSettled`, `updates`) for the outcome.
     public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult {
         guard runs[id] != nil else { throw RunEngineError.notPickable }
         try ensureLock(id)
@@ -70,6 +74,18 @@ extension RunEngine {
               let chosen = run.lanes.first(where: { $0.id == lane }) else { throw RunEngineError.notPickable }
         picking.insert(id)
         defer { picking.remove(id) }
+        if run.flow.hasOpenPR {
+            try clearSuspension(id)
+            setDirect(id) { run in
+                run.pickedLane = lane
+                run.nodes[pickNode]?.state = .succeeded
+                run.nodes[pickNode]?.output = "chose \(lane)"
+                run.nodes[pickNode]?.endedAt = Date()
+                run.status = .running
+            }
+            requestPass(id)
+            return .handedToPullRequest
+        }
         // Unstructured so a cancelled caller cannot interrupt the status write and cleanup after a merge.
         return try await Task {
             let result = try await self.git.merge(
@@ -87,7 +103,7 @@ extension RunEngine {
         }.value
     }
 
-    private func pickNodeKey(_ run: Run) -> NodeKey? {
+    func pickNodeKey(_ run: Run) -> NodeKey? {
         run.flow.nodes.first { if case .pick = $0.kind { return true } else { return false } }
             .map { NodeKey(node: $0.id) }
     }
@@ -108,7 +124,7 @@ extension RunEngine {
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         switch run.status {
         case .needsYou, .failed, .completed, .cancelled: break
-        case .discarded, .merged: return
+        case .discarded, .merged, .prOpened: return
         case .running: throw RunEngineError.notDiscardable
         }
         guard !picking.contains(id) else { throw RunEngineError.notDiscardable }
@@ -134,7 +150,7 @@ extension RunEngine {
         }
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         switch run.status {
-        case .merged, .discarded: throw RunEngineError.notBranchable
+        case .merged, .discarded, .prOpened: throw RunEngineError.notBranchable
         default: break
         }
         guard let chosen = run.lanes.first(where: { $0.id == lane }) else { throw RunEngineError.unknownLane(lane) }

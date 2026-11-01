@@ -14,7 +14,9 @@ commands:
   answer <id> <nodeKey> [--] <reply...> [--allow Tool]
                                                   answer a paused node (-- ends options) and follow the run
   resume <id>                                     resume interrupted nodes and follow the run
-  pick <id> <lane>                                merge a candidate into the base branch
+  pick <id> <lane>                                merge a candidate into the base branch; when the flow has an Open PR
+                                                  node, push it and open a pull request instead, follow the run and
+                                                  print the pull request's URL
   discard <id>                                    throw the run away
   branch <id> <lane> <name>                       keep a candidate as a local branch
 
@@ -29,7 +31,8 @@ known-repo flows. Without --flow, <repo>/.flows/fix-issue.flow is used if it exi
 --repo fills a flow whose repo is asked at launch; with no --repo the git top-level of the current directory is
 used. A flow bound to one repo (this repo or fixed) refuses a different --repo ("this flow always runs on <path>").
 --repo defaults to the git top-level of the current directory. Set METALFLOW_HOME to use another run store.
-Exit codes: 0 ok / needs you / completed / merged, 1 failed / cancelled / not merged, 64 usage error.
+Exit codes: 0 ok / needs you / completed / merged / pull request opened, 1 failed / cancelled / not merged /
+pull request not opened, 64 usage error.
 """
 
 struct UsageError: Error { var message: String }
@@ -195,11 +198,18 @@ func statusText(_ s: RunStatus) -> String {
     case .running: "running"
     case .needsYou: "needs you"
     case .merged(let lane): "merged (\(lane))"
+    case .prOpened(let lane, let url): "PR opened (\(lane)): \(url)"
     case .discarded: "discarded"
     case .failed(let m): "failed: \(m)"
     case .cancelled: "cancelled"
     case .completed: "completed"
     }
+}
+
+/// The pull request's URL when the run opened one, else nil.
+func pullRequestLine(_ run: Run?) -> String? {
+    if case .prOpened(_, let url)? = run?.status { return url }
+    return nil
 }
 
 func gateText(_ g: Bool?) -> String {
@@ -237,6 +247,7 @@ func mergeResultText(_ r: MergeResult) -> String {
     case .merged(let c): "merged as \(c)"
     case .blockedDirty(let url): "not merged: the base branch is checked out at \(url.path) with uncommitted changes"
     case .conflict(let files): "not merged: conflicts in \(files.joined(separator: ", "))"
+    case .handedToPullRequest: "not merged: opening a pull request instead"
     }
 }
 

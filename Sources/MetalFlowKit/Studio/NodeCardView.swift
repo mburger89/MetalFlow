@@ -20,6 +20,7 @@ extension Node {
         case .gate: "GATE"
         case .judge: "JUDGE"
         case .pick: "YOU PICK"
+        case .openPR: "OPEN PR"
         }
     }
 
@@ -31,6 +32,7 @@ extension Node {
         case .shell, .gate: Color(Hsla.rgb(0x4fd1a5))
         case .judge: Palette.warn
         case .pick: Color(Hsla.rgb(0xd2a8ff))
+        case .openPR: Palette.ok
         }
     }
 
@@ -44,6 +46,7 @@ extension Node {
         case .shell(let c), .gate(let c): c.command
         case .judge(let c): c.model
         case .pick: "Merge the chosen branch back"
+        case .openPR(let c): c.draft ? "Draft pull request" : "Pull request"
         }
     }
 }
