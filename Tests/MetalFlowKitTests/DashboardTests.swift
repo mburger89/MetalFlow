@@ -232,6 +232,8 @@ import Testing
         #expect(dialog.canChooseDirectories && !dialog.canChooseFiles)
         #expect(dialog.allowedTypes.map(\.identifier) == ["public.folder"])
         #expect(model.addRepoRequest == .dashboard)
+        #expect(dialog.prompt == "Add Repository")
+        #expect(dialog.message == "Choose a git repository folder")
     }
 
     @Test func addRepoAddsChosenFolder() async throws {

@@ -26,6 +26,8 @@ public struct RootView: Component {
             guard let purpose else { return }
             Task { await model.finishAddRepo(folder, purpose: purpose) }
         }
+        .fileDialogConfirmationLabel("Add Repository")
+        .fileDialogMessage(model.addRepoRequest?.dialogMessage ?? "")
         // Escape presses the `.cancel` button below. A dismissal that presses no button lands in `set`, which hears it
         // before any button action: `alertDismissed` looks after the buttons have run.
         .alert("Save changes to this flow?", isPresented: Binding(

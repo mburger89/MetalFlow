@@ -11,6 +11,15 @@ public enum AddRepoPurpose: Equatable, Sendable {
     case saveDestination
     /// Add it, then set that Repo node's Fixed path or Exposed default.
     case repoNode(NodeID)
+
+    /// The folder dialog's explanatory message for this purpose.
+    var dialogMessage: String {
+        switch self {
+        case .dashboard, .launchField: "Choose a git repository folder"
+        case .saveDestination: "Choose the git repository to save this flow in"
+        case .repoNode: "Choose the git repository this flow runs on"
+        }
+    }
 }
 
 extension AppModel {
