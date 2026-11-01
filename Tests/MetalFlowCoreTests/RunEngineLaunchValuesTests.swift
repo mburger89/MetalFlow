@@ -41,6 +41,24 @@ import Testing
         #expect(run.inputs == ["issue": "7", "repo": h.repo.url.path])
     }
 
+    @Test func launchRecordsFlowFile() async throws {
+        let h = try Harness()
+        let values = ["issue": "7", "repo": h.repo.url.path]
+        let lib = URL(fileURLWithPath: "/tmp/lib/a.flow")
+        let repoFile = URL(fileURLWithPath: "/tmp/r/.flows/b.flow")
+        let cases: [(FlowLocation, URL?)] = [
+            (.library(file: lib), lib),
+            (.repo(root: URL(fileURLWithPath: "/tmp/r", isDirectory: true), file: repoFile), repoFile),
+            (.builtin, nil), (.unsaved, nil),
+        ]
+        for (location, expected) in cases {
+            let id = try await h.engine.launch(flow: h.flow(), location: location, values: values)
+            let run = await h.settled(id)
+            await h.engine.waitForPass(id)
+            #expect(run.flowFile == expected)
+        }
+    }
+
     @Test func launchMissingRequiredThrows() async throws {
         let h = try Harness()
         await #expect(throws: RunEngineError.missingInput("issue")) {

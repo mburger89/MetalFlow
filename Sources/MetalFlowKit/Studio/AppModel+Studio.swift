@@ -8,11 +8,17 @@ extension AppModel {
         return run
     }
 
-    /// Runs of the draft's flow, newest first (matched on the flow's name). Discarded runs have no worktrees left, so
-    /// nothing can be shown or branched from them.
+    /// Runs of the draft's flow, newest first. A draft with a file gets the runs launched from that file (compared as
+    /// standardized paths); runs recorded without a file (built-in, unsaved, or saved before files were recorded) belong
+    /// to a draft by flow name. Discarded runs have no worktrees left, so nothing can be shown or branched from them.
     public var studioRuns: [Run] {
         guard let draft else { return [] }
-        return order.compactMap { runs[$0] }.filter { $0.flow.name == draft.flow.name && $0.status != .discarded }
+        let file = draft.url?.standardizedFileURL.path
+        return order.compactMap { runs[$0] }.filter { run in
+            guard run.status != .discarded else { return false }
+            guard let runFile = run.flowFile else { return run.flow.name == draft.flow.name }
+            return runFile.standardizedFileURL.path == file
+        }
     }
 
     /// The text a unsaved flow's file name is made of: lowercase letters and digits joined by dashes.

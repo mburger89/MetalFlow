@@ -256,6 +256,20 @@ import Testing
         #expect(model.studioRun == newest.id)
     }
 
+    @Test func studioRunsSeparateSameNamedFlowFiles() async throws {
+        let fileA = URL(fileURLWithPath: "/lib/a/fix.flow"), fileB = URL(fileURLWithPath: "/lib/b/fix.flow")
+        var runA = makeRun("from a", createdAt: Date(timeIntervalSince1970: 1)); runA.flowFile = fileA
+        var runB = makeRun("from b", createdAt: Date(timeIntervalSince1970: 2)); runB.flowFile = fileB
+        let legacy = makeRun("legacy", createdAt: Date(timeIntervalSince1970: 3))
+        let (model, _, _) = try await fixture(runs: [runA, runB, legacy])
+        model.draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .library(file: fileA))
+        #expect(model.studioRuns.map(\.title) == ["legacy", "from a"], "own file plus legacy runs of the same name")
+        model.draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .library(file: fileB))
+        #expect(model.studioRuns.map(\.title) == ["legacy", "from b"])
+        model.draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .builtin)
+        #expect(model.studioRuns.map(\.title) == ["legacy"], "no file: only runs without one")
+    }
+
     @Test func pickerAndOverlayLeaveOutDiscardedRuns() async throws {
         let live = laneRun()
         var gone = makeRun("gone", status: .discarded, createdAt: Date(timeIntervalSince1970: 900))

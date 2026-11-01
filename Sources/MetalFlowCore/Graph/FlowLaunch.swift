@@ -7,6 +7,14 @@ public enum FlowLocation: Hashable, Sendable {
     case library(file: URL)
     case repo(root: URL, file: URL)
 
+    /// The flow file, if any; nil for `.builtin` and `.unsaved`.
+    public var file: URL? {
+        switch self {
+        case .builtin, .unsaved: return nil
+        case .library(let file), .repo(_, let file): return file
+        }
+    }
+
     /// `.repo` when the file's folder is named `.flows` (root = its parent), otherwise `.library`.
     public static func of(file: URL) -> FlowLocation {
         let dir = file.deletingLastPathComponent()

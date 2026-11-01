@@ -231,7 +231,7 @@ public actor RunEngine {
         try await git.addWorktree(repo: repo, path: worktree, newBranch: branch, from: base)
 
         var run = Run(id: id, flow: flow, title: title, repo: repo, baseBranch: base, branch: branch,
-                      worktree: worktree, inputs: inputs)
+                      worktree: worktree, inputs: inputs, flowFile: location.file)
         for (key, node) in firstNodes { run.nodes[key] = node }
         runs[id] = run
         persist(run)

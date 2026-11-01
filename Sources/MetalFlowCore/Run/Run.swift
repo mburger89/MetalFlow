@@ -192,6 +192,8 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
     public var branch: String
     /// Worktree directory.
     public var worktree: URL
+    /// The flow file the run was launched from; nil for the built-in or an unsaved flow, and for runs saved before this existed.
+    public var flowFile: URL?
     /// Flow input values by name.
     public var inputs: [String: String]
     /// Creation time.
@@ -214,7 +216,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         id: RunID = RunID(), flow: Flow, title: String, repo: URL, baseBranch: String,
         branch: String, worktree: URL, inputs: [String: String] = [:], createdAt: Date = Date(),
         status: RunStatus = .running, nodes: [NodeKey: NodeRun] = [:], lanes: [Lane] = [],
-        recommendation: LaneID? = nil, keptBranches: [String] = [], revision: Int = 0
+        recommendation: LaneID? = nil, keptBranches: [String] = [], revision: Int = 0, flowFile: URL? = nil
     ) {
         self.id = id
         self.flow = flow
@@ -223,6 +225,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         self.baseBranch = baseBranch
         self.branch = branch
         self.worktree = worktree
+        self.flowFile = flowFile
         self.inputs = inputs
         self.createdAt = createdAt
         self.status = status
@@ -272,7 +275,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, flow, title, repo, baseBranch, branch, worktree, inputs, createdAt
-        case status, nodes, lanes, recommendation, keptBranches, revision
+        case status, nodes, lanes, recommendation, keptBranches, revision, flowFile
     }
 
     /// Decodes a run; `nodes` is a JSON object keyed by `NodeKey.description`.
@@ -292,6 +295,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         recommendation = try c.decodeIfPresent(LaneID.self, forKey: .recommendation)
         keptBranches = try c.decodeIfPresent([String].self, forKey: .keptBranches) ?? []
         revision = try c.decodeIfPresent(Int.self, forKey: .revision) ?? 0
+        flowFile = try c.decodeIfPresent(URL.self, forKey: .flowFile)
         let raw = try c.decode([String: NodeRun].self, forKey: .nodes)
         var parsed: [NodeKey: NodeRun] = [:]
         for (k, v) in raw {
@@ -321,6 +325,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         try c.encodeIfPresent(recommendation, forKey: .recommendation)
         try c.encode(keptBranches, forKey: .keptBranches)
         try c.encode(revision, forKey: .revision)
+        try c.encodeIfPresent(flowFile, forKey: .flowFile)
         var raw: [String: NodeRun] = [:]
         for (k, v) in nodes { raw[k.description] = v }
         try c.encode(raw, forKey: .nodes)
