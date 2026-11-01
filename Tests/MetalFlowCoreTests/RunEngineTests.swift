@@ -207,6 +207,21 @@ import Testing
         #expect(run.nodes[NodeKey(node: "show")]?.state == .succeeded)
     }
 
+    @Test func shellOutputEndsWithStdoutAfterAnyStderr() async throws {
+        let h = try Harness()
+        // 100 lines of build log with no final newline, then a result: more than the kept lines, so stdout must be last.
+        let command = "i=0; while [ $i -lt 100 ]; do echo log$i >&2; i=$((i+1)); done; printf LASTLOG >&2; echo RESULT"
+        let flow = Flow(name: "order", nodes: [
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 0)),
+            Node(id: "show", title: "Show", kind: .shell(ShellConfig(command: command)), position: Point(x: 1, y: 0)),
+        ], wires: [Wire(from: "repo", to: "show", input: "repo")])
+        let id = try await h.engine.launch(flow: flow, location: h.repoLocation, values: ["repo": h.repo.url.path])
+        let run = await h.settled(id)
+        let lines = (run.nodes[NodeKey(node: "show")]?.output ?? "").components(separatedBy: "\n")
+        #expect(lines.first == "exit 0")
+        #expect(lines.suffix(2) == ["LASTLOG", "RESULT"])
+    }
+
     @Test func nonLaneFeederRunsBeforeLanes() async throws {
         let h = try Harness()
         let flow = Flow(name: "feeder", nodes: [

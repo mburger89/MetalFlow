@@ -210,7 +210,11 @@ extension RunEngine {
             finish(id, key, .failed(error is CancellationError ? "interrupted" : error.localizedDescription))
             return
         }
-        var lines = (result.stdout + result.stderr)
+        // Stdout goes last: a build logs to stderr and a test run reports on stdout, and only the last lines are kept.
+        var output = result.stderr
+        if let last = output.last, !last.isNewline { output += "\n" }
+        output += result.stdout
+        var lines = output
             .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
         while lines.last?.isEmpty == true { lines.removeLast() }
         let tail = lines.suffix(Self.maxShellOutputLines).joined(separator: "\n")
