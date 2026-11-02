@@ -33,7 +33,7 @@ extension RunEngine {
         requestPass(id)
     }
 
-    /// Resumes every interrupted node with "Continue where you left off.". A run that stopped between nodes (nothing
+    /// Resumes every interrupted node with "Continue where you left off." (or the reply it was still to receive). A run that stopped between nodes (nothing
     /// interrupted, nothing waiting on you) simply continues. Throws `nothingToResume` when there is nothing to do.
     public func resumeInterrupted(_ id: RunID) throws {
         guard runs[id] != nil else { throw RunEngineError.unknownRun(id) }
@@ -52,7 +52,11 @@ extension RunEngine {
             requestPass(id)
             return
         }
-        for key in keys { try answer(id, node: key, reply: "Continue where you left off.") }
+        for key in keys {
+            // A reply that never reached the agent (a fix turn cut short before it started) must not be lost.
+            let reply = run.nodes[key]?.pendingReply ?? "Continue where you left off."
+            try answer(id, node: key, reply: reply)
+        }
     }
 
     // MARK: - Picking

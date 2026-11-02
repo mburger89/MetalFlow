@@ -130,7 +130,7 @@ import os
         #expect(try #require(reviewRequests(h, lane: "b").first).model == "sonnet")
         #expect(request.prompt.contains("+++ b/ok.txt"))
         #expect(!request.prompt.contains("{diff}"))
-        #expect(request.prompt.hasSuffix("End your reply with a final line that is exactly `VERDICT: approve` or `VERDICT: changes`."))
+        #expect(request.prompt.hasSuffix("\n\nPut all your findings in your final reply, and end it with a line that is exactly `VERDICT: approve` or `VERDICT: changes`."))
         #expect(request.workingDirectory == (try lane(run, "a")).worktree)
         // The judge hears about the review.
         #expect(judgePrompts(h).first?.contains("## a (sonnet) — tests passed, review approved") == true)
@@ -242,6 +242,22 @@ import os
         #expect(RunEngine.reviewVerdict(in: "VERDICT: approve\nVERDICT: maybe") == nil)
         #expect(RunEngine.reviewVerdict(in: "I would say VERDICT: approve") == nil)
         #expect(RunEngine.reviewVerdict(in: "") == nil)
+    }
+
+    @Test func verdictIgnoresHeadingMarksAndClosingPunctuation() {
+        #expect(RunEngine.reviewVerdict(in: "VERDICT: approve.") == .approve)
+        #expect(RunEngine.reviewVerdict(in: "## VERDICT: approve") == .approve)
+        #expect(RunEngine.reviewVerdict(in: "**VERDICT: changes!**") == .changes)
+        #expect(RunEngine.reviewVerdict(in: "### `VERDICT: changes`.") == .changes)
+        #expect(RunEngine.reviewVerdict(in: "VERDICT: maybe") == nil)
+        #expect(RunEngine.reviewVerdict(in: "VERDICT: approve, but") == nil)
+    }
+
+    @Test func recommendationStaysExact() {
+        let lanes = [Lane(id: "a", model: "m", branch: "b", worktree: URL(fileURLWithPath: "/w"))]
+        #expect(RunEngine.recommendation(in: "RECOMMEND: a", lanes: lanes) == "a")
+        #expect(RunEngine.recommendation(in: "RECOMMEND: a.", lanes: lanes) == nil)
+        #expect(RunEngine.recommendation(in: "## RECOMMEND: a", lanes: lanes) == nil)
     }
 
     @Test func reviewFixMessageKeepsTheLastTwoHundredLines() {
@@ -395,6 +411,139 @@ import os
         let id = try await launch(h, flow(h))
         _ = try await finished(h, id)
         #expect(try #require(reviewRequests(h, lane: "a").first?.prompt).contains("(cut at") == false)
+    }
+
+    // MARK: - Checks that did not finish
+
+    private func summaryRun(gate: Bool = true, review: Bool = true, output: String? = nil, lane: Lane) -> Run {
+        var flow = BuiltinFlows.fixGitHubIssue
+        if !gate { flow.nodes.removeAll { $0.id == "gate" } }
+        if review {
+            flow.nodes.append(Node(id: "review", title: "Code review", kind: .review(ReviewConfig()), position: Point(x: 0, y: 0)))
+        }
+        var run = Run(id: RunID(rawValue: "R"), flow: flow, title: "t", repo: URL(fileURLWithPath: "/r"), baseBranch: "main",
+                      branch: "mf/t", worktree: URL(fileURLWithPath: "/w"), lanes: [lane])
+        if let output { run.nodes[NodeKey(node: "review", lane: lane.id)] = NodeRun(state: .succeeded, output: output) }
+        return run
+    }
+
+    @Test(arguments: [
+        (true, true, true as Bool?, true as Bool?, "tests passed, review approved"),
+        (true, true, true, false, "tests passed, review asked for changes"),
+        (true, true, true, nil, "tests passed, review not finished"),
+        (true, true, nil, nil, "tests not finished, review not finished"),
+        (true, true, false, nil, "tests failed"),
+        (true, false, true, nil, "tests passed"),
+        (true, false, nil, nil, "tests not finished"),
+        (false, true, nil, nil, "no gate, review not finished"),
+        (false, false, nil, nil, "no gate"),
+    ] as [(Bool, Bool, Bool?, Bool?, String)])
+    func checksSummaryTellsWhatDidNotFinish(gate: Bool, review: Bool, tests: Bool?, reviewed: Bool?, expected: String) {
+        let lane = Lane(id: "a", model: "opus", branch: "b", worktree: URL(fileURLWithPath: "/w"), gatePassed: tests, reviewPassed: reviewed)
+        let run = summaryRun(gate: gate, review: review, lane: lane)
+        #expect(RunEngine.checksSummary(of: lane, in: run) == expected)
+    }
+
+    @Test func reviewFindingsAreTheLast40LinesAndOnlyWhenItAskedForChanges() {
+        let output = (1...60).map { "finding \($0)" }.joined(separator: "\n") + "\n\n"
+        var lane = Lane(id: "a", model: "opus", branch: "b", worktree: URL(fileURLWithPath: "/w"), gatePassed: true, reviewPassed: false)
+        let run = summaryRun(output: output, lane: lane)
+        let findings = run.reviewFindings(of: lane)
+        #expect(findings?.hasPrefix("finding 21\n") == true)
+        #expect(findings?.hasSuffix("finding 60") == true)
+        lane.reviewPassed = true
+        #expect(run.reviewFindings(of: lane) == nil)
+        lane.reviewPassed = nil
+        #expect(run.reviewFindings(of: lane) == nil)
+    }
+
+    @Test func aReviewThatErroredReadsAsNotFinishedInTheJudgeHeaderAndThePullRequest() async throws {
+        let h = try Harness()
+        h.hooks.stubGit("push")
+        h.gh.stub("gh", ["pr", "create"], result: CommandResult(exitCode: 0, stdout: "https://github.com/acme/widgets/pull/12\n", stderr: ""))
+        scriptImplement(h)
+        scriptReviews(h, lane: "a", ["VERDICT: approve"])
+        scriptReviews(h, lane: "b", ["Something broke"], error: true)
+        var flow = flow(h)
+        flow.nodes.append(Node(id: "openpr", title: "Open PR", kind: .openPR(OpenPRConfig(draft: true)), position: Point(x: 1200, y: 330)))
+        flow.wires.append(Wire(from: "pick", to: "openpr", input: "approval"))
+        let id = try await launch(h, flow)
+        _ = try await finished(h, id)
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let args = try #require(h.gh.calls.first { $0.arguments.starts(with: ["pr", "create"]) }).arguments
+        #expect(args[args.firstIndex(of: "--body")! + 1] == "Closes #7\n\nCandidate b (opus), tests passed, review not finished, chosen in MetalFlow.")
+    }
+
+    // MARK: - Resuming
+
+    /// Lane a is mid fix round: its agent is cut short before it saw the reviewer's findings, and the gate and
+    /// review are cleared. Everything else has finished, so a resume only has lane a's round left.
+    private func suspendMidRound(_ h: Harness, reviewState: NodeState? = nil, reviewSession: String? = nil,
+                                 reply: String? = nil) async throws -> (RunID, RunEngine) {
+        scriptImplement(h)
+        scriptReviews(h, lane: "a", ["VERDICT: approve"])
+        scriptReviews(h, lane: "b", ["VERDICT: approve"])
+        let id = try await launch(h, flow(h))
+        var run = try await finished(h, id)
+        let implement = NodeKey(node: "implement", lane: "a")
+        if let reply {
+            run.nodes[implement]?.state = .interrupted
+            run.nodes[implement]?.pendingReply = reply
+            run.nodes[gate("a")] = nil
+            run.nodes[review("a")] = nil
+            if let i = run.lanes.firstIndex(where: { $0.id == "a" }) { run.lanes[i].gatePassed = nil; run.lanes[i].reviewPassed = nil }
+        } else if let reviewState {
+            run.nodes[review("a")] = NodeRun(state: reviewState, sessionID: reviewSession)
+            if let i = run.lanes.firstIndex(where: { $0.id == "a" }) { run.lanes[i].reviewPassed = nil }
+        }
+        run.nodes[NodeKey(node: "judge")] = nil
+        run.nodes[NodeKey(node: "pick")] = nil
+        run.status = .needsYou
+        run.recommendation = nil
+        try h.store.save(run)
+
+        let runner = RoutingRunner(gh: h.gh, hooks: h.hooks)
+        let engine = RunEngine(store: h.store, runner: runner, agent: h.agent, issues: GitHubIssues(runner: runner))
+        _ = try await engine.restore()
+        return (id, engine)
+    }
+
+    @Test func resumingKeepsAReplyTheAgentNeverReceived() async throws {
+        let h = try Harness()
+        let (id, engine) = try await suspendMidRound(h, reply: "FINDINGS: rename the thing")
+        scriptReviews(h, lane: "a", ["VERDICT: approve"])
+        let before = h.agent.requests.count
+        try await engine.resumeInterrupted(id)
+        await engine.waitUntilSettled(id)
+        let resumed = h.agent.requests.dropFirst(before).filter { $0.resumeSessionID == "sa" }
+        #expect(resumed.map(\.prompt) == ["FINDINGS: rename the thing"])
+    }
+
+    @Test func resumingAnInterruptedNodeWithNothingPendingSaysContinue() async throws {
+        let h = try Harness()
+        let (id, engine) = try await suspendMidRound(h, reply: "x")
+        await engine.setDirect(id) { $0.nodes[NodeKey(node: "implement", lane: "a")]?.pendingReply = nil }
+        let before = h.agent.requests.count
+        try await engine.resumeInterrupted(id)
+        await engine.waitUntilSettled(id)
+        #expect(h.agent.requests.dropFirst(before).filter { $0.resumeSessionID == "sa" }.first?.prompt == "Continue where you left off.")
+    }
+
+    @Test func aRunSuspendedWhileTheReviewReranResumesWithAFreshReview() async throws {
+        let h = try Harness()
+        let (id, engine) = try await suspendMidRound(h, reviewState: .interrupted)
+        scriptReviews(h, lane: "a", ["Fresh.\nVERDICT: approve"])
+        let before = h.agent.requests.count
+        try await engine.resumeInterrupted(id)
+        await engine.waitUntilSettled(id)
+        let new = Array(h.agent.requests.dropFirst(before))
+        let reviews = new.filter { isReview($0, lane: "a") }
+        #expect(reviews.count == 1)
+        #expect(reviews.first?.prompt.contains("REVIEW-THIS") == true)
+        #expect(new.filter { $0.resumeSessionID != nil && $0.workingDirectory.lastPathComponent == "a" }.isEmpty)
+        let run = try #require(await engine.run(id))
+        #expect(try lane(run, "a").reviewPassed == true)
     }
 
     // MARK: - Pull request, commits, retry, coding

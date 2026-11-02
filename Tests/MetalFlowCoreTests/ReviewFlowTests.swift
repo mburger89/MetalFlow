@@ -115,6 +115,39 @@ import Testing
         #expect(throws: FlowError.reviewBeforeGate("review")) { try flow.validate() }
     }
 
+    private func prompt(_ id: String) -> Node {
+        node(id, .prompt(PromptConfig(model: "sonnet", prompt: "\(id) {code}", candidates: [], allowedTools: [], maxTurns: nil)))
+    }
+
+    @Test func anAgentThatFeedsTheReviewButNotTheGateIsInvalid() {
+        var flow = reviewFlow()
+        flow.nodes.append(prompt("docs"))
+        flow.wires.append(Wire(from: "implement", to: "docs", input: "code"))
+        flow.wires.append(Wire(from: "docs", to: "review", input: "docs"))
+        #expect(throws: FlowError.reviewBeforeGate("review")) { try flow.validate() }
+    }
+
+    @Test func anAgentThatFeedsTheReviewButNotTheGateIsFineWithoutAGate() throws {
+        var flow = reviewFlow()
+        flow.nodes.removeAll { $0.id == "gate" }
+        flow.wires.removeAll { $0.from == "gate" || $0.to == "gate" }
+        flow.wires.append(Wire(from: "implement", to: "review", input: "code"))
+        flow.nodes.append(prompt("docs"))
+        flow.wires.append(Wire(from: "implement", to: "docs", input: "code"))
+        flow.wires.append(Wire(from: "docs", to: "review", input: "docs"))
+        #expect(throws: Never.self) { try flow.validate() }
+    }
+
+    @Test func anAgentAfterTheReviewIsInvalid() {
+        var flow = reviewFlow()
+        flow.nodes.append(prompt("polish"))
+        flow.wires.removeAll { $0.from == "review" && $0.to == "judge" }
+        flow.wires.append(Wire(from: "review", to: "polish", input: "code"))
+        flow.wires.append(Wire(from: "polish", to: "judge", input: "review"))
+        #expect(throws: FlowError.agentAfterReview("polish")) { try flow.validate() }
+        #expect(FlowError.agentAfterReview("polish").errorDescription == "No agent step can come after a Review.")
+    }
+
     @Test func shellBetweenTheGateAndTheReviewIsValid() throws {
         var flow = reviewFlow()
         flow.nodes.append(node("fmt", .shell(ShellConfig(command: "echo {code}"))))

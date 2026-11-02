@@ -47,7 +47,7 @@ import Testing
         #expect((try? window.element(identifier: "cand.a.recommended")) == nil)
         #expect(try window.element(identifier: "cand.a.gate").value == "Tests passed")
         #expect(try window.element(identifier: "cand.b.gate").value == "Tests failed")
-        #expect(try window.element(identifier: "cand.c.gate").value == "No gate")
+        #expect(try window.element(identifier: "cand.c.gate").value == "Tests not finished")
         #expect(try window.element(identifier: "cand.a.added").value == "+12")
         #expect(try window.element(identifier: "cand.b.model").value == "opus")
         #expect(try window.element(identifier: "detail.judge").value == "B is the most complete.")

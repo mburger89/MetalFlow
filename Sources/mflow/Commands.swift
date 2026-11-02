@@ -220,11 +220,12 @@ func gateText(_ g: Bool?) -> String {
     }
 }
 
-func reviewText(_ r: Bool?) -> String? {
-    switch r {
-    case true?: "review approved"
-    case false?: "review asked for changes"
-    case nil: nil
+func reviewText(_ lane: Lane, in run: Run) -> String? {
+    switch run.reviewStatus(of: lane) {
+    case .passed: "review approved"
+    case .failed: "review asked for changes"
+    case .notFinished: "review not finished"
+    case .none: nil
     }
 }
 
@@ -243,7 +244,10 @@ func runSummary(_ run: Run) -> [String] {
     if !run.lanes.isEmpty {
         lines.append("lanes:")
         for l in run.lanes {
-            lines.append("  \(l.id)  \(l.model)  \(([gateText(l.gatePassed), reviewText(l.reviewPassed)].compactMap { $0 }).joined(separator: "  "))  +\(l.added) -\(l.removed)  \(l.branch)")
+            lines.append("  \(l.id)  \(l.model)  \(([gateText(l.gatePassed), reviewText(l, in: run)].compactMap { $0 }).joined(separator: "  "))  +\(l.added) -\(l.removed)  \(l.branch)")
+            if let findings = run.reviewFindings(of: l) {
+                lines += findings.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map { "    \($0)" }
+            }
         }
     }
     if let r = run.recommendation { lines.append("recommendation: \(r)") }

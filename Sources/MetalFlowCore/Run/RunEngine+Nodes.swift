@@ -93,16 +93,8 @@ extension RunEngine {
                 sections.append("## \(lane.id) (\(lane.model)) — failed: \(message)")
                 continue
             }
-            let tests: String
-            switch lane.gatePassed {
-            case true?: tests = "tests passed"
-            case false?: tests = "tests failed"
-            case nil: tests = "no gate"
-            }
-            var section = "## \(lane.id) (\(lane.model)) — \(tests)\(Self.reviewSummary(lane.reviewPassed)), +\(lane.added) −\(lane.removed)\n\(await clippedDiff(lane, run: run).text)"
-            if lane.reviewPassed == false, let findings = Self.reviewOutput(of: lane.id, in: run) {
-                section += "\n\nReview:\n" + Self.lastLines(findings, 40)
-            }
+            var section = "## \(lane.id) (\(lane.model)) — \(Self.checksSummary(of: lane, in: run)), +\(lane.added) −\(lane.removed)\n\(await clippedDiff(lane, run: run).text)"
+            if let findings = run.reviewFindings(of: lane) { section += "\n\nReview:\n" + findings }
             sections.append(section)
         }
         return sections.joined(separator: "\n\n")
@@ -120,18 +112,21 @@ extension RunEngine {
         }
     }
 
-    /// The output of the flow's Review in a lane, when it has one.
-    private static func reviewOutput(of lane: LaneID, in run: Run) -> String? {
-        guard let review = run.flow.nodes.first(where: { if case .review = $0.kind { true } else { false } }) else { return nil }
-        return run.nodes[NodeKey(node: review.id, lane: lane)]?.output
-    }
-
-    /// How a lane's review reads in a header: nothing, ", review approved" or ", review asked for changes".
-    static func reviewSummary(_ passed: Bool?) -> String {
-        switch passed {
-        case true?: ", review approved"
-        case false?: ", review asked for changes"
-        case nil: ""
+    /// How a lane's checks read in a header or PR body: "tests passed, review approved", "tests not finished",
+    /// "no gate" and so on. A review that was skipped or is not in the flow adds nothing.
+    static func checksSummary(of lane: Lane, in run: Run) -> String {
+        let tests: String
+        switch run.testsStatus(of: lane) {
+        case .passed: tests = "tests passed"
+        case .failed: tests = "tests failed"
+        case .notFinished: tests = "tests not finished"
+        case .none: tests = "no gate"
+        }
+        switch run.reviewStatus(of: lane) {
+        case .passed: return tests + ", review approved"
+        case .failed: return tests + ", review asked for changes"
+        case .notFinished: return tests + ", review not finished"
+        case .none: return tests
         }
     }
 
@@ -164,7 +159,7 @@ extension RunEngine {
             values["candidates"] = await candidatesText(id, plan: plan)
         case .review(let reviewConfig):
             review = reviewConfig
-            instruction = "\n\nEnd your reply with a final line that is exactly `VERDICT: approve` or `VERDICT: changes`."
+            instruction = "\n\nPut all your findings in your final reply, and end it with a line that is exactly `VERDICT: approve` or `VERDICT: changes`."
             var diff = ""
             if let lane {
                 let clipped = await clippedDiff(lane, run: run)
@@ -287,10 +282,13 @@ extension RunEngine {
 
     /// The verdict on the last `VERDICT:` line; nil when there is none or it is neither `approve` nor `changes`.
     static func reviewVerdict(in text: String) -> ReviewVerdict? {
-        switch lastMarkedValue("VERDICT:", in: text)?.lowercased() {
-        case "approve": .approve
-        case "changes": .changes
-        default: nil
+        // Reviewers write `## VERDICT: approve` and `VERDICT: approve.` too; neither should read as no verdict.
+        let lead = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "`*#"))
+        let trail = lead.union(CharacterSet(charactersIn: ".!"))
+        switch lastMarkedValue("VERDICT:", in: text, leading: lead, trailing: trail)?.lowercased() {
+        case "approve": return .approve
+        case "changes": return .changes
+        default: return nil
         }
     }
 
@@ -311,14 +309,18 @@ extension RunEngine {
         return lanes.contains { $0.id == name } ? name : nil
     }
 
-    /// What follows `marker` on the last line that starts with it, ignoring case, spaces, backticks and asterisks.
-    private static func lastMarkedValue(_ marker: String, in text: String) -> String? {
-        let junk = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "`*"))
+    /// What follows `marker` on the last line that starts with it, ignoring case and the `leading` characters
+    /// before the marker and the `trailing` ones around the value (spaces, backticks and asterisks by default).
+    private static func lastMarkedValue(
+        _ marker: String, in text: String,
+        leading: CharacterSet = .whitespaces.union(CharacterSet(charactersIn: "`*")),
+        trailing: CharacterSet? = nil
+    ) -> String? {
         let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: junk) }
+            .map { $0.trimmingCharacters(in: leading) }
         guard let line = lines.last(where: { $0.range(of: marker, options: [.anchored, .caseInsensitive]) != nil })
         else { return nil }
-        return line.dropFirst(marker.count).trimmingCharacters(in: junk)
+        return line.dropFirst(marker.count).trimmingCharacters(in: trailing ?? leading)
     }
 
     // MARK: - Open PR
@@ -348,13 +350,7 @@ extension RunEngine {
         note("Pushing \(lane.branch) to origin")
         do { try await git.push(repo: run.repo, branch: lane.branch) } catch { return fail(error) }
 
-        let tests: String
-        switch lane.gatePassed {
-        case true?: tests = "tests passed"
-        case false?: tests = "tests failed"
-        case nil: tests = "no gate"
-        }
-        var body = "Candidate \(lane.id) (\(lane.model)), \(tests)\(Self.reviewSummary(lane.reviewPassed)), chosen in MetalFlow."
+        var body = "Candidate \(lane.id) (\(lane.model)), \(Self.checksSummary(of: lane, in: run)), chosen in MetalFlow."
         if let issue = Self.closedIssue(of: run, plan: plan) { body = "Closes #\(issue)\n\n" + body }
         let title = Self.commitName(runTitle: run.title, flowName: run.flow.name)
 

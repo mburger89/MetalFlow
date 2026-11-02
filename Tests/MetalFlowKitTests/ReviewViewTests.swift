@@ -129,6 +129,56 @@ import Testing
 
     // MARK: Activity
 
+    /// A run detail whose flow has (or lacks) a gate and a review, with lane a in the given state.
+    func cardWindow(gate: Bool = true, review: Bool = true, tests: Bool?, reviewed: Bool?, findings: String? = nil) async throws -> TestWindow {
+        var flow = BuiltinFlows.fixGitHubIssue
+        if !gate { flow.nodes.removeAll { $0.id == "gate" } }
+        if review { flow.nodes.append(Node(id: "review", title: "Review", kind: .review(ReviewConfig()), position: Point(x: 0, y: 0))) }
+        var nodes: [NodeKey: NodeRun] = [NodeKey(node: "pick"): NodeRun(state: .needsYou(.pickWinner(recommended: nil, allGatesFailed: false)))]
+        if let findings { nodes[NodeKey(node: "review", lane: "a")] = NodeRun(state: .succeeded, output: findings) }
+        var run = makeRun("review", status: .needsYou, nodes: nodes)
+        run.flow = flow
+        run.lanes = [Lane(id: "a", model: "sonnet", branch: "mf/x-a", worktree: URL(fileURLWithPath: "/wt/a"), gatePassed: tests, reviewPassed: reviewed)]
+        let client = FakeEngineClient(restored: [run], repos: [repo])
+        let model = AppModel(client: client, notifier: NoopNotifier())
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        model.open(run: run.id)
+        try await window.runUntilIdle()
+        return window
+    }
+
+    @Test func aCheckThatDidNotFinishSaysSo() async throws {
+        var window = try await cardWindow(tests: true, reviewed: nil)
+        #expect(try window.element(identifier: "cand.a.gate").value == "Tests passed")
+        #expect(try window.element(identifier: "cand.a.review").value == "Review not finished")
+        window = try await cardWindow(tests: nil, reviewed: nil)
+        #expect(try window.element(identifier: "cand.a.gate").value == "Tests not finished")
+        #expect(try window.element(identifier: "cand.a.review").value == "Review not finished")
+    }
+
+    @Test func noGateAndNoReviewReadAsBefore() async throws {
+        let window = try await cardWindow(gate: false, review: false, tests: nil, reviewed: nil)
+        #expect(try window.element(identifier: "cand.a.gate").value == "No gate")
+        #expect((try? window.element(identifier: "cand.a.review")) == nil)
+        let noReview = try await cardWindow(review: false, tests: true, reviewed: nil)
+        #expect((try? noReview.element(identifier: "cand.a.review")) == nil)
+    }
+
+    @Test func failedTestsExplainASkippedReview() async throws {
+        let window = try await cardWindow(tests: false, reviewed: nil)
+        #expect(try window.element(identifier: "cand.a.gate").value == "Tests failed")
+        #expect((try? window.element(identifier: "cand.a.review")) == nil)
+    }
+
+    @Test func theCardShowsWhatTheReviewFound() async throws {
+        let window = try await cardWindow(tests: true, reviewed: false, findings: "Line 3 leaks.\nVERDICT: changes")
+        #expect(try window.element(identifier: "cand.a.reviewFindings").value == "Line 3 leaks.\nVERDICT: changes")
+        let approved = try await cardWindow(tests: true, reviewed: true, findings: "Fine.\nVERDICT: approve")
+        #expect((try? approved.element(identifier: "cand.a.reviewFindings")) == nil)
+    }
+
     @Test func activityReportsTheReviewVerdict() {
         let before = makeRun("r")
         var after = before

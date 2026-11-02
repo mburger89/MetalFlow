@@ -32,6 +32,8 @@ public enum FlowError: Error, Equatable, Sendable {
     case multipleReviews(NodeID)
     /// A gate is not upstream of the Review, or an agent step sits between a gate and the Review.
     case reviewBeforeGate(NodeID)
+    /// An agent step (a prompt) comes after the Review, so it would change code that was already approved.
+    case agentAfterReview(NodeID)
 }
 
 extension FlowError: LocalizedError {
@@ -53,6 +55,7 @@ extension FlowError: LocalizedError {
         case .reviewOutsideCandidates: return "A Review has to sit after a step with several candidates and before the judge."
         case .multipleReviews: return "A flow can have only one Review."
         case .reviewBeforeGate: return "A Review has to come after every gate, with no agent step between them."
+        case .agentAfterReview: return "No agent step can come after a Review."
         }
     }
 }
@@ -118,7 +121,7 @@ extension Flow {
         for w in wires { children[w.from, default: []].append(w.to) }
         func descendants(of id: NodeID) -> Set<NodeID> {
             var out = Set<NodeID>(), stack = children[id] ?? []
-            while let n = stack.popLast(), out.insert(n).inserted { stack += children[n] ?? [] }
+            while let n = stack.popLast() { if out.insert(n).inserted { stack += children[n] ?? [] } }
             return out
         }
 
@@ -144,7 +147,7 @@ extension Flow {
         for w in wires { parents[w.to, default: []].append(w.from) }
         for open in openPRs {
             var upstream = Set<NodeID>(), stack = parents[open] ?? []
-            while let n = stack.popLast(), upstream.insert(n).inserted { stack += parents[n] ?? [] }
+            while let n = stack.popLast() { if upstream.insert(n).inserted { stack += parents[n] ?? [] } }
             if !upstream.contains(where: { node($0)?.kind == .pick }) { throw .openPRWithoutPick(open) }
         }
 
@@ -176,15 +179,30 @@ extension Flow {
         // and no other agent may sit on it, or the fix could skip a gate.
         if let review = reviews.first {
             var upstream = Set<NodeID>(), stack = parents[review] ?? []
-            while let n = stack.popLast(), upstream.insert(n).inserted { stack += parents[n] ?? [] }
+            while let n = stack.popLast() { if upstream.insert(n).inserted { stack += parents[n] ?? [] } }
             let gates = order.filter { scoped.contains($0) && { if case .gate? = node($0)?.kind { true } else { false } }($0) }
             if gates.contains(where: { !upstream.contains($0) }) { throw .reviewBeforeGate(review) }
+            // A fix goes to the first agent found upstream, so every agent that feeds the review has to feed every
+            // gate too, or the gate would never rerun on what that agent changes.
+            if !gates.isEmpty {
+                let isPrompt: (NodeID) -> Bool = { if case .prompt? = self.node($0)?.kind { true } else { false } }
+                for agent in upstream where scoped.contains(agent) && isPrompt(agent) {
+                    let feeding = descendants(of: agent)
+                    if gates.contains(where: { !feeding.contains($0) }) { throw .reviewBeforeGate(review) }
+                }
+            }
             for gate in gates {
                 let between = descendants(of: gate).intersection(upstream)
                 if between.contains(where: { if case .prompt? = node($0)?.kind { true } else { false } }) {
                     throw .reviewBeforeGate(review)
                 }
             }
+        }
+        if let review = reviews.first {
+            // Whatever an agent does after the Review changes code the Review already approved.
+            if let agent = order.first(where: { id in
+                descendants(of: review).contains(id) && { if case .prompt? = node(id)?.kind { true } else { false } }()
+            }) { throw .agentAfterReview(agent) }
         }
         return FlowPlan(order: order, fanOut: fanOut, laneScoped: scoped)
     }

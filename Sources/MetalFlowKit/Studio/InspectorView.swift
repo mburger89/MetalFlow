@@ -70,7 +70,6 @@ extension FlowDraft {
         case .review(let c)?: return c.fixAttempts
         default: return 0
         }
-        return 0
     }
 
     /// Whether a prompt node feeds the node, directly or through other nodes: someone the gate could send back to fix.

@@ -32,10 +32,13 @@ struct CandidateCard: Component {
                 .accessibilityIdentifier("\(id).model")
             Text(verbatim: gateText).font(size: 13).foregroundColor(gateColor)
                 .accessibilityIdentifier("\(id).gate")
-            if let review = lane.reviewPassed {
-                Text(verbatim: review ? "Review approved" : "Review asked for changes").font(size: 13)
-                    .foregroundColor(review ? Palette.ok : Palette.warn)
+            if let review = reviewLine {
+                Text(verbatim: review.text).font(size: 13).foregroundColor(review.color)
                     .accessibilityIdentifier("\(id).review")
+            }
+            if let findings = run.reviewFindings(of: lane) {
+                Text(verbatim: findings).font(size: 12).foregroundColor(Palette.muted)
+                    .accessibilityIdentifier("\(id).reviewFindings")
             }
             HStack(spacing: Spacing.sm) {
                 Text(verbatim: "+\(lane.added)").font(Theme.mono(12)).foregroundColor(Palette.ok)
@@ -102,18 +105,29 @@ struct CandidateCard: Component {
     }
 
     private var gateText: String {
-        switch lane.gatePassed {
-        case true?: "Tests passed"
-        case false?: "Tests failed"
-        case nil: "No gate"
+        switch run.testsStatus(of: lane) {
+        case .passed: "Tests passed"
+        case .failed: "Tests failed"
+        case .notFinished: "Tests not finished"
+        case .none: "No gate"
         }
     }
 
     private var gateColor: Color {
-        switch lane.gatePassed {
-        case true?: Palette.ok
-        case false?: Palette.bad
-        case nil: Palette.muted
+        switch run.testsStatus(of: lane) {
+        case .passed: Palette.ok
+        case .failed: Palette.bad
+        case .notFinished, .none: Palette.muted
+        }
+    }
+
+    /// The review line, or nil when the flow has no review or tests failing skipped it.
+    private var reviewLine: (text: String, color: Color)? {
+        switch run.reviewStatus(of: lane) {
+        case .passed: ("Review approved", Palette.ok)
+        case .failed: ("Review asked for changes", Palette.warn)
+        case .notFinished: ("Review not finished", Palette.muted)
+        case .none: nil
         }
     }
 }
