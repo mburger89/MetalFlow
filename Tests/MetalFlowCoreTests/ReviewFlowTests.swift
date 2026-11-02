@@ -69,6 +69,61 @@ import Testing
         #expect(throws: FlowError.reviewOutsideCandidates("review")) { try flow.validate() }
     }
 
+    private let gateMessage = "A Review has to come after every gate, with no agent step between them."
+
+    @Test func reviewWithoutAGateIsValid() throws {
+        var flow = reviewFlow()
+        flow.nodes.removeAll { $0.id == "gate" }
+        flow.wires.removeAll { $0.from == "gate" || $0.to == "gate" }
+        flow.wires.append(Wire(from: "implement", to: "review", input: "code"))
+        #expect(throws: Never.self) { try flow.validate() }
+    }
+
+    @Test func twoReviewsAreInvalid() {
+        var flow = reviewFlow()
+        flow.nodes.append(node("review2", .review(ReviewConfig())))
+        flow.wires.append(Wire(from: "review", to: "review2", input: "x"))
+        #expect(throws: FlowError.multipleReviews("review2")) { try flow.validate() }
+        #expect(FlowError.multipleReviews("review2").errorDescription == "A flow can have only one Review.")
+    }
+
+    @Test func reviewSiblingToTheGateIsInvalid() {
+        var flow = reviewFlow()
+        flow.wires.removeAll { $0.from == "gate" && $0.to == "review" }
+        flow.wires.append(Wire(from: "implement", to: "review", input: "code"))
+        flow.wires.append(Wire(from: "gate", to: "judge", input: "gateResults"))
+        #expect(throws: FlowError.reviewBeforeGate("review")) { try flow.validate() }
+        #expect(FlowError.reviewBeforeGate("review").errorDescription == gateMessage)
+    }
+
+    @Test func reviewBeforeTheGateIsInvalid() {
+        var flow = reviewFlow()
+        flow.wires.removeAll { $0.from == "implement" && $0.to == "gate" }
+        flow.wires.removeAll { $0.from == "gate" && $0.to == "review" }
+        flow.wires.append(Wire(from: "implement", to: "review", input: "code"))
+        flow.wires.append(Wire(from: "review", to: "gate", input: "code"))
+        flow.wires.append(Wire(from: "gate", to: "judge", input: "gate"))
+        #expect(throws: FlowError.reviewBeforeGate("review")) { try flow.validate() }
+    }
+
+    @Test func agentBetweenTheGateAndTheReviewIsInvalid() {
+        var flow = reviewFlow()
+        flow.nodes.append(node("polish", .prompt(PromptConfig(model: "sonnet", prompt: "polish {code}", candidates: [], allowedTools: [], maxTurns: nil))))
+        flow.wires.removeAll { $0.from == "gate" && $0.to == "review" }
+        flow.wires.append(Wire(from: "gate", to: "polish", input: "code"))
+        flow.wires.append(Wire(from: "polish", to: "review", input: "code"))
+        #expect(throws: FlowError.reviewBeforeGate("review")) { try flow.validate() }
+    }
+
+    @Test func shellBetweenTheGateAndTheReviewIsValid() throws {
+        var flow = reviewFlow()
+        flow.nodes.append(node("fmt", .shell(ShellConfig(command: "echo {code}"))))
+        flow.wires.removeAll { $0.from == "gate" && $0.to == "review" }
+        flow.wires.append(Wire(from: "gate", to: "fmt", input: "code"))
+        flow.wires.append(Wire(from: "fmt", to: "review", input: "code"))
+        #expect(throws: Never.self) { try flow.validate() }
+    }
+
     @Test func laneDecodesWithoutReviewPassed() throws {
         let lane = Lane(id: "a", model: "m", branch: "b", worktree: URL(fileURLWithPath: "/w"))
         let json = String(decoding: try JSONEncoder().encode(lane), as: UTF8.self)

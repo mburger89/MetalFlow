@@ -28,6 +28,10 @@ public enum FlowError: Error, Equatable, Sendable {
     case multipleOpenPRs(NodeID)
     /// A Review node is not between a step with several candidates and the judge.
     case reviewOutsideCandidates(NodeID)
+    /// The flow has more than one Review node; this is the second.
+    case multipleReviews(NodeID)
+    /// A gate is not upstream of the Review, or an agent step sits between a gate and the Review.
+    case reviewBeforeGate(NodeID)
 }
 
 extension FlowError: LocalizedError {
@@ -47,6 +51,8 @@ extension FlowError: LocalizedError {
         case .openPRWithoutPick: return "Open PR needs a You pick before it."
         case .multipleOpenPRs: return "A flow can have only one Open PR node."
         case .reviewOutsideCandidates: return "A Review has to sit after a step with several candidates and before the judge."
+        case .multipleReviews: return "A flow can have only one Review."
+        case .reviewBeforeGate: return "A Review has to come after every gate, with no agent step between them."
         }
     }
 }
@@ -163,6 +169,22 @@ extension Flow {
         }
         for id in order {
             if case .review? = node(id)?.kind, !scoped.contains(id) { throw .reviewOutsideCandidates(id) }
+        }
+        let reviews = order.filter { if case .review? = node($0)?.kind { true } else { false } }
+        if reviews.count > 1 { throw .multipleReviews(reviews[1]) }
+        // A fix sends the writing agent back and reruns what lies between, so every gate has to be on that path
+        // and no other agent may sit on it, or the fix could skip a gate.
+        if let review = reviews.first {
+            var upstream = Set<NodeID>(), stack = parents[review] ?? []
+            while let n = stack.popLast(), upstream.insert(n).inserted { stack += parents[n] ?? [] }
+            let gates = order.filter { scoped.contains($0) && { if case .gate? = node($0)?.kind { true } else { false } }($0) }
+            if gates.contains(where: { !upstream.contains($0) }) { throw .reviewBeforeGate(review) }
+            for gate in gates {
+                let between = descendants(of: gate).intersection(upstream)
+                if between.contains(where: { if case .prompt? = node($0)?.kind { true } else { false } }) {
+                    throw .reviewBeforeGate(review)
+                }
+            }
         }
         return FlowPlan(order: order, fanOut: fanOut, laneScoped: scoped)
     }

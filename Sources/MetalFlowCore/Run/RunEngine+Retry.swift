@@ -64,24 +64,19 @@ extension RunEngine {
             }
             let resetLanes = Set(keys.compactMap(\.lane) + (node.lane.map { [$0] } ?? []))
             for index in run.lanes.indices where resetLanes.contains(run.lanes[index].id) {
-                // A reset gate re-measures the lane; one that did not reset keeps its numbers.
-                let gateReset = (Array(keys) + [node]).contains { key in
-                    guard key.lane == run.lanes[index].id, case .gate? = run.flow.node(key.node)?.kind else { return false }
-                    return true
+                // A reset gate re-measures the lane and a reset review has no verdict; ones that did not reset keep theirs.
+                func reset(_ isKind: (NodeKind) -> Bool) -> Bool {
+                    (Array(keys) + [node]).contains { key in
+                        guard key.lane == run.lanes[index].id, let kind = run.flow.node(key.node)?.kind else { return false }
+                        return isKind(kind)
+                    }
                 }
-                if gateReset {
+                if reset({ if case .gate = $0 { true } else { false } }) {
                     run.lanes[index].gatePassed = nil
                     run.lanes[index].added = 0
                     run.lanes[index].removed = 0
                 }
-            }
-            // A reset review has no verdict until it runs again.
-            for index in run.lanes.indices where resetLanes.contains(run.lanes[index].id) {
-                let reviewReset = (Array(keys) + [node]).contains { key in
-                    guard key.lane == run.lanes[index].id, case .review? = run.flow.node(key.node)?.kind else { return false }
-                    return true
-                }
-                if reviewReset { run.lanes[index].reviewPassed = nil }
+                if reset({ if case .review = $0 { true } else { false } }) { run.lanes[index].reviewPassed = nil }
             }
             run.recommendation = nil
             // A pick that is reset must be made again.

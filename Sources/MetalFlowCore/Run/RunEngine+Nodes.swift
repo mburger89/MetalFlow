@@ -99,13 +99,7 @@ extension RunEngine {
             case false?: tests = "tests failed"
             case nil: tests = "no gate"
             }
-            let reviewNote: String
-            switch lane.reviewPassed {
-            case true?: reviewNote = ", review approved"
-            case false?: reviewNote = ", review asked for changes"
-            case nil: reviewNote = ""
-            }
-            var section = "## \(lane.id) (\(lane.model)) — \(tests)\(reviewNote), +\(lane.added) −\(lane.removed)\n\(await clippedDiff(lane, run: run).text)"
+            var section = "## \(lane.id) (\(lane.model)) — \(tests)\(Self.reviewSummary(lane.reviewPassed)), +\(lane.added) −\(lane.removed)\n\(await clippedDiff(lane, run: run).text)"
             if lane.reviewPassed == false, let findings = Self.reviewOutput(of: lane.id, in: run) {
                 section += "\n\nReview:\n" + Self.lastLines(findings, 40)
             }
@@ -118,20 +112,27 @@ extension RunEngine {
     private func clippedDiff(_ lane: Lane, run: Run) async -> (text: String, cut: Bool) {
         do {
             let diff = try await git.diff(worktree: lane.worktree, base: run.branch)
-            let lines = diff.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            // `git diff` ends with a newline, which is not another line.
+            let lines = diff.split(whereSeparator: \.isNewline)
             return (lines.prefix(Self.maxCandidateDiffLines).joined(separator: "\n"), lines.count > Self.maxCandidateDiffLines)
         } catch {
             return ("(diff unavailable: \(error.localizedDescription))", false)
         }
     }
 
-    /// The output of the first Review node's run in a lane, when it has one.
+    /// The output of the flow's Review in a lane, when it has one.
     private static func reviewOutput(of lane: LaneID, in run: Run) -> String? {
-        for node in run.flow.nodes {
-            guard case .review = node.kind, let output = run.nodes[NodeKey(node: node.id, lane: lane)]?.output else { continue }
-            return output
+        guard let review = run.flow.nodes.first(where: { if case .review = $0.kind { true } else { false } }) else { return nil }
+        return run.nodes[NodeKey(node: review.id, lane: lane)]?.output
+    }
+
+    /// How a lane's review reads in a header: nothing, ", review approved" or ", review asked for changes".
+    static func reviewSummary(_ passed: Bool?) -> String {
+        switch passed {
+        case true?: ", review approved"
+        case false?: ", review asked for changes"
+        case nil: ""
         }
-        return nil
     }
 
     /// The last `count` lines of `text`, without trailing blank lines.
@@ -353,13 +354,7 @@ extension RunEngine {
         case false?: tests = "tests failed"
         case nil: tests = "no gate"
         }
-        let review: String
-        switch lane.reviewPassed {
-        case true?: review = ", review approved"
-        case false?: review = ", review asked for changes"
-        case nil: review = ""
-        }
-        var body = "Candidate \(lane.id) (\(lane.model)), \(tests)\(review), chosen in MetalFlow."
+        var body = "Candidate \(lane.id) (\(lane.model)), \(tests)\(Self.reviewSummary(lane.reviewPassed)), chosen in MetalFlow."
         if let issue = Self.closedIssue(of: run, plan: plan) { body = "Closes #\(issue)\n\n" + body }
         let title = Self.commitName(runTitle: run.title, flowName: run.flow.name)
 
@@ -419,10 +414,7 @@ extension RunEngine {
         var output = result.stderr
         if let last = output.last, !last.isNewline { output += "\n" }
         output += result.stdout
-        var lines = output
-            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
-        while lines.last?.isEmpty == true { lines.removeLast() }
-        let tail = lines.suffix(Self.maxShellOutputLines).joined(separator: "\n")
+        let tail = Self.lastLines(output, Self.maxShellOutputLines)
         if isGate, !result.succeeded {
             let n = (run.nodes[key]?.fixAttemptsUsed ?? 0) + 1
             let source = PendingFix(attempt: n, total: config.fixAttempts, command: command)

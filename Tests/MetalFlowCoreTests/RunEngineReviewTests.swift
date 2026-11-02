@@ -44,15 +44,15 @@ import os
 
     /// Every lane's implement turn starts session `s<lane>`; lanes in `writesOK` also write ok.txt. A resume of
     /// that session does nothing unless `scriptResume` says so.
-    private func scriptImplement(_ h: Harness, writesOK: Set<String> = ["a", "b"], bigFile: Bool = false) {
+    private func scriptImplement(_ h: Harness, writesOK: Set<String> = ["a", "b"], bigLines: Int = 0) {
         for lane in ["a", "b", "c"] {
             let session = "s\(lane)"
             h.agent.script({ isImplement($0, lane: lane) }, effect: { r in
                 if writesOK.contains(lane) {
                     try "ok".write(to: r.workingDirectory.appendingPathComponent("ok.txt"), atomically: true, encoding: .utf8)
                 }
-                if bigFile {
-                    let text = (1...500).map { "line \($0)" }.joined(separator: "\n")
+                if bigLines > 0 {
+                    let text = (1...bigLines).map { "line \($0)" }.joined(separator: "\n") + "\n"
                     try text.write(to: r.workingDirectory.appendingPathComponent("big.txt"), atomically: true, encoding: .utf8)
                 }
             }, events: [.started(sessionID: session), .finished(result(session))])
@@ -125,7 +125,9 @@ import os
         #expect(run.nodes[review("a")]?.output == "Looks fine.\nVERDICT: approve")
         let request = try #require(reviewRequests(h, lane: "a").first)
         #expect(request.allowedTools == ReviewConfig.defaultAgent.allowedTools)
+        // The review's own model, not the candidate's: lane b's candidate model is opus.
         #expect(request.model == "sonnet")
+        #expect(try #require(reviewRequests(h, lane: "b").first).model == "sonnet")
         #expect(request.prompt.contains("+++ b/ok.txt"))
         #expect(!request.prompt.contains("{diff}"))
         #expect(request.prompt.hasSuffix("End your reply with a final line that is exactly `VERDICT: approve` or `VERDICT: changes`."))
@@ -359,7 +361,7 @@ import os
 
     @Test func longDiffIsCutAndSaysSo() async throws {
         let h = try Harness()
-        scriptImplement(h, bigFile: true)
+        scriptImplement(h, bigLines: 500)
         scriptReviews(h, lane: "a", ["VERDICT: approve"])
         scriptReviews(h, lane: "b", ["VERDICT: approve"])
         let id = try await launch(h, flow(h))
@@ -368,6 +370,21 @@ import os
         #expect(prompt.contains("(cut at 400 lines; read the rest with git diff \(run.branch))"))
         #expect(prompt.contains("+line 100"))
         #expect(!prompt.contains("+line 500"))
+    }
+
+    /// Lane a's diff is big.txt (6 header lines + n) and ok.txt (6 + 1 + the no-newline marker): 400 lines at n = 386.
+    @Test(arguments: [(386, false), (387, true)])
+    func theCutNoteAppearsOnlyWhenSomethingIsCut(bigLines: Int, cut: Bool) async throws {
+        let h = try Harness()
+        scriptImplement(h, bigLines: bigLines)
+        scriptReviews(h, lane: "a", ["VERDICT: approve"])
+        scriptReviews(h, lane: "b", ["VERDICT: approve"])
+        let id = try await launch(h, flow(h))
+        let run = try await finished(h, id)
+        let diff = try h.repo.git(["diff", run.branch, try lane(run, "a").branch])
+        #expect(diff.split(whereSeparator: \.isNewline).count == bigLines + 14)
+        let prompt = try #require(reviewRequests(h, lane: "a").first?.prompt)
+        #expect(prompt.contains("(cut at 400 lines") == cut)
     }
 
     @Test func shortDiffHasNoCutNote() async throws {
