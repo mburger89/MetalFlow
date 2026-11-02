@@ -14,6 +14,21 @@ extension RunEngine {
             """
     }
 
+    /// The commit message for a lane agent's turn: the issue's title (the flow's name when there is none) and the lane,
+    /// labelled as a fix attempt when a failing gate started the turn.
+    static func laneCommitMessage(runTitle: String, flowName: String, lane: LaneID, nodeTitle: String,
+                                  fix: PendingFix?) -> String {
+        let name = commitName(runTitle: runTitle, flowName: flowName)
+        guard let fix else { return "\(name) (\(lane))\n\nNode: \(nodeTitle)" }
+        return "Fix attempt \(fix.attempt) of \(fix.total): \(name) (\(lane))\n\nNode: \(nodeTitle)\nGate: \(fix.command)"
+    }
+
+    /// What a run's commits and pull request are called: its title without `#N `, else the flow's name.
+    static func commitName(runTitle: String, flowName: String) -> String {
+        let title = pullRequestTitle(runTitle)
+        return title.isEmpty ? flowName : title
+    }
+
     /// The agent a failing gate sends back to work: the nearest prompt node upstream of the gate, through wires
     /// (breadth first), in the gate's own scope, that has a session to resume. A lane gate looks at its lane's nodes,
     /// any other gate at the nodes outside the lanes. Judges never count. Nil when there is none.
@@ -65,6 +80,7 @@ extension RunEngine {
         mutate(id) { run in
             var agent = run.nodes[agentKey] ?? NodeRun()
             agent.pendingReply = message
+            agent.pendingFix = PendingFix(attempt: used + 1, total: config.fixAttempts, command: command)
             agent.state = .waiting
             agent.endedAt = nil
             run.nodes[agentKey] = agent

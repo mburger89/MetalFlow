@@ -162,13 +162,17 @@ extension RunEngine {
             return
         }
         if let lane {
+            let message = Self.laneCommitMessage(
+                runTitle: run.title, flowName: run.flow.name, lane: lane.id, nodeTitle: node.title, fix: current.pendingFix)
             do {
-                _ = try await git.commitAll(worktree: lane.worktree, message: "\(node.title) (\(lane.id))")
+                _ = try await git.commitAll(worktree: lane.worktree, message: message)
             } catch {
                 finish(id, key, .failed("commit failed: \(error.localizedDescription)"), output: result.text)
                 return
             }
         }
+        // The turn is over: a later one (an answer to a question) is ordinary work.
+        if current.pendingFix != nil { updateNode(id, key) { $0.pendingFix = nil } }
         if !result.deniedTools.isEmpty {
             let tools = result.deniedTools.joined(separator: ", ")
             updateNode(id, key) { $0.appendLog("⚠ denied: \(tools)") }
@@ -230,8 +234,7 @@ extension RunEngine {
         }
         var body = "Candidate \(lane.id) (\(lane.model)), \(tests), chosen in MetalFlow."
         if let issue = Self.closedIssue(of: run, plan: plan) { body = "Closes #\(issue)\n\n" + body }
-        var title = Self.pullRequestTitle(run.title)
-        if title.isEmpty { title = run.flow.name }
+        let title = Self.commitName(runTitle: run.title, flowName: run.flow.name)
 
         note("Opening pull request")
         let url: String

@@ -108,12 +108,16 @@ public struct NodeRun: Codable, Hashable, Sendable {
     public var endedAt: Date?
     /// For a gate: how many times it sent its agent back to fix a failure.
     public var fixAttemptsUsed: Int
+    /// Set while the agent works on a failing gate's behalf: the fix its next turn carries out. It labels that turn's commit.
+    public var pendingFix: PendingFix?
     /// Creates a node run with defaults (waiting, empty log).
     public init(
         state: NodeState = .waiting, output: String? = nil, sessionID: String? = nil,
         log: [String] = [], pendingReply: String? = nil, extraAllowedTools: [String] = [],
-        costUSD: Double = 0, startedAt: Date? = nil, endedAt: Date? = nil, fixAttemptsUsed: Int = 0
+        costUSD: Double = 0, startedAt: Date? = nil, endedAt: Date? = nil, fixAttemptsUsed: Int = 0,
+        pendingFix: PendingFix? = nil
     ) {
+        self.pendingFix = pendingFix
         self.fixAttemptsUsed = fixAttemptsUsed
         self.state = state
         self.output = output
@@ -127,7 +131,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed
+        case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed, pendingFix
     }
 
     /// Decodes a node run; runs saved before fix attempts existed have no `fixAttemptsUsed` and mean 0.
@@ -143,12 +147,29 @@ public struct NodeRun: Codable, Hashable, Sendable {
         startedAt = try c.decodeIfPresent(Date.self, forKey: .startedAt)
         endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         fixAttemptsUsed = try c.decodeIfPresent(Int.self, forKey: .fixAttemptsUsed) ?? 0
+        pendingFix = try c.decodeIfPresent(PendingFix.self, forKey: .pendingFix)
     }
 
     /// Appends a log line, keeping only the last 50.
     public mutating func appendLog(_ line: String) {
         log.append(line)
         if log.count > Self.maxLogLines { log.removeFirst(log.count - Self.maxLogLines) }
+    }
+}
+
+/// A fix attempt an agent is about to carry out for a failing gate.
+public struct PendingFix: Codable, Hashable, Sendable {
+    /// Which attempt this is, counting from 1.
+    public var attempt: Int
+    /// How many attempts the gate allows.
+    public var total: Int
+    /// The gate's command.
+    public var command: String
+    /// Creates a pending fix.
+    public init(attempt: Int, total: Int, command: String) {
+        self.attempt = attempt
+        self.total = total
+        self.command = command
     }
 }
 

@@ -84,7 +84,12 @@ import os
         #expect(run.status == .needsYou)
         #expect(run.nodes[NodeKey(node: "pick")]?.state == .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))
         // The fix is committed in the lane.
-        #expect(try h.repo.git(["log", "--format=%s", run.lanes[2].branch]).contains("Implement (c)"))
+        let subjects = try h.repo.git(["log", "--format=%s", run.lanes[2].branch]).split(separator: "\n").map(String.init)
+        #expect(subjects.contains("Fix attempt 1 of 1: Crash on launch (c)"))
+        let body = try h.repo.git(["log", "-1", "--format=%B", run.lanes[2].branch])
+        #expect(body.contains("Node: Implement"))
+        #expect(body.contains("Gate: echo GATE-OUTPUT; echo run >> runs.txt; test -f ok.txt"))
+        #expect(run.nodes[implement("c")]?.pendingFix == nil)
     }
 
     @Test func fixAttemptsRunOut() async throws {
@@ -177,6 +182,12 @@ import os
         #expect(run.nodes[gate("c")]?.state == .succeeded)
         #expect(run.lanes.map(\.gatePassed) == [true, true, true])
         #expect(h.agent.requests.filter { $0.prompt.contains("judging candidate") }.count == 1)
+        // The answer's commit is ordinary work, not labelled as a fix.
+        let subjects = try h.repo.git(["log", "--format=%s", run.lanes[2].branch]).split(separator: "\n").map(String.init)
+        #expect(subjects.contains("Crash on launch (c)"))
+        // (The fix turn itself, which asked the question, committed the gate's runs.txt: exactly one fix label.)
+        #expect(subjects.filter { $0.hasPrefix("Fix attempt") } == ["Fix attempt 1 of 2: Crash on launch (c)"])
+        #expect(run.nodes[implement("c")]?.pendingFix == nil)
     }
 
     @Test func nodesBetweenTheAgentAndTheGateRunAgainOnEachFix() async throws {
@@ -443,6 +454,36 @@ import os
         object["fixAttemptsUsed"] = nil
         let old = try JSONDecoder().decode(NodeRun.self, from: JSONSerialization.data(withJSONObject: object))
         #expect(old.fixAttemptsUsed == 0 && old.output == "x" && old.state == .succeeded)
+    }
+
+    @Test func nodeRunDecodesWithoutPendingFix() throws {
+        var run = NodeRun(state: .succeeded, output: "x")
+        let plain = try JSONEncoder().encode(run)
+        let plainObject = try #require(try JSONSerialization.jsonObject(with: plain) as? [String: Any])
+        #expect(plainObject["pendingFix"] == nil)  // omitted when nil
+        run.pendingFix = PendingFix(attempt: 2, total: 3, command: "make")
+        let data = try JSONEncoder().encode(run)
+        #expect(try JSONDecoder().decode(NodeRun.self, from: data) == run)
+        var object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["pendingFix"] = nil
+        let old = try JSONDecoder().decode(NodeRun.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(old.pendingFix == nil && old.output == "x")
+    }
+
+    @Test func laneCommitMessageNamesTheIssueAndLabelsFixes() {
+        let normal = RunEngine.laneCommitMessage(
+            runTitle: "#7 Crash on launch", flowName: "Fix issue", lane: "a", nodeTitle: "Implement", fix: nil)
+        #expect(normal == "Crash on launch (a)\n\nNode: Implement")
+        let fix = PendingFix(attempt: 1, total: 2, command: "make test")
+        let fixed = RunEngine.laneCommitMessage(
+            runTitle: "#7 Crash on launch", flowName: "Fix issue", lane: "b", nodeTitle: "Implement", fix: fix)
+        #expect(fixed == "Fix attempt 1 of 2: Crash on launch (b)\n\nNode: Implement\nGate: make test")
+    }
+
+    @Test func laneCommitMessageFallsBackToTheFlowName() {
+        let message = RunEngine.laneCommitMessage(
+            runTitle: "", flowName: "Fix issue", lane: "a", nodeTitle: "Implement", fix: nil)
+        #expect(message.hasPrefix("Fix issue (a)\n"))
     }
 
     @Test func savedRunWithoutFixAttemptsUsedLoads() throws {
