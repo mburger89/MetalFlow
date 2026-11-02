@@ -200,6 +200,7 @@ struct GateFixFields: Component {
             ForEach(Array(0...Self.maxAttempts), id: \.self) { Text(verbatim: "\($0)").tag($0) }
         }
         .pickerStyle(.menu)
+        .labelsHidden()
         .accessibilityIdentifier("inspector.gate.fixAttempts")
         if !draft.hasPromptUpstream(of: id) {
             Text(verbatim: "Needs a Prompt node feeding this gate.").font(size: 12).foregroundColor(Palette.muted)
