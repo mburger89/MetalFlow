@@ -273,6 +273,26 @@ import Testing
         #expect(draft.canvasSelection.nodes.count == draft.flow.nodes.count)
     }
 
+    @Test func aFocusedFieldKeepsDeleteSelectAllAndEscapeWithThePointerOverTheCanvas() async throws {
+        let (_, draft, window) = try await fixture()
+        try await click("node.plan", in: window)
+        let field = try window.element(identifier: "inspector.title")
+        window.click(at: ScreenPoint(x: field.frame.origin.x + field.frame.size.width - 4,
+                                     y: field.frame.origin.y + field.frame.size.height / 2))
+        window.typeText("x")
+        window.hover(at: try center(window, "node.gate"))
+        let flowBefore = draft.flow
+        window.typeKey(.delete)
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "inspector.title").value == "Plan", "Delete edited the field")
+        window.typeKey("a", modifierFlags: .command)
+        window.typeKey(.escape)
+        try await window.runUntilIdle()
+        #expect(draft.canvasSelection.nodes == ["plan"], "neither Cmd-A nor Esc reached the canvas")
+        #expect(draft.flow.nodes.count == flowBefore.nodes.count)
+        #expect(draft.flow.node("plan") != nil)
+    }
+
     @Test func selectionBridgeIsNilWithTwoSelected() async throws {
         let (_, draft, _) = try await fixture()
         draft.selection = "plan"

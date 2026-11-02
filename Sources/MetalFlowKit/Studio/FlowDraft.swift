@@ -177,11 +177,16 @@ public final class FlowDraft {
 
     /// Removes a node and every wire touching it, as one undo step.
     public func deleteNode(_ id: NodeID) {
-        apply("delete \(id.rawValue)", coalescing: false) { flow in
-            flow.nodes.removeAll { $0.id == id }
-            flow.wires.removeAll { $0.from == id || $0.to == id }
+        removeNodes([id], name: "delete \(id.rawValue)")
+    }
+
+    /// Removes `ids` with every wire touching them as one undo step named `name`, and drops them from the selection.
+    private func removeNodes(_ ids: Set<NodeID>, name: String) {
+        apply(name, coalescing: false) { flow in
+            flow.nodes.removeAll { ids.contains($0.id) }
+            flow.wires.removeAll { ids.contains($0.from) || ids.contains($0.to) }
         }
-        canvasSelection.nodes.remove(id)
+        canvasSelection.nodes.subtract(ids)
     }
 
     /// Removes the selected nodes with their wires as one undo step, or the selected wire.
@@ -190,11 +195,7 @@ public final class FlowDraft {
         if ids.count == 1, let id = ids.first {
             deleteNode(id)
         } else if !ids.isEmpty {
-            apply("delete \(ids.count) nodes", coalescing: false) { flow in
-                flow.nodes.removeAll { ids.contains($0.id) }
-                flow.wires.removeAll { ids.contains($0.from) || ids.contains($0.to) }
-            }
-            canvasSelection.nodes = []
+            removeNodes(ids, name: "delete \(ids.count) nodes")
         } else if let wire = selectedWire {
             apply("delete wire", coalescing: false) { flow in
                 if let i = flow.wires.firstIndex(of: wire) { flow.wires.remove(at: i) }
