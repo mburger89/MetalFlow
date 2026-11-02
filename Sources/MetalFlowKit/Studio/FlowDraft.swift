@@ -35,12 +35,12 @@ public final class FlowDraft {
     public private(set) var redoStack: [Flow] = []
     /// What is selected. View state: never undone. Selecting different nodes ends a typing burst.
     var canvasSelection = CanvasSelection() {
-        didSet { if canvasSelection.nodes != oldValue.nodes { lastEditName = nil } }
+        didSet { if canvasSelection.nodes != oldValue.nodes || canvasSelection.notes != oldValue.notes { lastEditName = nil } }
     }
     /// The selected node: the one node when exactly one node and nothing else is selected, else nil. Setting
     /// replaces the selection with that node (nil clears the nodes).
     public var selection: NodeID? {
-        get { canvasSelection.wire == nil && canvasSelection.nodes.count == 1 ? canvasSelection.nodes.first : nil }
+        get { canvasSelection.count == 1 && canvasSelection.wire == nil ? canvasSelection.nodes.first : nil }
         set {
             if let newValue {
                 canvasSelection = CanvasSelection(nodes: [newValue])
@@ -78,6 +78,8 @@ public final class FlowDraft {
     @ObservationIgnored var pointerInWindow: ScreenPoint?
     /// The Tab search pane, while open.
     var nodeSearch: NodeSearch?
+    /// The note being typed into, while its field is open. The text is written to the flow when the edit commits.
+    var noteEdit: NoteEdit?
     @ObservationIgnored private var hasFitted = false
     @ObservationIgnored var panStart: ScreenPoint?
     /// What the current primary drag is doing.
@@ -157,7 +159,10 @@ public final class FlowDraft {
     private func dropStaleSelection() {
         let nodes = canvasSelection.nodes.filter { flow.node($0) != nil }
         if nodes != canvasSelection.nodes { canvasSelection.nodes = nodes }
+        let notes = canvasSelection.notes.filter { id in flow.notes.contains { $0.id == id } }
+        if notes != canvasSelection.notes { canvasSelection.notes = notes }
         if let selectedWire, !flow.wires.contains(selectedWire) { self.selectedWire = nil }
+        if let edit = noteEdit, !flow.notes.contains(where: { $0.id == edit.id }) { noteEdit = nil }
     }
 
     // MARK: Structural edits
@@ -174,22 +179,28 @@ public final class FlowDraft {
         removeNodes([id], name: "delete \(id.rawValue)")
     }
 
-    /// Removes `ids` with every wire touching them as one undo step named `name`, and drops them from the selection.
-    private func removeNodes(_ ids: Set<NodeID>, name: String) {
+    /// Removes `ids` with every wire touching them, and the notes `noteIDs`, as one undo step named `name`, and drops
+    /// them from the selection. The nodes inside a removed frame stay.
+    private func removeNodes(_ ids: Set<NodeID>, notes noteIDs: Set<NoteID> = [], name: String) {
         apply(name, coalescing: false) { flow in
             flow.nodes.removeAll { ids.contains($0.id) }
             flow.wires.removeAll { ids.contains($0.from) || ids.contains($0.to) }
+            flow.notes.removeAll { noteIDs.contains($0.id) }
         }
         canvasSelection.nodes.subtract(ids)
+        canvasSelection.notes.subtract(noteIDs)
+        if let edit = noteEdit, noteIDs.contains(edit.id) { noteEdit = nil }
     }
 
-    /// Removes the selected nodes with their wires as one undo step, or the selected wire.
+    /// Removes the selected nodes with their wires, and the selected notes, as one undo step, or the selected wire.
     public func deleteSelection() {
-        let ids = canvasSelection.nodes
-        if ids.count == 1, let id = ids.first {
+        let ids = canvasSelection.nodes, notes = canvasSelection.notes
+        if ids.count == 1, notes.isEmpty, let id = ids.first {
             deleteNode(id)
-        } else if !ids.isEmpty {
-            removeNodes(ids, name: "delete \(ids.count) nodes")
+        } else if ids.isEmpty, notes.count == 1, let id = notes.first {
+            removeNodes([], notes: [id], name: "delete \(id.rawValue)")
+        } else if !ids.isEmpty || !notes.isEmpty {
+            removeNodes(ids, notes: notes, name: "delete \(ids.count + notes.count) items")
         } else if let wire = selectedWire {
             apply("delete wire", coalescing: false) { flow in
                 if let i = flow.wires.firstIndex(of: wire) { flow.wires.remove(at: i) }
@@ -221,14 +232,29 @@ public final class FlowDraft {
 
     // MARK: Moving
 
-    /// Moves the nodes in `origins` by `delta` canvas units, without an undo step.
-    func moveLive(_ origins: [NodeID: CanvasPoint], by delta: CanvasPoint) {
+    /// Moves the nodes in `origins` and the notes in `noteOrigins` by `delta` canvas units, without an undo step.
+    func moveLive(_ origins: [NodeID: CanvasPoint], notes noteOrigins: [NoteID: CanvasPoint] = [:], by delta: CanvasPoint) {
         var updated = flow
         for i in updated.nodes.indices {
             if let origin = origins[updated.nodes[i].id] {
                 updated.nodes[i].position = CanvasPoint(x: origin.x + delta.x, y: origin.y + delta.y)
             }
         }
+        for i in updated.notes.indices {
+            if let origin = noteOrigins[updated.notes[i].id] {
+                updated.notes[i].origin = CanvasPoint(x: origin.x + delta.x, y: origin.y + delta.y)
+            }
+        }
+        flow = updated
+    }
+
+    /// Sets a note's size to its size at drag start plus `delta` canvas units, no smaller than the minimum, without
+    /// an undo step.
+    func resizeLive(_ id: NoteID, from origin: CanvasRect, by delta: CanvasPoint) {
+        var updated = flow
+        guard let i = updated.notes.firstIndex(where: { $0.id == id }) else { return }
+        updated.notes[i].width = max(origin.w + delta.x, NoteLayout.minimumWidth)
+        updated.notes[i].height = max(origin.h + delta.y, NoteLayout.minimumHeight)
         flow = updated
     }
 
@@ -266,12 +292,43 @@ public final class FlowDraft {
 
 /// What a primary drag on the canvas is doing.
 enum DragMode {
-    /// Moving the selected nodes, whose positions were `origins` when the drag began.
-    case move(origins: [NodeID: CanvasPoint])
+    /// Moving the selected nodes and notes, and the nodes the selected frames carry, whose positions were `origins` and
+    /// `notes` when the drag began.
+    case move(origins: [NodeID: CanvasPoint], notes: [NoteID: CanvasPoint])
+    /// Resizing a note by its handle; `origin` is its rectangle when the drag began.
+    case resize(NoteID, origin: CanvasRect)
     /// Drawing a selection box from `start` (canvas-local screen points) over the selection `base`.
     case box(start: ScreenPoint, base: CanvasSelection, mode: SelectionMode)
     /// Dragging a new wire out of a node's out-port.
     case wire(NodeID)
+}
+
+/// What the palette adds: a node, or a note.
+public enum PaletteEntry: Hashable, Sendable {
+    /// A node of a kind.
+    case node(PaletteKind)
+    /// A note, which is not a node.
+    case note
+
+    /// The palette item's identifier suffix.
+    public var idPrefix: String {
+        switch self {
+        case .node(let kind): kind.idPrefix
+        case .note: "note"
+        }
+    }
+
+    /// The palette label.
+    public var label: String {
+        switch self {
+        case .node(let kind): kind.label
+        case .note: "Note"
+        }
+    }
+
+    /// The palette groups, in order: the node groups, then NOTES.
+    public static let groups: [(title: String, items: [PaletteEntry])] =
+        PaletteKind.groups.map { ($0.title, $0.items.map(PaletteEntry.node)) } + [("NOTES", [.note])]
 }
 
 /// The node kinds the palette adds.

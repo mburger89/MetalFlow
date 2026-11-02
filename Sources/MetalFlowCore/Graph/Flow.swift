@@ -283,11 +283,34 @@ public struct Flow: Codable, Hashable, Sendable {
     public var name: String
     public var nodes: [Node]
     public var wires: [Wire]
+    /// Notes and frames on the canvas. Never read by validation, the plan or a run.
+    public var notes: [FlowNote]
     /// Creates a flow.
-    public init(name: String, nodes: [Node], wires: [Wire]) {
+    public init(name: String, nodes: [Node], wires: [Wire], notes: [FlowNote] = []) {
         self.name = name
         self.nodes = nodes
         self.wires = wires
+        self.notes = notes
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, nodes, wires, notes }
+
+    /// Decodes a flow; files written before notes existed have no `notes` and mean none.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        nodes = try c.decode([Node].self, forKey: .nodes)
+        wires = try c.decode([Wire].self, forKey: .wires)
+        notes = try c.decodeIfPresent([FlowNote].self, forKey: .notes) ?? []
+    }
+
+    /// Encodes the flow, and `notes` only when there are some, so files without notes stay as they were.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(nodes, forKey: .nodes)
+        try c.encode(wires, forKey: .wires)
+        if !notes.isEmpty { try c.encode(notes, forKey: .notes) }
     }
     /// The node with the given ID, if any.
     public func node(_ id: NodeID) -> Node? { nodes.first { $0.id == id } }

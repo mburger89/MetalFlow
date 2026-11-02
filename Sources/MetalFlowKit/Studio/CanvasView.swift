@@ -2,10 +2,33 @@ import Foundation
 import MetalFlowCore
 import MetalUI
 
-/// The graph: dotted grid, wires and node cards under a pan and zoom, with the Fit button and zoom readout.
-/// Pan with the wheel or a middle / secondary drag, zoom with ⌘-wheel or a pinch, click to select (⇧ adds, ⌘ toggles),
-/// drag on empty canvas to draw a selection box.
+/// The layers of the canvas surface, bottom to top. Frames lie under the wires and stickies over them, both under the
+/// nodes; `CanvasSurface` draws them in this order.
+enum CanvasLayer: Hashable {
+    case grid, frames, wires, stickies, nodes, ports, box
+
+    /// Bottom to top.
+    static let drawOrder: [CanvasLayer] = [.grid, .frames, .wires, .stickies, .nodes, .ports, .box]
+}
+
+/// The graph and the field of the note being typed into. The field is a sibling of the surface, never inside it: the
+/// surface is a key region, and a field inside it would pass its keys to the canvas's own handler.
 struct CanvasView: Component {
+    let model: AppModel
+    let draft: FlowDraft
+
+    var content: some ElementGroup {
+        ZStack(alignment: .topLeading) {
+            CanvasSurface(model: model, draft: draft)
+            NoteEditorLayer(draft: draft)
+        }
+    }
+}
+
+/// The graph: dotted grid, notes, wires and node cards under a pan and zoom, with the Fit button and zoom readout.
+/// Pan with the wheel or a middle / secondary drag, zoom with ⌘-wheel or a pinch, click to select (⇧ adds, ⌘ toggles),
+/// drag on empty canvas to draw a selection box, double-click a note to edit it.
+struct CanvasSurface: Component {
     let model: AppModel
     let draft: FlowDraft
 
@@ -16,23 +39,7 @@ struct CanvasView: Component {
         let scoped = run.map(NodeOverlay.laneScoped) ?? []
         let draft = draft
         ZStack(alignment: .topLeading) {
-            DotGrid(geometry: g, size: size)
-            WireLayer(flow: draft.flow, geometry: g, selection: draft.canvasSelection.nodes, selectedWire: draft.selectedWire,
-                      pending: draft.pendingWire, size: size)
-            // The cards sit at canvas * zoom, so a pan is this one offset and no card is rebuilt for it.
-            ZStack(alignment: .topLeading) {
-                ForEach(draft.flow.nodes, id: \.id) { node in
-                    NodeCardView(
-                        node: node, zoom: g.zoom, selected: draft.canvasSelection.nodes.contains(node.id),
-                        overlay: run.map { NodeOverlay.make(node: node, run: $0, laneScoped: scoped.contains(node.id)) })
-                        .equatable()
-                }
-            }
-            .offset(x: g.pan.x, y: g.pan.y)
-            PortLayer(flow: draft.flow, geometry: g, size: size)
-            if let box = draft.selectionBox {
-                SelectionBoxView(rect: box)
-            }
+            CanvasLayers(draft: draft, run: run, laneScoped: scoped, size: size)
         }
         // minWidth / minHeight 0: the layers are as big as the canvas was last, and must not stop it shrinking
         // (the candidates strip appearing takes space from it).
@@ -64,7 +71,9 @@ struct CanvasView: Component {
             }
         }
         .onScrollWheel { Self.scroll($0, draft) }
-        .gesture(SpatialTapGesture().onEnded { draft.select(at: $0.location, modifiers: $0.modifiers) })
+        .gesture(SpatialTapGesture().onEnded { (tap: SpatialTapGesture.Value) in
+            draft.select(at: tap.location, modifiers: tap.modifiers, clickCount: tap.clickCount)
+        })
         .gesture(MagnifyGesture()
             .onChanged { draft.pinchChanged($0) }
             .onEnded { draft.pinchEnded($0) })
@@ -82,9 +91,9 @@ struct CanvasView: Component {
             .onEnded { _ in draft.panStart = nil })
     }
 
-    /// Delete and Backspace remove the selection; ⌘A selects every node, Esc clears the selection; ⌘Z undoes, ⇧⌘Z
-    /// redoes; Tab opens the node search. Only reached while the canvas has focus or the pointer is over it with nothing focused, so typing in
-    /// an inspector field never lands here.
+    /// Delete and Backspace remove the selection; ⌘A selects every node and note, Esc clears the selection; ⌘Z undoes,
+    /// ⇧⌘Z redoes; Tab opens the node search; N adds a note at the pointer. Only reached while the canvas has focus or
+    /// the pointer is over it with nothing focused, so typing in an inspector field never lands here.
     @MainActor
     static func key(_ press: KeyPress, _ draft: FlowDraft) -> KeyPress.Result {
         if press.key == .delete || press.key == .deleteForward {
@@ -94,6 +103,10 @@ struct CanvasView: Component {
         }
         if press.key == .tab, press.modifiers.isEmpty {
             draft.openNodeSearch()
+            return .handled
+        }
+        if press.key.character.lowercased() == "n", press.modifiers.isEmpty {
+            draft.addNote(at: draft.pointer)
             return .handled
         }
         if press.key == .escape {
@@ -126,27 +139,38 @@ struct CanvasView: Component {
 }
 
 extension FlowDraft {
-    /// A primary drag: on an out-port it draws a wire, on a node it moves the selection (selecting the node first
-    /// unless it is selected), on empty canvas it draws a selection box.
+    /// A primary drag: on an out-port it draws a wire, on a node or a note it moves the selection (selecting what was
+    /// pressed first unless it is selected), on the handle of a selected note it resizes the note, on empty canvas it
+    /// draws a selection box.
     func primaryDragChanged(_ value: DragGesture.Value) {
         if dragMode == nil {
             let start = geometry.toCanvas(value.startLocation)
             let mode = SelectionMode(value.modifiers)
             if let (id, side) = geometry.hitPort(at: start, in: flow), side == .output {
                 dragMode = .wire(id)
-            } else if let id = geometry.hitNode(at: start, in: flow) {
+            } else if let hit = hit(at: start) {
                 dragStartFlow = flow
-                dragMode = .move(origins: beginMove(of: id, mode: mode))
+                if case .note(let id, .handle) = hit, let note = flow.notes.first(where: { $0.id == id }) {
+                    dragMode = .resize(id, origin: geometry.noteRect(note))
+                } else {
+                    let origins = beginMove(of: hit, mode: mode)
+                    dragMode = .move(origins: origins.nodes, notes: origins.notes)
+                }
             } else {
-                let base = mode == .replace ? CanvasSelection() : CanvasSelection(nodes: canvasSelection.nodes)
+                let base = mode == .replace ? CanvasSelection()
+                    : CanvasSelection(nodes: canvasSelection.nodes, notes: canvasSelection.notes)
                 dragMode = .box(start: value.startLocation, base: base, mode: mode)
             }
         }
         switch dragMode {
-        case .move(let origins):
+        case .move(let origins, let notes):
             let z = geometry.zoom
-            moveLive(origins, by: CanvasPoint(x: Double(value.translation.width.value) / z,
-                                              y: Double(value.translation.height.value) / z))
+            moveLive(origins, notes: notes, by: CanvasPoint(x: Double(value.translation.width.value) / z,
+                                                            y: Double(value.translation.height.value) / z))
+        case .resize(let id, let origin):
+            let z = geometry.zoom
+            resizeLive(id, from: origin, by: CanvasPoint(x: Double(value.translation.width.value) / z,
+                                                         y: Double(value.translation.height.value) / z))
         case .wire(let id):
             pendingWire = (id, value.location)
         case .box(let start, let base, let mode):
@@ -158,7 +182,7 @@ extension FlowDraft {
 
     func primaryDragEnded(_ value: DragGesture.Value) {
         switch dragMode {
-        case .move:
+        case .move, .resize:
             finishMove()
         case .wire(let from):
             pendingWire = nil
@@ -190,6 +214,89 @@ extension FlowDraft {
     func pinchEnded(_ value: MagnifyGesture.Value) {
         pinchChanged(value)
         pinchStart = nil
+    }
+}
+
+/// The grid, notes, wires, cards, ports and selection box, in `CanvasLayer.drawOrder`.
+struct CanvasLayers: Component {
+    let draft: FlowDraft
+    let run: Run?
+    let laneScoped: Set<NodeID>
+    let size: Size<Pixels>
+
+    var content: some ElementGroup {
+        let g = draft.geometry
+        let draft = draft
+        let run = run, scoped = laneScoped
+        ZStack(alignment: .topLeading) {
+            ForEach(CanvasLayer.drawOrder, id: \.self) { layer in
+                switch layer {
+                case .grid:
+                    DotGrid(geometry: g, size: size)
+                case .frames:
+                    NoteLayer(draft: draft, frames: true)
+                case .wires:
+                    WireLayer(flow: draft.flow, geometry: g, selection: draft.canvasSelection.nodes,
+                              selectedWire: draft.selectedWire, pending: draft.pendingWire, size: size)
+                case .stickies:
+                    NoteLayer(draft: draft, frames: false)
+                case .nodes:
+                    NodeLayer(draft: draft, run: run, laneScoped: scoped)
+                case .ports:
+                    PortLayer(flow: draft.flow, geometry: g, size: size)
+                case .box:
+                    if let box = draft.selectionBox {
+                        SelectionBoxView(rect: box)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The node cards. They sit at canvas * zoom, so a pan is the one offset and no card is rebuilt for it.
+struct NodeLayer: Component {
+    let draft: FlowDraft
+    let run: Run?
+    let laneScoped: Set<NodeID>
+
+    var content: some ElementGroup {
+        let g = draft.geometry
+        let selection = draft.canvasSelection.nodes
+        ZStack(alignment: .topLeading) {
+            ForEach(draft.flow.nodes, id: \.id) { node in
+                NodeCardView(
+                    node: node, zoom: g.zoom, selected: selection.contains(node.id),
+                    overlay: run.map { NodeOverlay.make(node: node, run: $0, laneScoped: laneScoped.contains(node.id)) })
+                    .equatable()
+            }
+        }
+        .offset(x: g.pan.x, y: g.pan.y)
+    }
+}
+
+/// The frames, or the stickies, of the flow, placed like the node cards.
+struct NoteLayer: Component {
+    let draft: FlowDraft
+    let frames: Bool
+
+    var content: some ElementGroup {
+        let g = draft.geometry
+        let notes = draft.flow.notes.filter { $0.surrounds == frames }
+        let selection = draft.canvasSelection.notes
+        let editing = draft.editingNote
+        ZStack(alignment: .topLeading) {
+            ForEach(notes, id: \.id.rawValue) { note in
+                if frames {
+                    FrameView(note: note, zoom: g.zoom, selected: selection.contains(note.id), editing: editing == note.id)
+                        .equatable()
+                } else {
+                    StickyView(note: note, zoom: g.zoom, selected: selection.contains(note.id), editing: editing == note.id)
+                        .equatable()
+                }
+            }
+        }
+        .offset(x: g.pan.x, y: g.pan.y)
     }
 }
 

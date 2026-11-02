@@ -15,8 +15,48 @@ struct CanvasRect: Equatable, Sendable {
     /// Height.
     var h: Double
 
+    /// The right edge.
+    var maxX: Double { x + w }
+    /// The bottom edge.
+    var maxY: Double { y + h }
+
     /// Whether the point lies inside (half-open on the right and bottom edges).
     func contains(_ p: CanvasPoint) -> Bool { p.x >= x && p.x < x + w && p.y >= y && p.y < y + h }
+
+    /// Whether the two rectangles overlap. Rectangles that only touch do not.
+    func intersects(_ other: CanvasRect) -> Bool {
+        x < other.maxX && other.x < maxX && y < other.maxY && other.y < maxY
+    }
+}
+
+/// Which part of a note a point is on.
+enum NotePart: Equatable, Sendable {
+    /// A sticky anywhere: it grabs every press inside it.
+    case body
+    /// A frame's title strip or edge band: the only parts of a frame that grab a press.
+    case chrome
+    /// The resize handle at the bottom-right corner of a selected note.
+    case handle
+}
+
+/// The sizes of notes, in canvas units. Computed, never measured, so drawing, hit testing and resizing agree.
+enum NoteLayout {
+    /// A new sticky's size.
+    static let stickyWidth = 200.0
+    static let stickyHeight = 120.0
+    /// Slack between the nodes a new frame surrounds and the frame.
+    static let framePadding = 24.0
+    /// The title strip at the top of a frame.
+    static let titleStrip = 22.0
+    /// How far inside a frame's edge a press still grabs the frame.
+    static let edgeBand = 6.0
+    /// The side of the resize handle.
+    static let handle = 12.0
+    /// The smallest a note can be resized to.
+    static let minimumWidth = 80.0
+    static let minimumHeight = 40.0
+    /// A sticky's text inset.
+    static let textPadding = 8.0
 }
 
 /// Which side of a node a port is on.
@@ -114,6 +154,62 @@ struct CanvasGeometry: Equatable {
         }.map(\.id)
     }
 
+    /// A note's rectangle in canvas units.
+    func noteRect(_ n: FlowNote) -> CanvasRect {
+        CanvasRect(x: n.origin.x, y: n.origin.y, w: n.width, h: n.height)
+    }
+
+    /// The part of a frame drawn at `rect` that is not its chrome (inside the title strip and the edge band); nil when
+    /// the frame is so small that all of it is chrome.
+    func interior(of rect: CanvasRect) -> CanvasRect? {
+        let w = rect.w - 2 * NoteLayout.edgeBand, h = rect.h - NoteLayout.titleStrip - NoteLayout.edgeBand
+        guard w > 0, h > 0 else { return nil }
+        return CanvasRect(x: rect.x + NoteLayout.edgeBand, y: rect.y + NoteLayout.titleStrip, w: w, h: h)
+    }
+
+    /// The resize handle of a note drawn at `rect`: its bottom-right corner.
+    func handleRect(of rect: CanvasRect) -> CanvasRect {
+        CanvasRect(x: rect.maxX - NoteLayout.handle, y: rect.maxY - NoteLayout.handle, w: NoteLayout.handle, h: NoteLayout.handle)
+    }
+
+    /// The note under a canvas point, with the part of it. Order: the handle of a selected note, then stickies (the
+    /// last drawn first), then the chrome of frames. A frame's interior is not a hit, so nodes and empty canvas
+    /// inside it still get their presses. The caller puts nodes between the handle and the rest.
+    func hitNote(at canvas: CanvasPoint, in flow: Flow, selected: Set<NoteID>) -> (NoteID, NotePart)? {
+        for note in flow.notes.reversed() where selected.contains(note.id) && handleRect(of: noteRect(note)).contains(canvas) {
+            return (note.id, .handle)
+        }
+        for note in flow.notes.reversed() where !note.surrounds && noteRect(note).contains(canvas) {
+            return (note.id, .body)
+        }
+        for note in flow.notes.reversed() where note.surrounds {
+            let rect = noteRect(note)
+            guard rect.contains(canvas) else { continue }
+            if interior(of: rect)?.contains(canvas) != true { return (note.id, .chrome) }
+        }
+        return nil
+    }
+
+    /// The notes a box takes, in draw order: a sticky it overlaps, a frame whose chrome it meets (a box wholly inside
+    /// a frame's interior is among the nodes, not on the frame).
+    func notes(in box: CanvasRect, flow: Flow) -> [NoteID] {
+        flow.notes.filter { note in
+            let rect = noteRect(note)
+            guard rect.intersects(box) else { return false }
+            guard note.surrounds, let inside = interior(of: rect) else { return true }
+            let wholly = box.x >= inside.x && box.y >= inside.y && box.maxX <= inside.maxX && box.maxY <= inside.maxY
+            return !wholly
+        }.map(\.id)
+    }
+
+    /// The nodes whose centre lies inside `rect`, in draw order.
+    func nodes(centredIn rect: CanvasRect, flow: Flow) -> [NodeID] {
+        flow.nodes.filter { node in
+            let r = nodeRect(node)
+            return rect.contains(CanvasPoint(x: r.x + r.w / 2, y: r.y + r.h / 2))
+        }.map(\.id)
+    }
+
     /// The port within 8 screen points of the canvas point. Outputs win over inputs; later nodes over earlier.
     func hitPort(at canvas: CanvasPoint, in flow: Flow) -> (NodeID, PortSide)? {
         let radius = Self.portRadius / zoom
@@ -157,11 +253,11 @@ struct CanvasGeometry: Equatable {
         return nil
     }
 
-    /// A geometry whose projection of every node lies inside `size` with a 40 point margin, centred.
-    /// A flow with no nodes gives the identity view.
+    /// A geometry whose projection of every node and note lies inside `size` with a 40 point margin, centred.
+    /// A flow with no nodes or notes gives the identity view.
     func fit(_ flow: Flow, in size: Size<Pixels>) -> CanvasGeometry {
-        guard !flow.nodes.isEmpty else { return CanvasGeometry() }
-        let rects = flow.nodes.map(nodeRect)
+        let rects = flow.nodes.map(nodeRect) + flow.notes.map(noteRect)
+        guard !rects.isEmpty else { return CanvasGeometry() }
         let minX = rects.map(\.x).min()!, minY = rects.map(\.y).min()!
         let maxX = rects.map { $0.x + $0.w }.max()!, maxY = rects.map { $0.y + $0.h }.max()!
         let w = Double(size.width.value), h = Double(size.height.value)

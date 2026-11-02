@@ -95,7 +95,7 @@ extension FlowDraft {
     }
 }
 
-/// The selected node's or wire's settings.
+/// The selected node's settings, a note's text, or a count when several things are selected.
 struct InspectorView: Component {
     let model: AppModel
     let draft: FlowDraft
@@ -106,12 +106,20 @@ struct InspectorView: Component {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if let id = draft.selection, let node = draft.flow.node(id) {
                 NodeInspector(model: model, draft: draft, node: node, repos: repos)
-            } else if draft.canvasSelection.nodes.count > 1 {
-                Text(verbatim: "\(draft.canvasSelection.nodes.count) selected").font(size: 13).foregroundColor(Palette.text)
+            } else if draft.canvasSelection.count > 1 {
+                Text(verbatim: "\(draft.canvasSelection.count) selected").font(size: 13).foregroundColor(Palette.text)
                     .accessibilityIdentifier("inspector.selectionCount")
                 Button("Delete") { draft.deleteSelection() }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("inspector.deleteSelection")
+            } else if draft.canvasSelection.count == 1, let id = draft.canvasSelection.notes.first,
+                      let note = draft.flow.notes.first(where: { $0.id == id }) {
+                Text(verbatim: "Note").font(size: 11).foregroundColor(Palette.muted)
+                    .accessibilityIdentifier("inspector.note")
+                Text(verbatim: note.text).font(size: 13).foregroundColor(Palette.text)
+                    .accessibilityIdentifier("inspector.noteText")
+                Text(verbatim: "Double-click the note to edit it. Delete removes it.")
+                    .font(size: 12).foregroundColor(Palette.muted)
             } else if let wire = draft.selectedWire {
                 Text(verbatim: "Wire").font(size: 11).foregroundColor(Palette.muted)
                 Text(verbatim: "\(wire.from.rawValue) → \(wire.to.rawValue) as {\(wire.input)}")

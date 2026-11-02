@@ -1,7 +1,7 @@
 import MetalFlowCore
 import MetalUI
 
-/// The Tab search pane: a field, up to six matching node kinds with the highlighted one marked, and a caption line.
+/// The Tab search pane: a field, up to six matching entries with the highlighted one marked, and a caption line.
 /// A fixed size, whatever it shows, so it does not jump as results change. `StudioBody` presents it with
 /// `anchoredOverlay`, which flips it at the window's edges, closes it on Esc or a click outside, and keeps a click or
 /// scroll on it from reaching the canvas.
@@ -36,8 +36,8 @@ struct NodeSearchPane: Component {
                 .frame(height: Pixels(Self.fieldHeight))
                 .accessibilityIdentifier("nodeSearch.field")
             VStack(alignment: .leading, spacing: Pixels(0)) {
-                ForEach(visible, id: \.idPrefix) { kind in
-                    NodeSearchRow(draft: draft, kind: kind, isHighlighted: kind == matches[highlighted.clamped(to: matches)])
+                ForEach(visible, id: \.idPrefix) { entry in
+                    NodeSearchRow(draft: draft, entry: entry, isHighlighted: entry == matches[highlighted.clamped(to: matches)])
                 }
             }
             .frame(width: Pixels(Self.width - 2 * Self.padding), height: Pixels(Float(Self.rows) * Self.rowHeight),
@@ -73,19 +73,19 @@ private extension Int {
 /// One match: its label, marked when highlighted. A click adds it.
 struct NodeSearchRow: Component {
     let draft: FlowDraft
-    let kind: PaletteKind
+    let entry: PaletteEntry
     let isHighlighted: Bool
 
     var content: some ElementGroup {
-        let draft = draft, kind = kind
-        Text(verbatim: kind.label).font(size: 13).foregroundColor(Palette.text)
+        let draft = draft, entry = entry
+        Text(verbatim: entry.label).font(size: 13).foregroundColor(Palette.text)
             .padding(insets(top: 0, right: 8, bottom: 0, left: 8))
             .frame(maxWidth: .infinity, minHeight: Pixels(NodeSearchPane.rowHeight), maxHeight: Pixels(NodeSearchPane.rowHeight),
                    alignment: .leading)
             .background(isHighlighted ? Palette.line : Palette.panel)
             .cornerRadius(6)
-            .onTapGesture { draft.confirmNodeSearch(kind) }
-            .accessibilityIdentifier("nodeSearch.\(kind.idPrefix)")
-            .accessibilityAction { draft.confirmNodeSearch(kind) }
+            .onTapGesture { draft.confirmNodeSearch(entry) }
+            .accessibilityIdentifier("nodeSearch.\(entry.idPrefix)")
+            .accessibilityAction { draft.confirmNodeSearch(entry) }
     }
 }

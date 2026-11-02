@@ -87,7 +87,7 @@ import Testing
         // And model-level, just outside the canvas's left edge.
         let frame = try #require(draft.canvasFrame)
         let far = ScreenPoint(x: frame.origin.x, y: frame.origin.y + 50)
-        #expect(draft.endPaletteDrag(.shell, from: offset(far, -100, 0), at: offset(far, -1, 0)) == nil)
+        #expect(draft.endPaletteDrag(.node(.shell), from: offset(far, -100, 0), at: offset(far, -1, 0)) == nil)
         #expect(draft.flow == before)
     }
 
@@ -102,12 +102,12 @@ import Testing
         try expectCentre(draft, id, at: ScreenPoint(x: size.width / 2, y: size.height / 2))
         #expect(draft.paletteDrag == nil)
         // Below the threshold nothing is drawn under the pointer.
-        draft.movePaletteDrag(.gate, from: row, to: offset(row, 3, 0))
+        draft.movePaletteDrag(.node(.gate), from: row, to: offset(row, 3, 0))
         #expect(draft.paletteDrag == nil)
-        draft.movePaletteDrag(.gate, from: row, to: offset(row, 5, 0))
-        #expect(draft.paletteDrag == PaletteDrag(kind: .gate, windowPoint: offset(row, 5, 0)))
+        draft.movePaletteDrag(.node(.gate), from: row, to: offset(row, 5, 0))
+        #expect(draft.paletteDrag == PaletteDrag(entry: .node(.gate), windowPoint: offset(row, 5, 0)))
         // Once dragging, coming back within the threshold keeps it a drag.
-        draft.movePaletteDrag(.gate, from: row, to: offset(row, 1, 0))
+        draft.movePaletteDrag(.node(.gate), from: row, to: offset(row, 1, 0))
         #expect(draft.paletteDrag != nil)
     }
 
@@ -131,8 +131,8 @@ import Testing
         let before = draft.flow
         let frame = try #require(draft.canvasFrame)
         let start = ScreenPoint(x: frame.origin.x - 50, y: frame.origin.y + 50)
-        draft.movePaletteDrag(.shell, from: start, to: offset(frame.origin, 100, 100))
-        #expect(draft.paletteDrag?.kind == .shell)
+        draft.movePaletteDrag(.node(.shell), from: start, to: offset(frame.origin, 100, 100))
+        #expect(draft.paletteDrag?.entry == .node(.shell))
         try await window.runUntilIdle()
         let label = try window.element(identifier: "palette.drag").frame
         #expect(label.contains(offset(frame.origin, 100, 100)), "the label is drawn under the pointer")
@@ -158,8 +158,8 @@ import Testing
         _ = try window.element(identifier: "nodeSearch")
         _ = try window.element(identifier: "nodeSearch.field")
         #expect(try window.focusedElement?.identifier == "nodeSearch.field")
-        for kind in PaletteKind.groups.flatMap(\.items).prefix(NodeSearchPane.rows) {
-            _ = try window.element(identifier: "nodeSearch.\(kind.idPrefix)")
+        for entry in PaletteEntry.groups.flatMap(\.items).prefix(NodeSearchPane.rows) {
+            _ = try window.element(identifier: "nodeSearch.\(entry.idPrefix)")
         }
     }
 
@@ -206,14 +206,14 @@ import Testing
         draft.moveNodeSearch(by: 3)
         #expect(draft.nodeSearch?.highlighted == 3)
         draft.setNodeSearchQuery("PRO")
-        #expect(draft.nodeSearchMatches == [.prompt])
+        #expect(draft.nodeSearchMatches == [.node(.prompt)])
         #expect(draft.nodeSearch?.highlighted == 0)
         draft.setNodeSearchQuery("o")
-        let all = PaletteKind.groups.flatMap(\.items)
+        let all = PaletteEntry.groups.flatMap(\.items)
         #expect(draft.nodeSearchMatches == all.filter { $0.label.lowercased().contains("o") })
         draft.moveNodeSearch(by: 1)
         draft.setNodeSearchQuery("OPEN")
-        #expect(draft.nodeSearchMatches == [.openPR])
+        #expect(draft.nodeSearchMatches == [.node(.openPR)])
         #expect(draft.nodeSearch?.highlighted == 0)
     }
 
@@ -243,7 +243,7 @@ import Testing
         window.typeKey(.return)
         try await window.runUntilIdle()
         let id = try newNode(draft, before: before)
-        #expect(draft.flow.node(id)?.title == PaletteKind.groups.flatMap(\.items)[2].label)
+        #expect(draft.flow.node(id)?.title == PaletteEntry.groups.flatMap(\.items)[2].label)
         try expectCentre(draft, id, at: ScreenPoint(x: Pixels(250), y: Pixels(180)))
         #expect(draft.selection == id)
         #expect(draft.nodeSearch == nil)
@@ -292,14 +292,14 @@ import Testing
         #expect(draft.nodeSearch == nil)
     }
 
-    @Test func everyPaletteKindIsSearchable() async throws {
+    @Test func everyPaletteEntryIsSearchable() async throws {
         let (_, draft, _) = try await fixture()
         draft.openNodeSearch()
-        let all = PaletteKind.groups.flatMap(\.items)
+        let all = PaletteEntry.groups.flatMap(\.items)
         #expect(draft.nodeSearchMatches == all)
-        for kind in all {
-            draft.setNodeSearchQuery(kind.label)
-            #expect(draft.nodeSearchMatches.contains(kind), "\(kind.label) is not searchable")
+        for entry in all {
+            draft.setNodeSearchQuery(entry.label)
+            #expect(draft.nodeSearchMatches.contains(entry), "\(entry.label) is not searchable")
         }
     }
 }

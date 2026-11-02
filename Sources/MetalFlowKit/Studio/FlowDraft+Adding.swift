@@ -3,8 +3,14 @@ import MetalUI
 
 /// A palette row being dragged: what it adds and where the pointer is, in window points.
 struct PaletteDrag: Equatable {
-    var kind: PaletteKind
+    var entry: PaletteEntry
     var windowPoint: ScreenPoint
+}
+
+/// What a palette row, a drop or the search pane added.
+enum AddedItem: Equatable {
+    case node(NodeID)
+    case note(NoteID)
 }
 
 /// The Tab search pane: what was typed, which match is highlighted, where the pane sits (window points) and where
@@ -37,6 +43,24 @@ extension FlowDraft {
         return insert(kind, at: CanvasPoint(x: (centre.x - size.w / 2).rounded(), y: (centre.y - size.h / 2).rounded()))
     }
 
+    /// Adds `entry` at the canvas centre: a node, or a note (a frame if nodes are selected).
+    @discardableResult
+    func add(_ entry: PaletteEntry) -> AddedItem {
+        switch entry {
+        case .node(let kind): .node(addNode(kind))
+        case .note: .note(addNote())
+        }
+    }
+
+    /// Adds `entry` centred on a canvas-local screen point.
+    @discardableResult
+    func add(_ entry: PaletteEntry, centredAt point: ScreenPoint) -> AddedItem {
+        switch entry {
+        case .node(let kind): .node(addNode(kind, centredAt: point))
+        case .note: .note(addNote(at: point))
+        }
+    }
+
     private func insert(_ kind: PaletteKind, at position: CanvasPoint) -> NodeID {
         let id = uniqueID(prefix: kind.idPrefix)
         let node = Node(id: id, title: kind.label, kind: kind.defaultKind, position: position)
@@ -49,21 +73,21 @@ extension FlowDraft {
 
     /// The pointer moved while pressing a palette row (`start` and `point` in window points). Once it is past the
     /// click threshold the row is being dragged, and stays a drag until the press ends, even if the pointer returns.
-    func movePaletteDrag(_ kind: PaletteKind, from start: ScreenPoint, to point: ScreenPoint) {
-        guard paletteDrag?.kind == kind || Self.distance(start, point) >= Self.paletteDragThreshold else { return }
-        paletteDrag = PaletteDrag(kind: kind, windowPoint: point)
+    func movePaletteDrag(_ entry: PaletteEntry, from start: ScreenPoint, to point: ScreenPoint) {
+        guard paletteDrag?.entry == entry || Self.distance(start, point) >= Self.paletteDragThreshold else { return }
+        paletteDrag = PaletteDrag(entry: entry, windowPoint: point)
     }
 
     /// The press on a palette row ended at `point` (window points). A press that never left the threshold is a click
     /// and adds at the canvas centre; a drag adds centred on the drop when it lands on the canvas, and nothing
-    /// elsewhere. Returns the new node.
+    /// elsewhere. Returns what was added.
     @discardableResult
-    func endPaletteDrag(_ kind: PaletteKind, from start: ScreenPoint, at point: ScreenPoint) -> NodeID? {
-        let dragged = paletteDrag?.kind == kind || Self.distance(start, point) >= Self.paletteDragThreshold
+    func endPaletteDrag(_ entry: PaletteEntry, from start: ScreenPoint, at point: ScreenPoint) -> AddedItem? {
+        let dragged = paletteDrag?.entry == entry || Self.distance(start, point) >= Self.paletteDragThreshold
         paletteDrag = nil
-        guard dragged else { return addNode(kind) }
+        guard dragged else { return add(entry) }
         guard let frame = canvasFrame, frame.contains(point) else { return nil }
-        return addNode(kind, centredAt: ScreenPoint(x: point.x - frame.origin.x, y: point.y - frame.origin.y))
+        return add(entry, centredAt: ScreenPoint(x: point.x - frame.origin.x, y: point.y - frame.origin.y))
     }
 
     /// The press on a palette row was dropped without a release: nothing is added, not even as a click.
@@ -86,10 +110,10 @@ extension FlowDraft {
 
     // MARK: The Tab search pane
 
-    /// The palette kinds whose label contains the query, ignoring case, in palette order.
-    var nodeSearchMatches: [PaletteKind] {
+    /// The palette entries whose label contains the query, ignoring case, in palette order.
+    var nodeSearchMatches: [PaletteEntry] {
         let needle = (nodeSearch?.query ?? "").lowercased()
-        let all = PaletteKind.groups.flatMap(\.items)
+        let all = PaletteEntry.groups.flatMap(\.items)
         return needle.isEmpty ? all : all.filter { $0.label.lowercased().contains(needle) }
     }
 
@@ -118,17 +142,17 @@ extension FlowDraft {
         nodeSearch?.highlighted = highlighted
     }
 
-    /// Adds `kind`, or the highlighted match, at the point the pane opened and closes it. With nothing to add the
-    /// pane stays open. Returns the new node.
+    /// Adds `entry`, or the highlighted match, at the point the pane opened and closes it. With nothing to add the
+    /// pane stays open. Returns what was added.
     @discardableResult
-    func confirmNodeSearch(_ kind: PaletteKind? = nil) -> NodeID? {
+    func confirmNodeSearch(_ entry: PaletteEntry? = nil) -> AddedItem? {
         guard let search = nodeSearch else { return nil }
         let matches = nodeSearchMatches
-        guard let kind = kind ?? (matches.indices.contains(search.highlighted) ? matches[search.highlighted] : nil) else {
+        guard let entry = entry ?? (matches.indices.contains(search.highlighted) ? matches[search.highlighted] : nil) else {
             return nil
         }
         nodeSearch = nil
-        return addNode(kind, centredAt: search.dropPoint)
+        return add(entry, centredAt: search.dropPoint)
     }
 
     /// Closes the pane, adding nothing.

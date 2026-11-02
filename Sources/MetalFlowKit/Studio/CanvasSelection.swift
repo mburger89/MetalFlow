@@ -1,28 +1,35 @@
 import MetalFlowCore
 import MetalUI
 
-/// What is selected on the canvas: nodes, or one wire. View state: never undone, never saved.
+/// What is selected on the canvas: nodes and notes, or one wire. View state: never undone, never saved.
 struct CanvasSelection: Equatable {
     /// The selected nodes.
     var nodes: Set<NodeID>
-    /// The selected wire. A wire is never selected with nodes.
+    /// The selected notes and frames.
+    var notes: Set<NoteID>
+    /// The selected wire. A wire is never selected with nodes or notes.
     var wire: Wire?
 
-    init(nodes: Set<NodeID> = [], wire: Wire? = nil) {
+    init(nodes: Set<NodeID> = [], notes: Set<NoteID> = [], wire: Wire? = nil) {
         self.nodes = nodes
+        self.notes = notes
         self.wire = wire
     }
 
     /// Whether nothing is selected.
-    var isEmpty: Bool { nodes.isEmpty && wire == nil }
+    var isEmpty: Bool { nodes.isEmpty && notes.isEmpty && wire == nil }
 
-    /// This selection combined with `hit` nodes as `mode` says: replaced by them, with them added, or with each of
-    /// them toggled in or out. A selected wire is dropped.
-    func applying(_ hit: Set<NodeID>, mode: SelectionMode) -> CanvasSelection {
+    /// How many nodes and notes are selected.
+    var count: Int { nodes.count + notes.count }
+
+    /// This selection combined with the `hit` nodes and notes as `mode` says: replaced by them, with them added, or
+    /// with each of them toggled in or out. A selected wire is dropped.
+    func applying(_ hit: Set<NodeID>, notes hitNotes: Set<NoteID> = [], mode: SelectionMode) -> CanvasSelection {
         switch mode {
-        case .replace: CanvasSelection(nodes: hit)
-        case .add: CanvasSelection(nodes: nodes.union(hit))
-        case .toggle: CanvasSelection(nodes: nodes.symmetricDifference(hit))
+        case .replace: CanvasSelection(nodes: hit, notes: hitNotes)
+        case .add: CanvasSelection(nodes: nodes.union(hit), notes: notes.union(hitNotes))
+        case .toggle:
+            CanvasSelection(nodes: nodes.symmetricDifference(hit), notes: notes.symmetricDifference(hitNotes))
         }
     }
 }

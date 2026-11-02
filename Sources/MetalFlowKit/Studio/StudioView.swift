@@ -88,7 +88,7 @@ struct PaletteDragLabel: Component {
     var content: some ElementGroup {
         ZStack(alignment: .topLeading) {
             if let drag {
-                Text(verbatim: drag.kind.label).font(size: 13).foregroundColor(Palette.text)
+                Text(verbatim: drag.entry.label).font(size: 13).foregroundColor(Palette.text)
                     .frame(width: Pixels(Self.size.width), height: Pixels(Self.size.height))
                     .background(Palette.line)
                     .cornerRadius(6)
