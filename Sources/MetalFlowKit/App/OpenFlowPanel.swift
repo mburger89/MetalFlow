@@ -46,8 +46,11 @@ struct OpenFlowPanel: Component {
 }
 
 extension OpenFlowPanel {
-    /// `openFlow.builtin` for the built-in, otherwise `openFlow.<file name>`; the panel suffixes repeats (see `UniqueIdentifiers`).
+    /// `openFlow.builtin` for the default built-in, `openFlow.builtin.<slug of its name>` for the others, otherwise
+    /// `openFlow.<file name>`; the panel suffixes repeats (see `UniqueIdentifiers`).
     static func identifier(of entry: FlowEntry) -> String {
-        entry.file.map { "openFlow.\($0.lastPathComponent)" } ?? "openFlow.builtin"
+        if let file = entry.file { return "openFlow.\(file.lastPathComponent)" }
+        if entry.name == BuiltinFlows.all.first?.name { return "openFlow.builtin" }
+        return "openFlow.builtin.\(FlowCatalog.slug(entry.name))"
     }
 }

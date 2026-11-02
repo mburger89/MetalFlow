@@ -40,3 +40,68 @@ public enum BuiltinFlows {
             Wire(from: "judge", to: "pick", input: "recommendation"),
         ])
 }
+
+extension BuiltinFlows {
+    /// Every built-in flow; the first is the default.
+    public static let all: [Flow] = [fixGitHubIssue, buildFeature]
+
+    /// The built-in called `name`, if any.
+    public static func named(_ name: String) -> Flow? { all.first { $0.name == name } }
+
+    private static let readOnlyTools = ["Read", "Grep", "Glob", "Bash(git ls-files:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)"]
+    private static let editTools = ["Read", "Edit", "Write", "Grep", "Glob", "Bash(swift build:*)", "Bash(swift test:*)", "Bash(git ls-files:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)"]
+
+    /// Describe a feature, plan it with Opus, build it with Sonnet and Opus in parallel, gate on `swift test`, review,
+    /// judge, pick, then open a draft pull request.
+    public static let buildFeature: Flow = {
+        var review = ReviewConfig.defaultAgent
+        review.prompt = "Review this change against the feature request and the plan. Look for anything the plan promised that is missing, bugs, and missing tests. Do not edit files. List only the problems worth fixing, each with its file and line.\n\nFeature:\n{feature}\n\nPlan:\n{plan}\n\n{diff}"
+        return Flow(
+            name: "Build a feature",
+            nodes: [
+                Node(id: "feature", title: "Describe feature", kind: .flowInput(FlowInputConfig(name: "feature", source: .text)), position: Point(x: 24, y: 60)),
+                Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .exposed(default: nil))), position: Point(x: 24, y: 300)),
+                Node(id: "plan", title: "Plan", kind: .prompt(PromptConfig(
+                    model: "opus",
+                    prompt: "Read this feature request and the code in this repository ({repo}), then write a short plan to build it. Say what it will do, what it will not do, the numbered steps, and which tests will prove it works. Do not edit files.\n\nFeature:\n{feature}",
+                    candidates: [],
+                    allowedTools: readOnlyTools,
+                    maxTurns: nil)), position: Point(x: 264, y: 140)),
+                Node(id: "implement", title: "Implement", kind: .prompt(PromptConfig(
+                    model: "sonnet",
+                    prompt: "Build this feature by following the plan. Keep existing public APIs working, add tests for what the plan says it will do, and stop when swift test passes.\n\nFeature:\n{feature}\n\nPlan:\n{plan}",
+                    candidates: ["sonnet", "opus"],
+                    allowedTools: editTools,
+                    maxTurns: nil)), position: Point(x: 504, y: 185)),
+                Node(id: "gate", title: "swift test", kind: .gate(ShellConfig(command: "swift test", fixAttempts: 2)), position: Point(x: 744, y: 185)),
+                Node(id: "review", title: "Review", kind: .review(ReviewConfig(agent: review, fixAttempts: 1)), position: Point(x: 984, y: 185)),
+                Node(id: "judge", title: "Recommend", kind: .judge(PromptConfig(
+                    model: "opus",
+                    prompt: "You are judging candidate builds of this feature. Prefer candidates whose tests pass and whose review approved, then the one that does the most of what the feature asks with the least code. Explain briefly, then end with a final line `RECOMMEND: <lane>`.\n\nFeature:\n{feature}\n\nCandidates:\n{candidates}",
+                    candidates: [],
+                    allowedTools: ["Read"],
+                    maxTurns: nil)), position: Point(x: 1224, y: 90)),
+                Node(id: "pick", title: "You pick", kind: .pick, position: Point(x: 1224, y: 330)),
+                Node(id: "openpr", title: "Open PR", kind: .openPR(OpenPRConfig(draft: true)), position: Point(x: 1464, y: 330)),
+            ],
+            wires: [
+                Wire(from: "feature", to: "plan", input: "feature"),
+                Wire(from: "repo", to: "plan", input: "repo"),
+                Wire(from: "plan", to: "implement", input: "plan"),
+                Wire(from: "feature", to: "implement", input: "feature"),
+                Wire(from: "implement", to: "gate", input: "code"),
+                Wire(from: "gate", to: "review", input: "code"),
+                Wire(from: "plan", to: "review", input: "plan"),
+                Wire(from: "feature", to: "review", input: "feature"),
+                Wire(from: "review", to: "judge", input: "results"),
+                Wire(from: "feature", to: "judge", input: "feature"),
+                Wire(from: "judge", to: "pick", input: "recommendation"),
+                Wire(from: "pick", to: "openpr", input: "approval"),
+            ])
+    }()
+}
+
+extension FlowEntry {
+    /// The built-in flow this entry names; nil for a file entry.
+    public var builtinFlow: Flow? { file == nil ? BuiltinFlows.named(name) : nil }
+}

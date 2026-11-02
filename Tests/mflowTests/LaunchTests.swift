@@ -80,6 +80,21 @@ private final class Scratch: Sendable {
         if case .repo = rl {} else { Issue.record("expected a repo location") }
     }
 
+    @Test func flowArgumentNamesEachBuiltin() throws {
+        let s = try Scratch()
+        for built in BuiltinFlows.all {
+            for spelling in [built.name, built.name.uppercased()] {
+                let (f, loc) = try selectFlow(flowArgument: spelling, cwdRepo: nil, library: try s.dir("lib"), repos: [])
+                #expect(f == built && loc == .builtin)
+            }
+        }
+        let (f, _) = try selectFlow(flowArgument: "build a feature", cwdRepo: nil, library: try s.dir("lib"), repos: [])
+        #expect(f == BuiltinFlows.buildFeature)
+        // With no --flow the default stays Fix GitHub issue.
+        let (d, loc) = try selectFlow(flowArgument: nil, cwdRepo: try s.dir("repo"), library: try s.dir("lib"), repos: [])
+        #expect(d == BuiltinFlows.fixGitHubIssue && loc == .builtin)
+    }
+
     @Test func unknownAndAmbiguousNamesFail() throws {
         let s = try Scratch()
         let lib = try s.dir("lib")
@@ -126,6 +141,16 @@ private final class Scratch: Sendable {
         var a = Arguments(); a.positionals = ["v"]
         #expect(try values(flow("f", .exposed(default: nil), inputs: ["alpha", "beta"]), .unsaved, a)
                 == ["alpha": "v", "repo": "/work/repo"])
+    }
+
+    @Test func buildFeatureLaunchesFromTheFeatureTextWithNoIssue() throws {
+        let flow = BuiltinFlows.buildFeature
+        var a = Arguments(); a.positionals = ["Add a dark mode toggle"]
+        #expect(try values(flow, .builtin, a) == ["feature": "Add a dark mode toggle", "repo": "/work/repo"])
+        var b = Arguments(); b.sets = [("feature", "Export runs as CSV")]
+        #expect(try values(flow, .builtin, b) == ["feature": "Export runs as CSV", "repo": "/work/repo"])
+        var c = Arguments(); c.sets = [("issue", "7")]
+        #expect(throws: LaunchArgumentError.unknownInput("issue")) { _ = try values(flow, .builtin, c) }
     }
 
     @Test func setFillsAnyInputAndWinsOverPositional() throws {

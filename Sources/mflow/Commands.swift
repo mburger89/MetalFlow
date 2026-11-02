@@ -26,8 +26,8 @@ Press Ctrl-C (or send SIGTERM/SIGHUP) to cancel a running run (exit 130). pick, 
 ignore these signals until they finish.
 
 launch: VALUE fills the flow's first input (not the repo); --set name=value fills any input by name and
-can be repeated. --flow takes a flow file, or a flow name (case-insensitive) from the built-in, library and
-known-repo flows. Without --flow, <repo>/.flows/fix-issue.flow is used if it exists, else the built-in flow.
+can be repeated. --flow takes a flow file, or a flow name (case-insensitive) from the built-in (Fix GitHub issue, Build a feature), library and
+known-repo flows. Without --flow, <repo>/.flows/fix-issue.flow is used if it exists, else the built-in Fix GitHub issue flow.
 --repo fills a flow whose repo is asked at launch; with no --repo the git top-level of the current directory is
 used. A flow bound to one repo (this repo or fixed) refuses a different --repo ("this flow always runs on <path>").
 --repo defaults to the git top-level of the current directory. Set METALFLOW_HOME to use another run store.
@@ -118,7 +118,7 @@ func failureReport(_ error: Error) -> (code: Int32, message: String) {
     }
 }
 
-/// The flow `launch` runs: `--flow` as a file or a catalog name, else `<repo>/.flows/fix-issue.flow` if present, else the built-in.
+/// The flow `launch` runs: `--flow` as a file or a catalog name, else `<repo>/.flows/fix-issue.flow` if present, else the default built-in (Fix GitHub issue).
 func selectFlow(flowArgument: String?, cwdRepo: URL?, library: URL, repos: @autoclosure () -> [URL]) throws -> (Flow, FlowLocation) {
     if let arg = flowArgument {
         let url = URL(fileURLWithPath: arg)
@@ -129,7 +129,7 @@ func selectFlow(flowArgument: String?, cwdRepo: URL?, library: URL, repos: @auto
         let entries = FlowCatalog.entries(library: library, repos: repos())
         let entry = try FlowCatalog.resolve(flowArgument: arg, entries: entries)
         if let file = entry.file { return (try loadFlow(file), entry.location) }
-        return (BuiltinFlows.fixGitHubIssue, .builtin)
+        return (entry.builtinFlow ?? BuiltinFlows.fixGitHubIssue, .builtin)
     }
     let file = cwdRepo?.appendingPathComponent(FlowFile.directoryName).appendingPathComponent("fix-issue.flow")
     if let file, FileManager.default.fileExists(atPath: file.path) {

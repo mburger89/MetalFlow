@@ -139,7 +139,7 @@ extension AppModel {
         isLoadingLaunch = true
         let client = client
         let loaded = await Task.detached { () -> Result<Flow, Error> in
-            Result { try entry.file.map { try client.loadFlow($0) } ?? BuiltinFlows.fixGitHubIssue }
+            Result { try entry.file.map { try client.loadFlow($0) } ?? entry.builtinFlow ?? BuiltinFlows.fixGitHubIssue }
         }.value
         guard generation == launchGeneration else { return }
         isLoadingLaunch = false

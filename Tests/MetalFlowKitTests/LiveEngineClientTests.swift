@@ -18,7 +18,7 @@ import MetalFlowCore
         }
         // The builder is still blocked, yet the client exists and synchronous queries work.
         #expect(await built.value == false)
-        #expect(client.flowCatalog().map(\.location) == [.builtin], "an empty store lists only the built-in flow")
+        #expect(client.flowCatalog().map(\.location) == [.builtin, .builtin], "an empty store lists only the built-in flows")
         #expect(client.knownRepos().isEmpty)
 
         release.yield()

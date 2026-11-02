@@ -46,20 +46,26 @@ extension AppModel {
         }
     }
 
-    /// Shows the built-in flow in the Studio (saving it asks where to). The built-in already open keeps its draft.
-    func loadBuiltinDraft() {
-        if draft?.location != .builtin {
-            draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .builtin)
+    /// Shows a built-in flow in the Studio (saving it asks where to); the default one without an argument.
+    /// The built-in already open keeps its draft; another built-in replaces it.
+    func loadBuiltinDraft(_ flow: Flow = BuiltinFlows.fixGitHubIssue) {
+        if !isOpen(builtin: flow) {
+            draft = FlowDraft(flow: flow, location: .builtin)
         }
         screen = .studio
+    }
+
+    /// Whether the draft is `flow` the built-in. It goes by the name the draft was loaded with, since edits can rename it.
+    private func isOpen(builtin flow: Flow) -> Bool {
+        draft?.location == .builtin && draft?.lastSavedFlow.name == flow.name
     }
 
     /// What waits behind the unsaved-edits alert.
     public enum PendingAction: Sendable, Equatable {
         /// Open this flow file.
         case open(URL)
-        /// Open the built-in flow.
-        case openBuiltin
+        /// Open the built-in flow with this name.
+        case openBuiltin(String)
         /// Start a new flow.
         case newFlow
         /// Quit the app, or close its window (the same thing: it is the only one).
@@ -116,7 +122,7 @@ extension AppModel {
     private func perform(_ action: PendingAction) async {
         switch action {
         case .open(let url): openWithoutAsking(url)
-        case .openBuiltin: loadBuiltinDraft()
+        case .openBuiltin(let name): loadBuiltinDraft(BuiltinFlows.named(name) ?? BuiltinFlows.fixGitHubIssue)
         case .newFlow: await newFlowWithoutAsking()
         case .quit:
             if continueQuit() == .now { replyToTerminate(true) }
@@ -353,17 +359,18 @@ extension AppModel {
         if let file = entry.file {
             open(flow: file)
         } else {
-            openBuiltin()
+            openBuiltin(entry.builtinFlow ?? BuiltinFlows.fixGitHubIssue)
         }
     }
 
-    /// Shows the built-in flow in the Studio; with unsaved edits it asks first.
-    public func openBuiltin() {
-        if let draft, draft.isDirty, draft.location != .builtin {
-            pendingAction = .openBuiltin
+    /// Shows a built-in flow in the Studio (the default one without an argument); with unsaved edits to anything
+    /// else, including another built-in, it asks first.
+    public func openBuiltin(_ flow: Flow = BuiltinFlows.fixGitHubIssue) {
+        if let draft, draft.isDirty, !isOpen(builtin: flow) {
+            pendingAction = .openBuiltin(flow.name)
             return
         }
-        loadBuiltinDraft()
+        loadBuiltinDraft(flow)
     }
 
     /// Whether File > Save is enabled: the Studio shows a valid draft.

@@ -28,8 +28,7 @@ public enum FlowCatalog {
     /// Built-ins, then library flows (sorted by file name), then each repo's `.flows` (repos in the given order).
     /// Reads the file system, so call it off the main actor.
     public static func entries(library: URL, repos: [URL]) -> [FlowEntry] {
-        var out = [FlowEntry(id: "builtin:\(BuiltinFlows.fixGitHubIssue.name)", name: BuiltinFlows.fixGitHubIssue.name,
-                             location: .builtin, file: nil)]
+        var out = BuiltinFlows.all.map { FlowEntry(id: "builtin:\($0.name)", name: $0.name, location: .builtin, file: nil) }
         for file in flowFiles(in: library) {
             out.append(entry(file, location: .library(file: file)))
         }

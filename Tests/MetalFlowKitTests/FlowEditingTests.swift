@@ -1079,6 +1079,77 @@ struct KindMismatch: Error {}
         #expect(!model.isOpenFlowVisible)
     }
 
+    // MARK: Several built-ins
+
+    func bothBuiltins() -> [FlowEntry] {
+        BuiltinFlows.all.map { FlowEntry(id: "builtin:\($0.name)", name: $0.name, location: .builtin, file: nil) }
+    }
+
+    @Test func openFlowListsEachBuiltinWithItsOwnIdentifier() async throws {
+        let (model, client, window) = try await fixture()
+        client.catalog.entries = bothBuiltins()
+        await model.refreshCatalog()
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "openFlow.builtin").label == "Fix GitHub issue \u{2014} Built-in")
+        #expect(try window.element(identifier: "openFlow.builtin.build-a-feature").label == "Build a feature \u{2014} Built-in")
+        try await press("openFlow.builtin.build-a-feature", in: window)
+        #expect(model.draft?.location == .builtin)
+        #expect(model.draft?.flow == BuiltinFlows.buildFeature)
+        #expect(model.screen == .studio && !model.isOpenFlowVisible)
+        model.showOpenFlow()
+        try await window.runUntilIdle()
+        try await press("openFlow.builtin", in: window)
+        #expect(model.draft?.flow == BuiltinFlows.fixGitHubIssue)
+    }
+
+    @Test func eachBuiltinKeepsItsOwnDraftOnlyWhileItIsOpen() async throws {
+        let (model, client, _) = try await fixture()
+        client.catalog.entries = bothBuiltins()
+        await model.refreshCatalog()
+        let fix = model.catalog[0], feature = model.catalog[1]
+        let first = try #require(model.draft)
+        #expect(first.flow == BuiltinFlows.fixGitHubIssue)
+        // The built-in already open keeps its draft, edited or not, even renamed.
+        first.edit("test.rename") { $0.name = "Renamed" }
+        model.chooseEntry(fix)
+        #expect(model.draft === first && model.pendingAction == nil)
+        // Another built-in asks first while the draft has edits, and nothing is lost until the user says so.
+        model.chooseEntry(feature)
+        #expect(model.pendingAction == .openBuiltin("Build a feature"))
+        #expect(model.draft === first && first.isDirty)
+        model.cancelPending()
+        #expect(model.draft === first && first.isDirty)
+        model.chooseEntry(feature)
+        await model.resolvePending(.openBuiltin("Build a feature"), .discard)
+        let second = try #require(model.draft)
+        #expect(second !== first && second.flow == BuiltinFlows.buildFeature && !second.isDirty)
+        // A clean draft is replaced at once; the other way round asks again once it has edits.
+        model.chooseEntry(fix)
+        #expect(model.pendingAction == nil && model.draft?.flow == BuiltinFlows.fixGitHubIssue)
+        model.chooseEntry(feature)
+        let third = try #require(model.draft)
+        third.edit("test.rename") { $0.name = "Mine" }
+        model.chooseEntry(feature)
+        #expect(model.draft === third && model.pendingAction == nil)
+        model.chooseEntry(fix)
+        #expect(model.pendingAction == .openBuiltin("Fix GitHub issue") && model.draft === third)
+        model.cancelPending()
+    }
+
+    @Test func aDirtyBuiltinStillAsksBeforeAFileOrAnotherBuiltinReplacesIt() async throws {
+        let (model, _, _) = try await fixture()
+        let draft = try #require(model.draft)
+        draft.edit("test.rename") { $0.name = "Renamed" }
+        model.open(flow: URL(fileURLWithPath: "/lib/other.flow"))
+        #expect(model.pendingAction == .open(URL(fileURLWithPath: "/lib/other.flow")))
+        model.cancelPending()
+        await model.newFlow()
+        #expect(model.pendingAction == .newFlow)
+        model.cancelPending()
+        #expect(model.draft === draft)
+    }
+
     // MARK: Input bindings and the Repo node
 
     /// Gives the plan prompt a third placeholder, `{topic}`, that nothing wires.

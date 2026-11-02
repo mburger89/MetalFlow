@@ -34,17 +34,21 @@ private func mode(_ flow: Flow) -> RepoMode? {
         try write("R1", to: r1.appendingPathComponent(".flows/y.flow"))
 
         let entries = FlowCatalog.entries(library: library, repos: [r2, r1])
-        #expect(entries.map(\.name) == ["Fix GitHub issue", "A", "B", "R2", "R1"])
-        #expect(entries[0].location == .builtin)
-        #expect(entries[0].file == nil)
-        #expect(entries[0].id == "builtin:Fix GitHub issue")
+        #expect(entries.map(\.name) == ["Fix GitHub issue", "Build a feature", "A", "B", "R2", "R1"])
+        for entry in entries.prefix(2) {
+            #expect(entry.location == .builtin)
+            #expect(entry.file == nil)
+        }
+        #expect(entries.map(\.id).prefix(2) == ["builtin:Fix GitHub issue", "builtin:Build a feature"])
+        #expect(entries.prefix(2).map(\.builtinFlow) == BuiltinFlows.all)
+        #expect(entries[2].builtinFlow == nil)
         // Directory listings come back with /private resolved; compare resolved paths.
         func resolved(_ u: URL?) -> String? { u?.resolvingSymlinksInPath().path }
         let a = library.appendingPathComponent("a.flow")
-        #expect(resolved(entries[1].file) == resolved(a))
-        #expect(entries[1].id == entries[1].file?.path)
-        if case .library(let f) = entries[1].location { #expect(resolved(f) == resolved(a)) } else { Issue.record("not library") }
-        if case .repo(let root, let f) = entries[3].location {
+        #expect(resolved(entries[2].file) == resolved(a))
+        #expect(entries[2].id == entries[2].file?.path)
+        if case .library(let f) = entries[2].location { #expect(resolved(f) == resolved(a)) } else { Issue.record("not library") }
+        if case .repo(let root, let f) = entries[4].location {
             #expect(resolved(root) == resolved(r2))
             #expect(resolved(f) == resolved(r2.appendingPathComponent(".flows/x.flow")))
         } else { Issue.record("not repo") }
@@ -56,14 +60,14 @@ private func mode(_ flow: Flow) -> RepoMode? {
         try write("Pretty Name", to: dir.appendingPathComponent("file-stem.flow"))
         try Data("not json".utf8).write(to: dir.appendingPathComponent("broken.flow"))
         let entries = FlowCatalog.entries(library: dir, repos: [])
-        #expect(entries.map(\.name) == ["Fix GitHub issue", "broken", "Pretty Name"])
+        #expect(entries.map(\.name) == ["Fix GitHub issue", "Build a feature", "broken", "Pretty Name"])
     }
 
     @Test func catalogSkipsMissingRepoFolder() throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let entries = FlowCatalog.entries(library: dir.appendingPathComponent("nope"), repos: [dir.appendingPathComponent("gone")])
-        #expect(entries.map(\.name) == ["Fix GitHub issue"])
+        #expect(entries.map(\.name) == ["Fix GitHub issue", "Build a feature"])
     }
 
     @Test func thisRepoSavedToLibraryBecomesExposedWithDefault() {

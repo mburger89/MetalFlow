@@ -105,6 +105,34 @@ import Testing
         #expect((try? window.element(identifier: "launch.error")) == nil)
     }
 
+    @Test func buildFeatureLaunchesFromFeatureTextWithNoIssue() async throws {
+        let (model, client, window) = try await catalogFixture()
+        client.catalog.entries = BuiltinFlows.all.map {
+            FlowEntry(id: "builtin:\($0.name)", name: $0.name, location: .builtin, file: nil)
+        }
+        await model.refreshCatalog()
+        #expect(model.launchFlow?.name == "Fix GitHub issue")
+        await model.selectFlow("builtin:Build a feature")
+        try await window.runUntilIdle()
+        #expect(model.launchFlow == BuiltinFlows.buildFeature)
+        #expect(model.launchFields.map(\.name) == ["feature", "repo"])
+        #expect(model.launchError == nil)
+        _ = try window.element(identifier: "launch.field.feature")
+        #expect((try? window.element(identifier: "launch.field.issue")) == nil)
+        #expect(!model.canLaunch)
+        try await type("Add a dark mode toggle", into: "launch.field.feature", in: window)
+        #expect(model.canLaunch)
+        #expect(await model.launchFromForm() != nil)
+        let launched = await client.launches
+        #expect(launched.last?.location == .builtin)
+        #expect(launched.last?.values["feature"] == "Add a dark mode toggle")
+        #expect(launched.last?.values["issue"] == nil)
+        // The default still loads its own flow.
+        await model.selectFlow(builtinID)
+        try await window.runUntilIdle()
+        #expect(model.launchFlow == BuiltinFlows.fixGitHubIssue)
+    }
+
     @Test func launchDisabledUntilRequiredFilled() async throws {
         let (model, _, window) = try await catalogFixture()
         #expect(!model.canLaunch)
