@@ -116,13 +116,13 @@ struct KindMismatch: Error {}
         #expect(try node(draft, "plan").position == after)
     }
 
-    @Test func dragOnEmptyCanvasPans() async throws {
+    @Test func middleDragOnEmptyCanvasPans() async throws {
         let (model, _, window) = try await fixture()
         let draft = try #require(model.draft)
         let origin = try window.element(identifier: "canvas").frame.origin
         let from = ScreenPoint(x: origin.x + 12, y: origin.y + 6)
         let panBefore = draft.geometry.pan
-        window.drag(from: from, to: ScreenPoint(x: from.x + 30, y: from.y + 20))
+        window.drag(from: from, to: ScreenPoint(x: from.x + 30, y: from.y + 20), button: .middle)
         try await window.runUntilIdle()
         #expect(draft.geometry.pan != panBefore)
         #expect(draft.flow == BuiltinFlows.fixGitHubIssue)

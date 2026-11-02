@@ -1,12 +1,12 @@
 import MetalFlowCore
 import MetalUI
 
-/// All wires in one stroked `Path`. Wires touching the selected node are left out of it and drawn in a second,
+/// All wires in one stroked `Path`. Wires touching a selected node are left out of it and drawn in a second,
 /// accent-coloured `Path`.
 struct WireLayer: Component {
     let flow: Flow
     let geometry: CanvasGeometry
-    let selection: NodeID?
+    let selection: Set<NodeID>
     var selectedWire: Wire?
     var pending: (from: NodeID, to: ScreenPoint)?
     let size: Size<Pixels>
@@ -28,14 +28,14 @@ struct WireLayer: Component {
     }
 
     /// The wire paths, split by whether they touch the selection, and the port circles.
-    static func paths(flow: Flow, geometry g: CanvasGeometry, selection: NodeID?,
+    static func paths(flow: Flow, geometry g: CanvasGeometry, selection: Set<NodeID>,
                       selectedWire: Wire? = nil) -> (all: Path, selected: Path) {
         var all = Path(), selected = Path()
         for wire in flow.wires {
             guard let from = flow.node(wire.from), let to = flow.node(wire.to) else { continue }
             let (a, c1, c2, b) = g.wirePath(from: g.outPort(from), to: g.inPort(to))
             let (sa, s1, s2, sb) = (g.toScreen(a), g.toScreen(c1), g.toScreen(c2), g.toScreen(b))
-            let touches = (selection != nil && (wire.from == selection || wire.to == selection)) || wire == selectedWire
+            let touches = selection.contains(wire.from) || selection.contains(wire.to) || wire == selectedWire
             if touches {
                 selected.move(to: sa); selected.addCurve(to: sb, control1: s1, control2: s2)
             } else {

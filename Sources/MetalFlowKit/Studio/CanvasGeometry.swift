@@ -106,6 +106,14 @@ struct CanvasGeometry: Equatable {
         flow.nodes.last { nodeRect($0).contains(canvas) }?.id
     }
 
+    /// The nodes whose rectangle overlaps `rect`, in draw order. Any overlap counts.
+    func nodes(in rect: CanvasRect, flow: Flow) -> [NodeID] {
+        flow.nodes.filter { node in
+            let r = nodeRect(node)
+            return r.x < rect.x + rect.w && rect.x < r.x + r.w && r.y < rect.y + rect.h && rect.y < r.y + r.h
+        }.map(\.id)
+    }
+
     /// The port within 8 screen points of the canvas point. Outputs win over inputs; later nodes over earlier.
     func hitPort(at canvas: CanvasPoint, in flow: Flow) -> (NodeID, PortSide)? {
         let radius = Self.portRadius / zoom

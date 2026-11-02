@@ -106,6 +106,12 @@ struct InspectorView: Component {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if let id = draft.selection, let node = draft.flow.node(id) {
                 NodeInspector(model: model, draft: draft, node: node, repos: repos)
+            } else if draft.canvasSelection.nodes.count > 1 {
+                Text(verbatim: "\(draft.canvasSelection.nodes.count) selected").font(size: 13).foregroundColor(Palette.text)
+                    .accessibilityIdentifier("inspector.selectionCount")
+                Button("Delete") { draft.deleteSelection() }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("inspector.deleteSelection")
             } else if let wire = draft.selectedWire {
                 Text(verbatim: "Wire").font(size: 11).foregroundColor(Palette.muted)
                 Text(verbatim: "\(wire.from.rawValue) → \(wire.to.rawValue) as {\(wire.input)}")

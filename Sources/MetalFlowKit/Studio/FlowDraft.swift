@@ -33,17 +33,35 @@ public final class FlowDraft {
     public private(set) var undoStack: [Flow] = []
     /// States undone, most recently undone last.
     public private(set) var redoStack: [Flow] = []
-    /// The selected node. Selecting one clears the wire selection, and ends a typing burst.
+    /// What is selected. View state: never undone. Selecting different nodes ends a typing burst.
+    var canvasSelection = CanvasSelection() {
+        didSet { if canvasSelection.nodes != oldValue.nodes { lastEditName = nil } }
+    }
+    /// The selected node: the one node when exactly one node and nothing else is selected, else nil. Setting
+    /// replaces the selection with that node (nil clears the nodes).
     public var selection: NodeID? {
-        didSet {
-            if selection != nil { selectedWire = nil }
-            if selection != oldValue { lastEditName = nil }
+        get { canvasSelection.wire == nil && canvasSelection.nodes.count == 1 ? canvasSelection.nodes.first : nil }
+        set {
+            if let newValue {
+                canvasSelection = CanvasSelection(nodes: [newValue])
+            } else {
+                canvasSelection.nodes = []
+            }
         }
     }
-    /// The selected wire; exclusive with `selection`.
+    /// The selected wire; exclusive with node selection. Setting one replaces the selection (nil drops the wire).
     public var selectedWire: Wire? {
-        didSet { if selectedWire != nil { selection = nil } }
+        get { canvasSelection.wire }
+        set {
+            if let newValue {
+                canvasSelection = CanvasSelection(wire: newValue)
+            } else {
+                canvasSelection.wire = nil
+            }
+        }
     }
+    /// The box being drawn, in canvas-local screen points.
+    var selectionBox: CanvasRect?
     /// The wire being dragged out of an out-port: its source and the pointer, in canvas-local screen points.
     var pendingWire: (from: NodeID, to: ScreenPoint)?
 
@@ -128,7 +146,8 @@ public final class FlowDraft {
     }
 
     private func dropStaleSelection() {
-        if let selection, flow.node(selection) == nil { self.selection = nil }
+        let nodes = canvasSelection.nodes.filter { flow.node($0) != nil }
+        if nodes != canvasSelection.nodes { canvasSelection.nodes = nodes }
         if let selectedWire, !flow.wires.contains(selectedWire) { self.selectedWire = nil }
     }
 
@@ -162,13 +181,20 @@ public final class FlowDraft {
             flow.nodes.removeAll { $0.id == id }
             flow.wires.removeAll { $0.from == id || $0.to == id }
         }
-        if selection == id { selection = nil }
+        canvasSelection.nodes.remove(id)
     }
 
-    /// Removes the selected node with its wires, or the selected wire.
+    /// Removes the selected nodes with their wires as one undo step, or the selected wire.
     public func deleteSelection() {
-        if let id = selection {
+        let ids = canvasSelection.nodes
+        if ids.count == 1, let id = ids.first {
             deleteNode(id)
+        } else if !ids.isEmpty {
+            apply("delete \(ids.count) nodes", coalescing: false) { flow in
+                flow.nodes.removeAll { ids.contains($0.id) }
+                flow.wires.removeAll { ids.contains($0.from) || ids.contains($0.to) }
+            }
+            canvasSelection.nodes = []
         } else if let wire = selectedWire {
             apply("delete wire", coalescing: false) { flow in
                 if let i = flow.wires.firstIndex(of: wire) { flow.wires.remove(at: i) }
@@ -200,11 +226,14 @@ public final class FlowDraft {
 
     // MARK: Moving
 
-    /// Moves a node during a drag, without an undo step.
-    func moveLive(_ id: NodeID, to position: CanvasPoint) {
-        guard let i = flow.nodes.firstIndex(where: { $0.id == id }) else { return }
+    /// Moves the nodes in `origins` by `delta` canvas units, without an undo step.
+    func moveLive(_ origins: [NodeID: CanvasPoint], by delta: CanvasPoint) {
         var updated = flow
-        updated.nodes[i].position = position
+        for i in updated.nodes.indices {
+            if let origin = origins[updated.nodes[i].id] {
+                updated.nodes[i].position = CanvasPoint(x: origin.x + delta.x, y: origin.y + delta.y)
+            }
+        }
         flow = updated
     }
 
@@ -242,12 +271,12 @@ public final class FlowDraft {
 
 /// What a primary drag on the canvas is doing.
 enum DragMode {
-    /// Moving a node whose position was `origin` when the drag began.
-    case move(NodeID, origin: CanvasPoint)
+    /// Moving the selected nodes, whose positions were `origins` when the drag began.
+    case move(origins: [NodeID: CanvasPoint])
+    /// Drawing a selection box from `start` (canvas-local screen points) over the selection `base`.
+    case box(start: ScreenPoint, base: CanvasSelection, mode: SelectionMode)
     /// Dragging a new wire out of a node's out-port.
     case wire(NodeID)
-    /// Panning the view.
-    case pan
 }
 
 /// The node kinds the palette adds.

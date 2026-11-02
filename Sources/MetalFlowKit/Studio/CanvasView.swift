@@ -3,7 +3,8 @@ import MetalFlowCore
 import MetalUI
 
 /// The graph: dotted grid, wires and node cards under a pan and zoom, with the Fit button and zoom readout.
-/// Pan with the wheel or a middle / secondary drag, zoom with ⌘-wheel or a pinch, click to select.
+/// Pan with the wheel or a middle / secondary drag, zoom with ⌘-wheel or a pinch, click to select (⇧ adds, ⌘ toggles),
+/// drag on empty canvas to draw a selection box.
 struct CanvasView: Component {
     let model: AppModel
     let draft: FlowDraft
@@ -16,19 +17,22 @@ struct CanvasView: Component {
         let draft = draft
         ZStack(alignment: .topLeading) {
             DotGrid(geometry: g, size: size)
-            WireLayer(flow: draft.flow, geometry: g, selection: draft.selection, selectedWire: draft.selectedWire,
+            WireLayer(flow: draft.flow, geometry: g, selection: draft.canvasSelection.nodes, selectedWire: draft.selectedWire,
                       pending: draft.pendingWire, size: size)
             // The cards sit at canvas * zoom, so a pan is this one offset and no card is rebuilt for it.
             ZStack(alignment: .topLeading) {
                 ForEach(draft.flow.nodes, id: \.id) { node in
                     NodeCardView(
-                        node: node, zoom: g.zoom, selected: draft.selection == node.id,
+                        node: node, zoom: g.zoom, selected: draft.canvasSelection.nodes.contains(node.id),
                         overlay: run.map { NodeOverlay.make(node: node, run: $0, laneScoped: scoped.contains(node.id)) })
                         .equatable()
                 }
             }
             .offset(x: g.pan.x, y: g.pan.y)
             PortLayer(flow: draft.flow, geometry: g, size: size)
+            if let box = draft.selectionBox {
+                SelectionBoxView(rect: box)
+            }
         }
         // minWidth / minHeight 0: the layers are as big as the canvas was last, and must not stop it shrinking
         // (the candidates strip appearing takes space from it).
@@ -53,11 +57,12 @@ struct CanvasView: Component {
         .coordinateSpace(.named("canvas"))
         .onGeometryChange(for: Size<Pixels>.self, of: { $0.size }) { draft.canvasSizeChanged($0) }
         .onScrollWheel { Self.scroll($0, draft) }
-        .gesture(SpatialTapGesture().onEnded { draft.select(at: $0.location) })
+        .gesture(SpatialTapGesture().onEnded { draft.select(at: $0.location, modifiers: $0.modifiers) })
         .gesture(MagnifyGesture()
             .onChanged { draft.pinchChanged($0) }
             .onEnded { draft.pinchEnded($0) })
         .focusable(true, interactions: .edit)
+        .hoverKeyRegion()
         .onKeyPress { Self.key($0, draft) }
         .gesture(DragGesture(minimumDistance: Pixels(3))
             .onChanged { draft.primaryDragChanged($0) }
@@ -70,13 +75,23 @@ struct CanvasView: Component {
             .onEnded { _ in draft.panStart = nil })
     }
 
-    /// Delete and Backspace remove the selection; ⌘Z undoes, ⇧⌘Z redoes. Only reached while the canvas has focus,
-    /// so typing in an inspector field never lands here.
+    /// Delete and Backspace remove the selection; ⌘A selects every node, Esc clears the selection; ⌘Z undoes, ⇧⌘Z
+    /// redoes. Only reached while the canvas has focus or the pointer is over it with nothing focused, so typing in
+    /// an inspector field never lands here.
     @MainActor
     static func key(_ press: KeyPress, _ draft: FlowDraft) -> KeyPress.Result {
         if press.key == .delete || press.key == .deleteForward {
-            guard draft.selection != nil || draft.selectedWire != nil else { return .ignored }
+            guard !draft.canvasSelection.isEmpty else { return .ignored }
             draft.deleteSelection()
+            return .handled
+        }
+        if press.key == .escape {
+            guard !draft.canvasSelection.isEmpty else { return .ignored }
+            draft.clearSelection()
+            return .handled
+        }
+        if press.key.character.lowercased() == "a", press.modifiers.contains(.command) {
+            draft.selectAll()
             return .handled
         }
         if press.key.character.lowercased() == "z", press.modifiers.contains(.command) {
@@ -100,42 +115,33 @@ struct CanvasView: Component {
 }
 
 extension FlowDraft {
-    /// Selects the node under a canvas-local screen point, else the wire near it, else clears the selection.
-    func select(at location: ScreenPoint) {
-        lastEditName = nil  // a click on the canvas moves focus off any inspector field
-        if let id = geometry.hitNode(at: geometry.toCanvas(location), in: flow) {
-            selection = id
-        } else if let wire = geometry.hitWire(at: location, in: flow) {
-            selectedWire = wire
-        } else {
-            selection = nil
-            selectedWire = nil
-        }
-    }
-
-    /// A primary drag: on an out-port it draws a wire, on a node it moves it, on empty canvas it pans.
+    /// A primary drag: on an out-port it draws a wire, on a node it moves the selection (selecting the node first
+    /// unless it is selected), on empty canvas it draws a selection box.
     func primaryDragChanged(_ value: DragGesture.Value) {
         if dragMode == nil {
             let start = geometry.toCanvas(value.startLocation)
+            let mode = SelectionMode(value.modifiers)
             if let (id, side) = geometry.hitPort(at: start, in: flow), side == .output {
                 dragMode = .wire(id)
-            } else if let id = geometry.hitNode(at: start, in: flow), let node = flow.node(id) {
-                dragMode = .move(id, origin: node.position)
+            } else if let id = geometry.hitNode(at: start, in: flow) {
                 dragStartFlow = flow
-                selection = id
+                dragMode = .move(origins: beginMove(of: id, mode: mode))
             } else {
-                dragMode = .pan
+                let base = mode == .replace ? CanvasSelection() : CanvasSelection(nodes: canvasSelection.nodes)
+                dragMode = .box(start: value.startLocation, base: base, mode: mode)
             }
         }
         switch dragMode {
-        case .move(let id, let origin):
+        case .move(let origins):
             let z = geometry.zoom
-            moveLive(id, to: CanvasPoint(x: origin.x + Double(value.translation.width.value) / z,
-                                         y: origin.y + Double(value.translation.height.value) / z))
+            moveLive(origins, by: CanvasPoint(x: Double(value.translation.width.value) / z,
+                                              y: Double(value.translation.height.value) / z))
         case .wire(let id):
             pendingWire = (id, value.location)
-        case .pan, nil:
-            panChanged(value)
+        case .box(let start, let base, let mode):
+            updateBox(to: value.location, start: start, base: base, mode: mode)
+        case nil:
+            break
         }
     }
 
@@ -148,8 +154,10 @@ extension FlowDraft {
             if let (to, side) = geometry.hitPort(at: geometry.toCanvas(value.location), in: flow), side == .input {
                 connect(from: from, to: to, allowParallel: false)
             }
-        case .pan, nil:
-            panStart = nil
+        case .box:
+            selectionBox = nil
+        case nil:
+            break
         }
         dragMode = nil
     }
