@@ -26,6 +26,8 @@ public enum FlowError: Error, Equatable, Sendable {
     case openPRWithoutPick(NodeID)
     /// The flow has more than one Open PR node; this is the second.
     case multipleOpenPRs(NodeID)
+    /// A Review node is not between a step with several candidates and the judge.
+    case reviewOutsideCandidates(NodeID)
 }
 
 extension FlowError: LocalizedError {
@@ -44,6 +46,7 @@ extension FlowError: LocalizedError {
         case .inputBoundTwice(let id, let name): return "node '\(id.rawValue)' has both a wire and a value for {\(name)}"
         case .openPRWithoutPick: return "Open PR needs a You pick before it."
         case .multipleOpenPRs: return "A flow can have only one Open PR node."
+        case .reviewOutsideCandidates: return "A Review has to sit after a step with several candidates and before the judge."
         }
     }
 }
@@ -157,6 +160,9 @@ extension Flow {
                 excluded.formUnion(descendants(of: n.id))
             }
             scoped = Set([f]).union(descendants(of: f)).subtracting(excluded)
+        }
+        for id in order {
+            if case .review? = node(id)?.kind, !scoped.contains(id) { throw .reviewOutsideCandidates(id) }
         }
         return FlowPlan(order: order, fanOut: fanOut, laneScoped: scoped)
     }

@@ -142,6 +142,38 @@ public struct OpenPRConfig: Codable, Hashable, Sendable {
     }
 }
 
+/// Configuration of a Review node: an agent reads a candidate's diff and, when it finds problems, sends the
+/// agent that wrote the code back to fix them.
+public struct ReviewConfig: Codable, Hashable, Sendable {
+    /// The reviewing agent; its `candidates` stay empty, and `{diff}` in its prompt is the candidate's diff.
+    public var agent: PromptConfig
+    /// How many times the review may send the writing agent back to fix what it found.
+    public var fixAttempts: Int
+
+    /// The agent a new Review node starts with.
+    public static let defaultAgent = PromptConfig(
+        model: "sonnet",
+        prompt: "Review this change. Look for bugs, missing tests and anything that does not do what it should. Do not edit files. List only the problems worth fixing, each with its file and line.\n\n{diff}",
+        candidates: [],
+        allowedTools: ["Read", "Grep", "Glob", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)"],
+        maxTurns: nil)
+
+    /// Creates a configuration; a review gets one fix attempt unless said otherwise.
+    public init(agent: PromptConfig = ReviewConfig.defaultAgent, fixAttempts: Int = 1) {
+        self.agent = agent
+        self.fixAttempts = fixAttempts
+    }
+
+    private enum CodingKeys: String, CodingKey { case agent, fixAttempts }
+
+    /// Decodes a configuration; a missing `fixAttempts` means 1.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agent = try c.decode(PromptConfig.self, forKey: .agent)
+        fixAttempts = try c.decodeIfPresent(Int.self, forKey: .fixAttempts) ?? 1
+    }
+}
+
 /// What a node does.
 public enum NodeKind: Codable, Hashable, Sendable {
     case flowInput(FlowInputConfig)
@@ -153,8 +185,10 @@ public enum NodeKind: Codable, Hashable, Sendable {
     case pick
     /// Pushes the picked candidate's branch and opens a GitHub pull request for it instead of merging locally.
     case openPR(OpenPRConfig)
+    /// Has an agent review each candidate's diff and send the writing agent back to fix what it finds.
+    case review(ReviewConfig)
 
-    private enum CodingKeys: String, CodingKey { case flowInput, repo, prompt, shell, gate, judge, pick, openPR }
+    private enum CodingKeys: String, CodingKey { case flowInput, repo, prompt, shell, gate, judge, pick, openPR, review }
     private enum PayloadKey: String, CodingKey { case _0 }
 
     /// Decodes the synthesized shape; a `repo` without payload (written before Repo had config) means `.thisRepo`.
@@ -177,6 +211,7 @@ public enum NodeKind: Codable, Hashable, Sendable {
         case .judge: self = .judge(try payload(PromptConfig.self))
         case .pick: self = .pick
         case .openPR: self = .openPR(try payload(OpenPRConfig.self))
+        case .review: self = .review(try payload(ReviewConfig.self))
         }
     }
 
@@ -196,6 +231,7 @@ public enum NodeKind: Codable, Hashable, Sendable {
         case .judge(let v): try put(.judge, v)
         case .pick: _ = c.nestedContainer(keyedBy: PayloadKey.self, forKey: .pick)
         case .openPR(let v): try put(.openPR, v)
+        case .review(let v): try put(.review, v)
         }
     }
 }
@@ -269,7 +305,7 @@ public struct Flow: Codable, Hashable, Sendable {
         return out
     }
 
-    /// Distinct placeholder names of a node's prompt or command, in order of first appearance. A judge's `candidates` is excluded.
+    /// Distinct placeholder names of a node's prompt or command, in order of first appearance. A judge's `candidates` and a review's `diff` are excluded.
     public func inputNames(of id: NodeID) -> [String] {
         guard let n = node(id) else { return [] }
         var texts: [String] = []
@@ -278,6 +314,7 @@ public struct Flow: Codable, Hashable, Sendable {
         case .prompt(let c): texts = [c.prompt]
         case .judge(let c): texts = [c.prompt]; exempt = ["candidates"]
         case .shell(let c), .gate(let c): texts = [c.command]
+        case .review(let c): texts = [c.agent.prompt]; exempt = ["diff"]
         case .flowInput, .repo, .pick, .openPR: break
         }
         var seen = Set<String>()

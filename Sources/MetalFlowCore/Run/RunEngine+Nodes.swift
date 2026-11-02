@@ -28,6 +28,8 @@ extension RunEngine {
             await runShell(id, key, config: config, plan: plan, isGate: true)
         case .openPR(let config):
             await runOpenPR(id, key, config: config, plan: plan)
+        case .review:
+            finish(id, key, .failed("Review is not implemented"))
         case .pick:
             let lanes = runs[id]?.lanes ?? []
             let allFailed = lanes.contains { $0.gatePassed != nil } && !lanes.contains { $0.gatePassed == true }

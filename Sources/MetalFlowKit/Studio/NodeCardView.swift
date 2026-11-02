@@ -21,6 +21,7 @@ extension Node {
         case .judge: "JUDGE"
         case .pick: "YOU PICK"
         case .openPR: "OPEN PR"
+        case .review: "REVIEW"
         }
     }
 
@@ -33,6 +34,7 @@ extension Node {
         case .judge: Palette.warn
         case .pick: Color(Hsla.rgb(0xd2a8ff))
         case .openPR: Palette.ok
+        case .review: Palette.warn
         }
     }
 
@@ -47,6 +49,7 @@ extension Node {
         case .judge(let c): c.model
         case .pick: "Merge the chosen branch back"
         case .openPR(let c): c.draft ? "Draft pull request" : "Pull request"
+        case .review(let c): c.agent.model
         }
     }
 }

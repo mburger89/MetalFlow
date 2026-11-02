@@ -185,18 +185,21 @@ public struct Lane: Codable, Hashable, Sendable {
     public var worktree: URL
     /// Whether the gate passed; nil if not yet run.
     public var gatePassed: Bool?
+    /// Whether the review found nothing left to fix; nil if there is no review or it has not finished.
+    public var reviewPassed: Bool?
     /// Lines added.
     public var added: Int
     /// Lines removed.
     public var removed: Int
     /// Creates a lane.
     public init(id: LaneID, model: String, branch: String, worktree: URL,
-                gatePassed: Bool? = nil, added: Int = 0, removed: Int = 0) {
+                gatePassed: Bool? = nil, reviewPassed: Bool? = nil, added: Int = 0, removed: Int = 0) {
         self.id = id
         self.model = model
         self.branch = branch
         self.worktree = worktree
         self.gatePassed = gatePassed
+        self.reviewPassed = reviewPassed
         self.added = added
         self.removed = removed
     }
@@ -317,11 +320,16 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         }
     }
 
-    /// The fix attempts a gate has used, or nil for a node that is not a gate or has used none.
+    /// The fix attempts a gate or review has used, or nil for any other node or one that has used none.
     public func fixProgress(_ key: NodeKey) -> FixProgress? {
-        guard case .gate(let config)? = flow.node(key.node)?.kind,
-              let used = nodes[key]?.fixAttemptsUsed, used > 0 else { return nil }
-        return FixProgress(used: used, of: config.fixAttempts)
+        let allowed: Int
+        switch flow.node(key.node)?.kind {
+        case .gate(let config)?: allowed = config.fixAttempts
+        case .review(let config)?: allowed = config.fixAttempts
+        default: return nil
+        }
+        guard let used = nodes[key]?.fixAttemptsUsed, used > 0 else { return nil }
+        return FixProgress(used: used, of: allowed)
     }
 
     /// True when any node, in any lane, has failed.

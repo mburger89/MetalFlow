@@ -162,6 +162,8 @@ struct NodeInspector: Component {
                         .accessibilityIdentifier("inspector.openpr.draft")
                     Text(verbatim: "Pushes the picked branch and opens a pull request instead of merging.")
                         .font(size: 12).foregroundColor(Palette.muted)
+                case .review:
+                    Text(verbatim: "Reviews each candidate's diff.").font(size: 12).foregroundColor(Palette.muted)
                 }
                 IncomingWires(draft: draft, id: id)
                 if node.acceptsInputs { InputBindings(draft: draft, id: id) }
