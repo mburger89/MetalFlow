@@ -48,4 +48,15 @@ import MetalFlowCore
         #expect(!lines.contains("needs you:") && !lines.contains("lanes:"))
         #expect(!lines.contains { $0.hasPrefix("recommendation") })
     }
+
+    @Test func lanesShowTheReviewAfterTheGateAndOmitItWhenNil() {
+        func lane(_ id: LaneID, _ review: Bool?) -> Lane {
+            Lane(id: id, model: "opus", branch: "mflow/7-\(id)", worktree: URL(fileURLWithPath: "/wt/\(id)"),
+                 gatePassed: true, reviewPassed: review, added: 5, removed: 2)
+        }
+        let lines = runSummary(run(lanes: [lane("a", true), lane("b", false), lane("c", nil)]))
+        #expect(lines.contains("  a  opus  gate passed  review approved  +5 -2  mflow/7-a"))
+        #expect(lines.contains("  b  opus  gate passed  review asked for changes  +5 -2  mflow/7-b"))
+        #expect(lines.contains("  c  opus  gate passed  +5 -2  mflow/7-c"))
+    }
 }

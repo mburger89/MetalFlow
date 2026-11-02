@@ -53,6 +53,7 @@ struct ActivityRow: Component {
         case .needsYou: Tone.warn.color
         case .ok: Tone.ok.color
         case .bad: Tone.bad.color
+        case .warn: Tone.warn.color
         }
     }
 }

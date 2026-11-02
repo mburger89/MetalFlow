@@ -18,13 +18,14 @@ extension FlowDraft {
         }
     }
 
-    /// Edits a prompt or judge node's configuration.
+    /// Edits a prompt, judge or review node's prompt configuration.
     func editPrompt(_ id: NodeID, _ field: String, coalescing: Bool = true,
                     _ change: @escaping (inout PromptConfig) -> Void) {
         editNode(id, field, coalescing: coalescing) { node in
             switch node.kind {
             case .prompt(var c): change(&c); node.kind = .prompt(c)
             case .judge(var c): change(&c); node.kind = .judge(c)
+            case .review(var c): change(&c.agent); node.kind = .review(c)
             default: break
             }
         }
@@ -42,6 +43,13 @@ extension FlowDraft {
         }
     }
 
+    /// Edits a Review node's configuration.
+    func editReview(_ id: NodeID, _ field: String, coalescing: Bool = true, _ change: @escaping (inout ReviewConfig) -> Void) {
+        editNode(id, field, coalescing: coalescing) { node in
+            if case .review(var c) = node.kind { change(&c); node.kind = .review(c) }
+        }
+    }
+
     /// Edits an Open PR node's configuration.
     func editOpenPR(_ id: NodeID, _ field: String, coalescing: Bool = true, _ change: @escaping (inout OpenPRConfig) -> Void) {
         editNode(id, field, coalescing: coalescing) { node in
@@ -55,9 +63,13 @@ extension FlowDraft {
         return true
     }
 
-    /// The fix attempts of a gate; 0 for any other node.
+    /// The fix attempts of a gate or review; 0 for any other node.
     func fixAttempts(_ id: NodeID) -> Int {
-        if case .gate(let c)? = flow.node(id)?.kind { return c.fixAttempts }
+        switch flow.node(id)?.kind {
+        case .gate(let c)?: return c.fixAttempts
+        case .review(let c)?: return c.fixAttempts
+        default: return 0
+        }
         return 0
     }
 
@@ -74,10 +86,11 @@ extension FlowDraft {
         return false
     }
 
-    /// A prompt or judge node's configuration.
+    /// A prompt, judge or review node's prompt configuration.
     func promptConfig(_ id: NodeID) -> PromptConfig? {
         switch flow.node(id)?.kind {
         case .prompt(let c), .judge(let c): c
+        case .review(let c)?: c.agent
         default: nil
         }
     }
@@ -145,6 +158,9 @@ struct NodeInspector: Component {
                 case .flowInput: FlowInputFields(draft: draft, id: id)
                 case .repo: RepoFields(model: model, draft: draft, id: id, repos: repos)
                 case .prompt, .judge: PromptFields(draft: draft, id: id)
+                case .review:
+                    PromptFields(draft: draft, id: id)
+                    FixAttemptsFields(draft: draft, id: id)
                 case .shell, .gate:
                     label("Command")
                     TextField("Command", text: Binding(
@@ -152,7 +168,7 @@ struct NodeInspector: Component {
                         set: { value in draft.editShell(id) { $0.command = value } }))
                         .font(family: "Menlo", size: 12)
                         .accessibilityIdentifier("inspector.command")
-                    if case .gate = node.kind { GateFixFields(draft: draft, id: id) }
+                    if case .gate = node.kind { FixAttemptsFields(draft: draft, id: id) }
                 case .pick:
                     Text(verbatim: "Waits for you to pick a candidate.").font(size: 12).foregroundColor(Palette.muted)
                 case .openPR:
@@ -162,8 +178,6 @@ struct NodeInspector: Component {
                         .accessibilityIdentifier("inspector.openpr.draft")
                     Text(verbatim: "Pushes the picked branch and opens a pull request instead of merging.")
                         .font(size: 12).foregroundColor(Palette.muted)
-                case .review:
-                    Text(verbatim: "Reviews each candidate's diff.").font(size: 12).foregroundColor(Palette.muted)
                 }
                 IncomingWires(draft: draft, id: id)
                 if node.acceptsInputs { InputBindings(draft: draft, id: id) }
@@ -185,26 +199,42 @@ struct NodeInspector: Component {
     }
 }
 
-/// How many times a failing gate may send its agent back to fix the code.
-struct GateFixFields: Component {
+/// How many times a failing gate, or a review that finds problems, may send its agent back to fix the code.
+struct FixAttemptsFields: Component {
     let draft: FlowDraft
     let id: NodeID
 
-    /// The most fix attempts a gate can be given.
+    /// The most fix attempts a gate or review can be given.
     static let maxAttempts = 5
 
     var content: some ElementGroup {
         let draft = draft, id = id
+        let isReview: Bool = { if case .review? = draft.flow.node(id)?.kind { return true } else { return false } }()
+        let kind = isReview ? "review" : "gate"
         Text(verbatim: "Fix attempts").font(size: 11).foregroundColor(Palette.muted)
+            .accessibilityIdentifier("inspector.fixAttempts.label")
         Picker("", selection: Binding(
             get: { draft.fixAttempts(id) },
-            set: { value in draft.editShell(id, "fixAttempts", coalescing: false) { $0.fixAttempts = value } })) {
+            set: { value in
+                if isReview {
+                    draft.editReview(id, "fixAttempts", coalescing: false) { $0.fixAttempts = value }
+                } else {
+                    draft.editShell(id, "fixAttempts", coalescing: false) { $0.fixAttempts = value }
+                }
+            })) {
             ForEach(Array(0...Self.maxAttempts), id: \.self) { Text(verbatim: "\($0)").tag($0) }
         }
         .pickerStyle(.menu)
         .labelsHidden()
-        .accessibilityIdentifier("inspector.gate.fixAttempts")
-        if !draft.hasPromptUpstream(of: id) {
+        .accessibilityIdentifier("inspector.\(kind).fixAttempts")
+        if isReview {
+            Text(verbatim: "Sends the requested changes back to the agent up to this many times.")
+                .font(size: 12).foregroundColor(Palette.muted)
+                .accessibilityIdentifier("inspector.review.fixHint")
+            Text(verbatim: "{diff} is filled in with the candidate's changes.")
+                .font(size: 12).foregroundColor(Palette.muted)
+                .accessibilityIdentifier("inspector.review.diffHint")
+        } else if !draft.hasPromptUpstream(of: id) {
             Text(verbatim: "Needs a Prompt node feeding this gate.").font(size: 12).foregroundColor(Palette.muted)
                 .accessibilityIdentifier("inspector.gate.fixHint")
         }
@@ -212,10 +242,10 @@ struct GateFixFields: Component {
 }
 
 extension Node {
-    /// Whether the node has placeholders to bind: prompt, judge, shell and gate.
+    /// Whether the node has placeholders to bind: prompt, judge, review, shell and gate.
     var acceptsInputs: Bool {
         switch kind {
-        case .prompt, .judge, .shell, .gate: true
+        case .prompt, .judge, .shell, .gate, .review: true
         default: false
         }
     }
@@ -473,22 +503,25 @@ struct FlowInputFields: Component {
     }
 }
 
-/// Model, candidates, prompt, tools and max turns of a prompt or judge.
+/// Model, candidates (not for a review), prompt, tools and max turns of a prompt, judge or review.
 struct PromptFields: Component {
     let draft: FlowDraft
     let id: NodeID
 
     var content: some ElementGroup {
         let draft = draft, id = id
+        let isReview: Bool = { if case .review? = draft.flow.node(id)?.kind { return true } else { return false } }()
         let config = draft.promptConfig(id) ?? PromptConfig(model: "sonnet", prompt: "", candidates: [], allowedTools: [], maxTurns: nil)
         Text(verbatim: "Model").font(size: 11).foregroundColor(Palette.muted)
         modelPicker(selection: Binding(
             get: { draft.promptConfig(id)?.model ?? "sonnet" },
             set: { value in draft.editPrompt(id, "model", coalescing: false) { $0.model = value } }), identifier: "inspector.model")
-        Stepper("Candidates: \(config.candidateCount)", value: Binding(
-            get: { draft.promptConfig(id)?.candidateCount ?? 1 },
-            set: { value in draft.editPrompt(id, "candidates", coalescing: false) { $0.setCandidateCount(value) } }), in: 1...PromptConfig.maxCandidates)
-            .accessibilityIdentifier("inspector.candidates")
+        if !isReview {
+            Stepper("Candidates: \(config.candidateCount)", value: Binding(
+                get: { draft.promptConfig(id)?.candidateCount ?? 1 },
+                set: { value in draft.editPrompt(id, "candidates", coalescing: false) { $0.setCandidateCount(value) } }), in: 1...PromptConfig.maxCandidates)
+                .accessibilityIdentifier("inspector.candidates")
+        }
         if config.candidates.count > 1 {
             ForEach(Array(config.candidates.indices), id: \.self) { index in
                 HStack(spacing: Spacing.sm) {

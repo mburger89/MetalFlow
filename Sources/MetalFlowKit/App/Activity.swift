@@ -13,6 +13,8 @@ public struct ActivityItem: Identifiable, Equatable, Sendable {
         case ok
         /// Something failed.
         case bad
+        /// Something needs attention but did not fail.
+        case warn
     }
 
     /// Unique id of the item.
@@ -94,6 +96,13 @@ func deriveActivity(old: Run?, new: Run, now: Date) -> [ActivityItem] {
         }
         let failed = gates.values.filter { $0.state.isFailed }.count
         add("gate failed on \(failed) of \(gates.count) candidate\(gates.count == 1 ? "" : "s")", .bad)
+    }
+
+    for lane in new.lanes {
+        let before = old?.lanes.first { $0.id == lane.id }?.reviewPassed
+        guard lane.reviewPassed != before, let passed = lane.reviewPassed else { continue }
+        add(passed ? "review approved candidate \(lane.id)" : "review asked for changes on candidate \(lane.id)",
+            passed ? .ok : .warn)
     }
 
     if let before = old, before.status != new.status {

@@ -32,6 +32,11 @@ struct CandidateCard: Component {
                 .accessibilityIdentifier("\(id).model")
             Text(verbatim: gateText).font(size: 13).foregroundColor(gateColor)
                 .accessibilityIdentifier("\(id).gate")
+            if let review = lane.reviewPassed {
+                Text(verbatim: review ? "Review approved" : "Review asked for changes").font(size: 13)
+                    .foregroundColor(review ? Palette.ok : Palette.warn)
+                    .accessibilityIdentifier("\(id).review")
+            }
             HStack(spacing: Spacing.sm) {
                 Text(verbatim: "+\(lane.added)").font(Theme.mono(12)).foregroundColor(Palette.ok)
                     .accessibilityIdentifier("\(id).added")

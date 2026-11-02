@@ -30,11 +30,10 @@ extension Node {
         switch kind {
         case .flowInput, .repo: Color(Hsla.rgb(0x8b93a1))
         case .prompt: Palette.accent
-        case .shell, .gate: Color(Hsla.rgb(0x4fd1a5))
+        case .shell, .gate, .review: Color(Hsla.rgb(0x4fd1a5))
         case .judge: Palette.warn
         case .pick: Color(Hsla.rgb(0xd2a8ff))
         case .openPR: Palette.ok
-        case .review: Palette.warn
         }
     }
 

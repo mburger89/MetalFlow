@@ -220,6 +220,14 @@ func gateText(_ g: Bool?) -> String {
     }
 }
 
+func reviewText(_ r: Bool?) -> String? {
+    switch r {
+    case true?: "review approved"
+    case false?: "review asked for changes"
+    case nil: nil
+    }
+}
+
 func runSummary(_ run: Run) -> [String] {
     var lines = ["\(run.id.rawValue)  \(statusText(run.status))  \(run.title)",
                  "  repo \(run.repo.path)  base \(run.baseBranch)  branch \(run.branch)"]
@@ -235,7 +243,7 @@ func runSummary(_ run: Run) -> [String] {
     if !run.lanes.isEmpty {
         lines.append("lanes:")
         for l in run.lanes {
-            lines.append("  \(l.id)  \(l.model)  \(gateText(l.gatePassed))  +\(l.added) -\(l.removed)  \(l.branch)")
+            lines.append("  \(l.id)  \(l.model)  \(([gateText(l.gatePassed), reviewText(l.reviewPassed)].compactMap { $0 }).joined(separator: "  "))  +\(l.added) -\(l.removed)  \(l.branch)")
         }
     }
     if let r = run.recommendation { lines.append("recommendation: \(r)") }

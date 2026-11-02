@@ -268,6 +268,8 @@ public enum PaletteKind: CaseIterable, Sendable {
     case pick
     /// Pushes the picked branch and opens a pull request.
     case openPR
+    /// An agent that reviews each candidate's diff.
+    case review
 
     /// The prefix of generated ids, also the palette item's identifier suffix.
     public var idPrefix: String {
@@ -280,6 +282,7 @@ public enum PaletteKind: CaseIterable, Sendable {
         case .judge: "judge"
         case .pick: "pick"
         case .openPR: "openpr"
+        case .review: "review"
         }
     }
 
@@ -294,6 +297,7 @@ public enum PaletteKind: CaseIterable, Sendable {
         case .judge: "Judge"
         case .pick: "You pick"
         case .openPR: "Open PR"
+        case .review: "Review"
         }
     }
 
@@ -309,6 +313,7 @@ public enum PaletteKind: CaseIterable, Sendable {
         case .judge: return .judge(prompt)
         case .pick: return .pick
         case .openPR: return .openPR(OpenPRConfig())
+        case .review: return .review(ReviewConfig())
         }
     }
 
@@ -316,7 +321,7 @@ public enum PaletteKind: CaseIterable, Sendable {
     public static let groups: [(title: String, items: [PaletteKind])] = [
         ("INPUTS", [.flowInput, .repo]),
         ("STEPS", [.prompt, .shell]),
-        ("CHECKS", [.gate]),
+        ("CHECKS", [.gate, .review]),
         ("DECIDE", [.judge, .pick, .openPR]),
     ]
 }
