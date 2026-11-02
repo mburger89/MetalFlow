@@ -69,6 +69,15 @@ public final class FlowDraft {
     var geometry = CanvasGeometry()
     /// The canvas view's size, once measured.
     var canvasSize: Size<Pixels>?
+    /// The canvas view's frame in window points, once measured. Drops and the search pane convert between window
+    /// and canvas-local points with it.
+    var canvasFrame: Bounds<Pixels>?
+    /// The palette row being dragged, once the pointer is past the click threshold.
+    var paletteDrag: PaletteDrag?
+    /// The pointer over the canvas in window points; nil while it is elsewhere.
+    @ObservationIgnored var pointerInWindow: ScreenPoint?
+    /// The Tab search pane, while open.
+    var nodeSearch: NodeSearch?
     @ObservationIgnored private var hasFitted = false
     @ObservationIgnored var panStart: ScreenPoint?
     /// What the current primary drag is doing.
@@ -158,21 +167,6 @@ public final class FlowDraft {
         var n = 1
         while flow.node(NodeID(rawValue: "\(prefix)\(n)")) != nil { n += 1 }
         return NodeID(rawValue: "\(prefix)\(n)")
-    }
-
-    /// Adds a node of `kind` centred on the canvas centre (the canvas origin before it is measured) and selects it.
-    @discardableResult
-    public func addNode(_ kind: PaletteKind) -> NodeID {
-        let id = uniqueID(prefix: kind.idPrefix)
-        var node = Node(id: id, title: kind.label, kind: kind.defaultKind, position: CanvasPoint(x: 0, y: 0))
-        if let canvasSize {
-            let centre = geometry.toCanvas(ScreenPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
-            let rect = geometry.nodeRect(node)
-            node.position = CanvasPoint(x: (centre.x - rect.w / 2).rounded(), y: (centre.y - rect.h / 2).rounded())
-        }
-        apply("add \(id.rawValue)", coalescing: false) { $0.nodes.append(node) }
-        selection = id
-        return id
     }
 
     /// Removes a node and every wire touching it, as one undo step.

@@ -24,8 +24,11 @@ public struct StudioView: Component {
 struct StudioBody: Component {
     let model: AppModel
     let draft: FlowDraft
+    /// Where this view's top-left corner is in the window, to place the drag's label from a window point.
+    @State var origin = ScreenPoint(x: Pixels(0), y: Pixels(0))
 
     var content: some ElementGroup {
+        let draft = draft
         VStack(spacing: 0) {
             StudioToolbar(model: model, draft: draft)
             Divider()
@@ -55,6 +58,14 @@ struct StudioBody: Component {
             .splitViewAutosaveName("studio.panes")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .anchoredOverlay(
+            isPresented: Binding(get: { draft.nodeSearch != nil }, set: { shown in if !shown { draft.closeNodeSearch() } }),
+            at: draft.nodeSearch?.windowPoint ?? ScreenPoint(x: Pixels(0), y: Pixels(0)), in: .global) {
+            NodeSearchPane(draft: draft)
+        }
+        .onGeometryChange(for: ScreenPoint.self, of: { $0.frame(in: .global).origin }) { origin = $0 }
+        // Drawn here, not inside the canvas or palette, so neither clips the label being dragged.
+        .overlay(alignment: .topLeading) { PaletteDragLabel(drag: draft.paletteDrag, origin: origin) }
     }
 }
 
@@ -63,6 +74,31 @@ extension StudioBody {
     static func problem(_ draft: FlowDraft, launchError: String?) -> String? {
         if case .failure(let error) = draft.validation { return draft.flow.message(for: error) }
         return launchError
+    }
+}
+
+/// The label of the palette row being dragged, under the pointer. Drawn at `StudioBody`'s root so neither the palette
+/// nor the canvas clips it; it never takes a press. `origin` is the root's top-left corner in window points.
+struct PaletteDragLabel: Component {
+    let drag: PaletteDrag?
+    let origin: ScreenPoint
+
+    static let size = (width: Float(120), height: Float(28))
+
+    var content: some ElementGroup {
+        ZStack(alignment: .topLeading) {
+            if let drag {
+                Text(verbatim: drag.kind.label).font(size: 13).foregroundColor(Palette.text)
+                    .frame(width: Pixels(Self.size.width), height: Pixels(Self.size.height))
+                    .background(Palette.line)
+                    .cornerRadius(6)
+                    .offset(x: drag.windowPoint.x - origin.x - Pixels(Self.size.width / 2),
+                            y: drag.windowPoint.y - origin.y - Pixels(Self.size.height / 2))
+                    .accessibilityIdentifier("palette.drag")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
     }
 }
 

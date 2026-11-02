@@ -56,6 +56,13 @@ struct CanvasView: Component {
         }
         .coordinateSpace(.named("canvas"))
         .onGeometryChange(for: Size<Pixels>.self, of: { $0.size }) { draft.canvasSizeChanged($0) }
+        .onGeometryChange(for: Bounds<Pixels>.self, of: { $0.frame(in: .global) }) { draft.canvasFrame = $0 }
+        .onContinuousHover(coordinateSpace: .global) { phase in
+            switch phase {
+            case .active(let point): draft.pointerInWindow = point
+            case .ended: draft.pointerInWindow = nil
+            }
+        }
         .onScrollWheel { Self.scroll($0, draft) }
         .gesture(SpatialTapGesture().onEnded { draft.select(at: $0.location, modifiers: $0.modifiers) })
         .gesture(MagnifyGesture()
@@ -76,13 +83,17 @@ struct CanvasView: Component {
     }
 
     /// Delete and Backspace remove the selection; ⌘A selects every node, Esc clears the selection; ⌘Z undoes, ⇧⌘Z
-    /// redoes. Only reached while the canvas has focus or the pointer is over it with nothing focused, so typing in
+    /// redoes; Tab opens the node search. Only reached while the canvas has focus or the pointer is over it with nothing focused, so typing in
     /// an inspector field never lands here.
     @MainActor
     static func key(_ press: KeyPress, _ draft: FlowDraft) -> KeyPress.Result {
         if press.key == .delete || press.key == .deleteForward {
             guard !draft.canvasSelection.isEmpty else { return .ignored }
             draft.deleteSelection()
+            return .handled
+        }
+        if press.key == .tab, press.modifiers.isEmpty {
+            draft.openNodeSearch()
             return .handled
         }
         if press.key == .escape {
