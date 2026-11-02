@@ -82,13 +82,16 @@ struct CanvasSurface: Component {
         .onKeyPress { Self.key($0, draft) }
         .gesture(DragGesture(minimumDistance: Pixels(3))
             .onChanged { draft.primaryDragChanged($0) }
-            .onEnded { draft.primaryDragEnded($0) })
+            .onEnded { draft.primaryDragEnded($0) }
+            .onCancelled { draft.primaryDragCancelled() })
         .gesture(DragGesture(button: .middle)
             .onChanged { draft.panChanged($0) }
-            .onEnded { _ in draft.panStart = nil })
+            .onEnded { _ in draft.panCancelled() }
+            .onCancelled { draft.panCancelled() })
         .gesture(DragGesture(button: .secondary)
             .onChanged { draft.panChanged($0) }
-            .onEnded { _ in draft.panStart = nil })
+            .onEnded { _ in draft.panCancelled() }
+            .onCancelled { draft.panCancelled() })
     }
 
     /// Delete and Backspace remove the selection; ⌘A selects every node and note, Esc clears the selection; ⌘Z undoes,
@@ -96,6 +99,12 @@ struct CanvasSurface: Component {
     /// the pointer is over it with nothing focused, so typing in an inspector field never lands here.
     @MainActor
     static func key(_ press: KeyPress, _ draft: FlowDraft) -> KeyPress.Result {
+        // A drag under way owns the canvas: a key that changes the flow would push a step the drag then repeats.
+        if draft.isGestureActive {
+            let mutating = press.key == .delete || press.key == .deleteForward || press.key == .tab
+                || press.key == .escape || ["n", "a", "z"].contains(press.key.character.lowercased())
+            return mutating ? .handled : .ignored
+        }
         if press.key == .delete || press.key == .deleteForward {
             guard !draft.canvasSelection.isEmpty else { return .ignored }
             draft.deleteSelection()
@@ -143,7 +152,10 @@ extension FlowDraft {
     /// pressed first unless it is selected), on the handle of a selected note it resizes the note, on empty canvas it
     /// draws a selection box.
     func primaryDragChanged(_ value: DragGesture.Value) {
+        // A press somewhere else than the drag in hand began: that drag was dropped without being cancelled.
+        if dragMode != nil, dragPress != value.startLocation { primaryDragCancelled() }
         if dragMode == nil {
+            dragPress = value.startLocation
             let start = geometry.toCanvas(value.startLocation)
             let mode = SelectionMode(value.modifiers)
             if let (id, side) = geometry.hitPort(at: start, in: flow), side == .output {
@@ -195,10 +207,15 @@ extension FlowDraft {
             break
         }
         dragMode = nil
+        dragPress = nil
     }
 
     func panChanged(_ value: DragGesture.Value) {
-        if panStart == nil { panStart = geometry.pan }
+        if panStart != nil, panPress != value.startLocation { panCancelled() }
+        if panStart == nil {
+            panStart = geometry.pan
+            panPress = value.startLocation
+        }
         let start = panStart ?? geometry.pan
         geometry.pan = ScreenPoint(x: start.x + value.translation.width, y: start.y + value.translation.height)
     }

@@ -26,7 +26,7 @@ public final class FlowDraft {
     /// The flow as last loaded or saved.
     public private(set) var lastSavedFlow: Flow
     /// Whether the flow differs from the one last loaded or saved. Undoing back to it makes the draft clean.
-    public var isDirty: Bool { flow != lastSavedFlow }
+    public var isDirty: Bool { flow != lastSavedFlow || pendingNoteEditChangesFlow }
     /// The plan, or why the flow cannot run. Recomputed on every change.
     public private(set) var validation: Result<FlowPlan, FlowError>
     /// Earlier states of the flow, oldest first.
@@ -80,8 +80,18 @@ public final class FlowDraft {
     var nodeSearch: NodeSearch?
     /// The note being typed into, while its field is open. The text is written to the flow when the edit commits.
     var noteEdit: NoteEdit?
+    /// The open note field's selection (a `TextSelection`, type-erased because it needs macOS 15): what it opened with,
+    /// then what the field last reported.
+    var noteSelection: AnyHashable?
+    /// The note added by the edit now open and the undo depth just after its add step, while that edit is its first:
+    /// committing joins the add step and cancelling takes it back.
+    @ObservationIgnored var newNote: (id: NoteID, depth: Int)?
     @ObservationIgnored private var hasFitted = false
     @ObservationIgnored var panStart: ScreenPoint?
+    /// Where the press behind `panStart` landed; a drag that starts elsewhere is a new gesture.
+    @ObservationIgnored var panPress: ScreenPoint?
+    /// Where the press behind `dragMode` landed.
+    @ObservationIgnored var dragPress: ScreenPoint?
     /// What the current primary drag is doing.
     @ObservationIgnored var dragMode: DragMode?
     /// The flow when a node drag began; its undo step's before-state.
@@ -138,8 +148,20 @@ public final class FlowDraft {
         redoStack = []
     }
 
-    /// Steps back one edit.
+    /// Takes the newest undo step off the stack, returning the flow it held; nothing goes to the redo stack.
+    func takeLastUndoState() -> Flow? { undoStack.popLast() }
+
+    /// Replaces the flow without an undo step; the caller keeps the history consistent.
+    func replaceFlowWithoutHistory(_ updated: Flow) { flow = updated }
+
+    /// Whether a drag is under way, on the canvas or from the palette: edits by key wait for it to end.
+    var isGestureActive: Bool { dragMode != nil || paletteDrag != nil }
+
+    /// Steps back one edit. An open note edit is committed first, so its text is not left to land on the undone
+    /// state; a drag under way ignores it.
     public func undo() {
+        guard !isGestureActive else { return }
+        commitNoteEdit()
         guard let previous = undoStack.popLast() else { return }
         redoStack.append(flow)
         flow = previous
@@ -147,8 +169,10 @@ public final class FlowDraft {
         dropStaleSelection()
     }
 
-    /// Re-applies the last undone edit.
+    /// Re-applies the last undone edit. An open note edit is committed first.
     public func redo() {
+        guard !isGestureActive else { return }
+        commitNoteEdit()
         guard let next = redoStack.popLast() else { return }
         undoStack.append(flow)
         flow = next
@@ -156,13 +180,17 @@ public final class FlowDraft {
         dropStaleSelection()
     }
 
-    private func dropStaleSelection() {
+    func dropStaleSelection() {
         let nodes = canvasSelection.nodes.filter { flow.node($0) != nil }
         if nodes != canvasSelection.nodes { canvasSelection.nodes = nodes }
         let notes = canvasSelection.notes.filter { id in flow.notes.contains { $0.id == id } }
         if notes != canvasSelection.notes { canvasSelection.notes = notes }
         if let selectedWire, !flow.wires.contains(selectedWire) { self.selectedWire = nil }
-        if let edit = noteEdit, !flow.notes.contains(where: { $0.id == edit.id }) { noteEdit = nil }
+        if let edit = noteEdit, !flow.notes.contains(where: { $0.id == edit.id }) {
+            noteEdit = nil
+            noteSelection = nil
+            newNote = nil
+        }
     }
 
     // MARK: Structural edits
@@ -256,6 +284,41 @@ public final class FlowDraft {
         updated.notes[i].width = max(origin.w + delta.x, NoteLayout.minimumWidth)
         updated.notes[i].height = max(origin.h + delta.y, NoteLayout.minimumHeight)
         flow = updated
+    }
+
+    /// A primary drag was dropped without a release (the system took it, or a second press began): puts back what it
+    /// had changed and clears its state, leaving the draft as it was before the press.
+    func primaryDragCancelled() {
+        switch dragMode {
+        case .move, .resize:
+            if let start = dragStartFlow, start != flow { flow = start }
+        case .box(_, let base, _):
+            canvasSelection = base
+        case .wire, nil:
+            break
+        }
+        dragMode = nil
+        dragPress = nil
+        dragStartFlow = nil
+        selectionBox = nil
+        pendingWire = nil
+    }
+
+    /// A middle or secondary pan was dropped without a release.
+    func panCancelled() {
+        panStart = nil
+        panPress = nil
+    }
+
+    /// The Studio went away (another screen, or another draft): ends whatever gesture or pane was open, commits the
+    /// note being typed, so none of it is there when the Studio comes back.
+    func leaveStudio() {
+        commitNoteEdit()
+        primaryDragCancelled()
+        panCancelled()
+        pinchStart = nil
+        paletteDrag = nil
+        nodeSearch = nil
     }
 
     /// Ends a node drag: one undo step from the flow at drag start, if anything moved.

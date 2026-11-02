@@ -13,7 +13,7 @@ struct StickyView: Component, @MainActor Equatable {
     var content: some ElementGroup {
         let z = zoom
         let w = Pixels(Float(note.width * z)), h = Pixels(Float(note.height * z))
-        let handle = NoteLayout.handle * z
+        let handle = NoteLayout.handle
         ZStack(alignment: .topLeading) {
             Rectangle().fill(Palette.warn.opacity(0.2))
             if !editing {
@@ -28,6 +28,7 @@ struct StickyView: Component, @MainActor Equatable {
                 Rectangle().fill(Palette.accent)
                     .frame(width: Pixels(Float(handle)), height: Pixels(Float(handle)))
                     .offset(x: w - Pixels(Float(handle)), y: h - Pixels(Float(handle)))
+                    .accessibilityIdentifier("note.\(note.id.rawValue).handle")
             }
         }
         .frame(width: w, height: h, alignment: .topLeading)
@@ -48,7 +49,7 @@ struct FrameView: Component, @MainActor Equatable {
     var content: some ElementGroup {
         let z = zoom
         let w = Pixels(Float(note.width * z)), h = Pixels(Float(note.height * z))
-        let handle = NoteLayout.handle * z
+        let handle = NoteLayout.handle
         ZStack(alignment: .topLeading) {
             Rectangle().fill(Palette.accent.opacity(0.06))
             Text(verbatim: editing ? "" : note.text).font(size: 12 * z).foregroundColor(Palette.text)
@@ -63,6 +64,7 @@ struct FrameView: Component, @MainActor Equatable {
                 Rectangle().fill(Palette.accent)
                     .frame(width: Pixels(Float(handle)), height: Pixels(Float(handle)))
                     .offset(x: w - Pixels(Float(handle)), y: h - Pixels(Float(handle)))
+                    .accessibilityIdentifier("note.\(note.id.rawValue).handle")
             }
         }
         .frame(width: w, height: h, alignment: .topLeading)
@@ -88,6 +90,10 @@ struct NoteEditorLayer: Component {
             // Keyed by the note, so each edit is a new field and asks for focus again.
             ForEach(editors, id: \.edit.id.rawValue) { $0 }
         }
+        // As big as the canvas and no bigger: a field running past it must neither resize the canvas nor draw over
+        // the palette or inspector.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
     }
 }
 
@@ -103,7 +109,7 @@ struct NoteEditorField: Component {
         let z = geometry.zoom
         let origin = geometry.toScreen(CanvasPoint(x: note.origin.x, y: note.origin.y))
         if note.surrounds {
-            TextField("Title", text: edit.draft, onChange: { draft.updateNoteDraft($0) })
+            titleField(draft)
                 .font(size: 12 * z)
                 .focused($focused)
                 .onKeyPress(.escape) {
@@ -117,7 +123,7 @@ struct NoteEditorField: Component {
                 .onAppear { focused = true }
                 .onChange(of: focused) { was, now in if was, !now { draft.commitNoteEdit() } }
         } else {
-            TextEditor("Note", text: edit.draft, onChange: { draft.updateNoteDraft($0) })
+            stickyEditor(draft)
                 .font(size: 13 * z)
                 .focused($focused)
                 .onKeyPress(keys: [.return]) { press in
@@ -135,5 +141,25 @@ struct NoteEditorField: Component {
                 .onAppear { focused = true }
                 .onChange(of: focused) { was, now in if was, !now { draft.commitNoteEdit() } }
         }
+    }
+
+    /// The sticky's field, opening with the selection the draft holds (the caret at the end) where MetalUI can take one.
+    private func stickyEditor(_ draft: FlowDraft) -> TextEditor {
+        if #available(macOS 15, *) {
+            return TextEditor("Note", text: edit.draft, selection: draft.noteSelection as? TextSelection,
+                              onChange: { draft.updateNoteDraft($0) },
+                              onSelectionChange: { draft.noteSelectionChanged(AnyHashable($0)) })
+        }
+        return TextEditor("Note", text: edit.draft, onChange: { draft.updateNoteDraft($0) })
+    }
+
+    /// The frame title's field, opening with its text selected where MetalUI can take a selection.
+    private func titleField(_ draft: FlowDraft) -> TextField {
+        if #available(macOS 15, *) {
+            return TextField("Title", text: edit.draft, selection: draft.noteSelection as? TextSelection,
+                             onChange: { draft.updateNoteDraft($0) },
+                             onSelectionChange: { draft.noteSelectionChanged(AnyHashable($0)) })
+        }
+        return TextField("Title", text: edit.draft, onChange: { draft.updateNoteDraft($0) })
     }
 }

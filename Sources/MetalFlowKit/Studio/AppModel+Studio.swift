@@ -129,6 +129,12 @@ extension AppModel {
         }
     }
 
+    /// Writes the text of an open note editor into the draft's flow. Typed text lives only in the editor until it
+    /// commits, so everything that reads the flow to save, copy, launch or compare it calls this first.
+    func commitStudioEdit() {
+        draft?.commitNoteEdit()
+    }
+
     /// Whether the draft can be saved or launched.
     public var draftIsValid: Bool {
         if let draft, case .success = draft.validation { return true }
@@ -140,6 +146,7 @@ extension AppModel {
     /// Sets a notice on failure.
     @discardableResult
     public func saveDraft() async -> Bool {
+        commitStudioEdit()
         guard let draft, draftIsValid else { return false }
         let flow: Flow
         let location: FlowLocation
@@ -203,6 +210,7 @@ extension AppModel {
     /// Studio switches to the copy, with a fresh undo history. Cancelling the panel does nothing; a failed write sets
     /// a notice and leaves the draft as it was.
     public func copyDraft() async {
+        commitStudioEdit()
         guard let draft, draft.url != nil else { return }
         guard draftIsValid else {
             notice = Notice("Fix the flow's errors before copying it.")
@@ -285,6 +293,7 @@ extension AppModel {
     /// text was not changed meanwhile.
     @discardableResult
     public func launchFromStudio() async -> RunID? {
+        commitStudioEdit()
         guard let draft, draftIsValid, studioLaunch.canLaunch else { return nil }
         let fields = studioLaunch.fields
         let typed = Dictionary(uniqueKeysWithValues: fields.map { ($0.name, studioValue($0)) })
@@ -318,6 +327,7 @@ extension AppModel {
     /// File > New Flow: a new flow with one Repo node, "Untitled flow" or the first "Untitled flow N" the catalog
     /// does not use. With unsaved edits it asks first.
     public func newFlow() async {
+        commitStudioEdit()
         if let draft, draft.isDirty {
             pendingAction = .newFlow
             screen = .studio
@@ -366,6 +376,7 @@ extension AppModel {
     /// Shows a built-in flow in the Studio (the default one without an argument); with unsaved edits to anything
     /// else, including another built-in, it asks first.
     public func openBuiltin(_ flow: Flow = BuiltinFlows.fixGitHubIssue) {
+        commitStudioEdit()
         if let draft, draft.isDirty, !isOpen(builtin: flow) {
             pendingAction = .openBuiltin(flow.name)
             return

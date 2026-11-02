@@ -48,6 +48,7 @@ public final class AppModel {
     /// The visible screen.
     public var screen: Screen = .dashboard {
         didSet {
+            if oldValue == .studio, screen != .studio { draft?.leaveStudio() }
             if screen == .studio { ensureDraft() }
             if screen != oldValue { detailMayHaveOpened() }
         }
@@ -56,6 +57,7 @@ public final class AppModel {
     public var draft: FlowDraft? {
         didSet {
             guard draft !== oldValue else { return }
+            oldValue?.leaveStudio()
             studioRun = nil
             studioValues = [:]
         }
@@ -407,6 +409,7 @@ public final class AppModel {
     /// Remembers an open flow, loads it into the Studio and shows the Studio. A flow that is already the
     /// draft keeps its draft. A load error becomes a notice and the screen stays.
     public func open(flow url: URL) {
+        commitStudioEdit()
         if let draft, draft.isDirty, draft.url != url {
             pendingAction = .open(url)
             return

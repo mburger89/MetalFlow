@@ -21,6 +21,7 @@ extension AppModel {
     /// The answer to ⌘Q and to the window's close button (one window, so closing it is quitting). Unsaved
     /// Studio edits are asked about first (Save / Discard / Cancel), then running runs.
     public func requestTerminate() -> CloseRequestReply {
+        commitStudioEdit()
         if draft?.isDirty == true {
             pendingAction = .quit
             return .later

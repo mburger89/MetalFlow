@@ -48,9 +48,10 @@ enum NoteLayout {
     static let framePadding = 24.0
     /// The title strip at the top of a frame.
     static let titleStrip = 22.0
-    /// How far inside a frame's edge a press still grabs the frame.
+    /// How far inside a frame's edge a press still grabs the frame, in screen points: it keeps this size at any zoom,
+    /// as `portRadius` does. The title strip scales.
     static let edgeBand = 6.0
-    /// The side of the resize handle.
+    /// The side of the resize handle, in screen points at any zoom.
     static let handle = 12.0
     /// The smallest a note can be resized to.
     static let minimumWidth = 80.0
@@ -162,14 +163,16 @@ struct CanvasGeometry: Equatable {
     /// The part of a frame drawn at `rect` that is not its chrome (inside the title strip and the edge band); nil when
     /// the frame is so small that all of it is chrome.
     func interior(of rect: CanvasRect) -> CanvasRect? {
-        let w = rect.w - 2 * NoteLayout.edgeBand, h = rect.h - NoteLayout.titleStrip - NoteLayout.edgeBand
+        let band = NoteLayout.edgeBand / zoom
+        let w = rect.w - 2 * band, h = rect.h - NoteLayout.titleStrip - band
         guard w > 0, h > 0 else { return nil }
-        return CanvasRect(x: rect.x + NoteLayout.edgeBand, y: rect.y + NoteLayout.titleStrip, w: w, h: h)
+        return CanvasRect(x: rect.x + band, y: rect.y + NoteLayout.titleStrip, w: w, h: h)
     }
 
     /// The resize handle of a note drawn at `rect`: its bottom-right corner.
     func handleRect(of rect: CanvasRect) -> CanvasRect {
-        CanvasRect(x: rect.maxX - NoteLayout.handle, y: rect.maxY - NoteLayout.handle, w: NoteLayout.handle, h: NoteLayout.handle)
+        let side = NoteLayout.handle / zoom
+        return CanvasRect(x: rect.maxX - side, y: rect.maxY - side, w: side, h: side)
     }
 
     /// The note under a canvas point, with the part of it. Order: the handle of a selected note, then stickies (the

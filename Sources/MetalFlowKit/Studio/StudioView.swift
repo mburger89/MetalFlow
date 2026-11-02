@@ -16,6 +16,8 @@ public struct StudioView: Component {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
+        // A press on the palette or any chrome that takes no focus itself ends a note edit (losing focus commits).
+        .resignsFocusOnPress()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("studio")
     }

@@ -266,12 +266,15 @@ import Testing
         try await window.runUntilIdle()
         #expect(draft.canvasSelection == CanvasSelection(nodes: ["plan"]))
         // An empty spot in the frame's interior, under the first node: a click clears.
-        let gap = try screen(window, draft, CanvasPoint(x: 400, y: 330))
+        // The edge band is 6 screen points, 12 canvas units at this zoom: stay well inside it.
+        let frame = try note(draft, id)
+        let gapPoint = CanvasPoint(x: 400, y: frame.origin.y + frame.height - 30)
+        let gap = try screen(window, draft, gapPoint)
         window.click(at: gap)
         try await window.runUntilIdle()
         #expect(draft.canvasSelection.isEmpty)
         // And a drag from it draws a box that selects neither the frame nor any node.
-        let start = draft.geometry.toScreen(CanvasPoint(x: 400, y: 330))
+        let start = draft.geometry.toScreen(gapPoint)
         let end = ScreenPoint(x: start.x + 6, y: start.y + 4)
         draft.primaryDragChanged(.init(startLocation: start, location: end))
         #expect(draft.selectionBox != nil)
