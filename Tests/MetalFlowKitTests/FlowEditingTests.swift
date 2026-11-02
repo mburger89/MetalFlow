@@ -656,6 +656,8 @@ struct KindMismatch: Error {}
         _ = try window.element(identifier: "save.dest.app")
         _ = try window.element(identifier: "save.dest.app-2")
         try await press("save.dest.app-2", in: window)
+        // The new file name is chosen off the main actor.
+        try await window.runUntil { !client.files.saved.isEmpty }
         #expect(client.files.saved.first?.url.path.hasPrefix("/work/b/app/") == true)
     }
 
