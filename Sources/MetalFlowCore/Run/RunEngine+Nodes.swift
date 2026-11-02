@@ -19,17 +19,22 @@ extension RunEngine {
         case .repo:
             finish(id, key, .succeeded, output: run.repo.path)
         case .prompt(let config):
-            await runAgent(id, key, node: node, config: config, plan: plan, isJudge: false)
+            await runAgent(id, key, node: node, config: config, plan: plan, role: .work)
         case .judge(let config):
-            await runAgent(id, key, node: node, config: config, plan: plan, isJudge: true)
+            await runAgent(id, key, node: node, config: config, plan: plan, role: .judge)
         case .shell(let config):
             await runShell(id, key, config: config, plan: plan, isGate: false)
         case .gate(let config):
             await runShell(id, key, config: config, plan: plan, isGate: true)
         case .openPR(let config):
             await runOpenPR(id, key, config: config, plan: plan)
-        case .review:
-            finish(id, key, .failed("Review is not implemented"))
+        case .review(let config):
+            let lane = key.lane.flatMap { laneID in run.lanes.first { $0.id == laneID } }
+            if lane?.gatePassed == false {
+                finish(id, key, .succeeded, output: "Skipped: tests failed")
+            } else {
+                await runAgent(id, key, node: node, config: config.agent, plan: plan, role: .review(config))
+            }
         case .pick:
             let lanes = runs[id]?.lanes ?? []
             let allFailed = lanes.contains { $0.gatePassed != nil } && !lanes.contains { $0.gatePassed == true }
@@ -94,33 +99,88 @@ extension RunEngine {
             case false?: tests = "tests failed"
             case nil: tests = "no gate"
             }
-            let clipped: String
-            do {
-                let diff = try await git.diff(worktree: lane.worktree, base: run.branch)
-                let lines = diff.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-                clipped = lines.prefix(Self.maxCandidateDiffLines).joined(separator: "\n")
-            } catch {
-                clipped = "(diff unavailable: \(error.localizedDescription))"
+            let reviewNote: String
+            switch lane.reviewPassed {
+            case true?: reviewNote = ", review approved"
+            case false?: reviewNote = ", review asked for changes"
+            case nil: reviewNote = ""
             }
-            sections.append("## \(lane.id) (\(lane.model)) — \(tests), +\(lane.added) −\(lane.removed)\n\(clipped)")
+            var section = "## \(lane.id) (\(lane.model)) — \(tests)\(reviewNote), +\(lane.added) −\(lane.removed)\n\(await clippedDiff(lane, run: run).text)"
+            if lane.reviewPassed == false, let findings = Self.reviewOutput(of: lane.id, in: run) {
+                section += "\n\nReview:\n" + Self.lastLines(findings, 40)
+            }
+            sections.append(section)
         }
         return sections.joined(separator: "\n\n")
     }
 
+    /// A lane's committed diff against the run's branch, cut to `maxCandidateDiffLines`; `cut` says whether it was.
+    private func clippedDiff(_ lane: Lane, run: Run) async -> (text: String, cut: Bool) {
+        do {
+            let diff = try await git.diff(worktree: lane.worktree, base: run.branch)
+            let lines = diff.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            return (lines.prefix(Self.maxCandidateDiffLines).joined(separator: "\n"), lines.count > Self.maxCandidateDiffLines)
+        } catch {
+            return ("(diff unavailable: \(error.localizedDescription))", false)
+        }
+    }
+
+    /// The output of the first Review node's run in a lane, when it has one.
+    private static func reviewOutput(of lane: LaneID, in run: Run) -> String? {
+        for node in run.flow.nodes {
+            guard case .review = node.kind, let output = run.nodes[NodeKey(node: node.id, lane: lane)]?.output else { continue }
+            return output
+        }
+        return nil
+    }
+
+    /// The last `count` lines of `text`, without trailing blank lines.
+    static func lastLines(_ text: String, _ count: Int) -> String {
+        var lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines.suffix(count).joined(separator: "\n")
+    }
+
     // MARK: - Agent nodes
 
-    func runAgent(_ id: RunID, _ key: NodeKey, node: Node, config: PromptConfig, plan: FlowPlan, isJudge: Bool) async {
+    /// What an agent node is for: it changes the code, judges the candidates, or reviews a candidate's diff.
+    enum AgentRole {
+        case work, judge
+        case review(ReviewConfig)
+    }
+
+    func runAgent(_ id: RunID, _ key: NodeKey, node: Node, config: PromptConfig, plan: FlowPlan, role: AgentRole) async {
         guard let run = runs[id] else { return }
         let lane = key.lane.flatMap { laneID in run.lanes.first { $0.id == laneID } }
 
         var values = templateValues(id, key, plan: plan)
-        if isJudge { values["candidates"] = await candidatesText(id, plan: plan) }
+        var instruction = ""
+        var isJudge = false, review: ReviewConfig?
+        switch role {
+        case .work: break
+        case .judge:
+            isJudge = true
+            values["candidates"] = await candidatesText(id, plan: plan)
+        case .review(let reviewConfig):
+            review = reviewConfig
+            instruction = "\n\nEnd your reply with a final line that is exactly `VERDICT: approve` or `VERDICT: changes`."
+            var diff = ""
+            if let lane {
+                let clipped = await clippedDiff(lane, run: run)
+                diff = clipped.text
+                if clipped.cut {
+                    diff += "\n(cut at \(Self.maxCandidateDiffLines) lines; read the rest with git diff \(run.branch))"
+                }
+            }
+            values["diff"] = diff
+        }
         let current = runs[id]?.nodes[key] ?? NodeRun()
 
         var request = AgentRequest(
-            prompt: Template.fill(config.prompt, with: values),
+            prompt: Template.fill(config.prompt, with: values) + instruction,
             workingDirectory: lane?.worktree ?? run.worktree,
-            model: lane?.model ?? config.model,
+            // A review keeps its own model; the lane's is the candidate's.
+            model: review == nil ? (lane?.model ?? config.model) : config.model,
             allowedTools: config.allowedTools + current.extraAllowedTools,
             maxTurns: config.maxTurns)
         if let reply = current.pendingReply, let session = current.sessionID {
@@ -163,7 +223,8 @@ extension RunEngine {
             finish(id, key, .failed(result.text))
             return
         }
-        if let lane {
+        // A reviewer never edits, so there is nothing of its to commit.
+        if let lane, review == nil {
             let message = Self.laneCommitMessage(
                 runTitle: run.title, flowName: run.flow.name, lane: lane.id, nodeTitle: node.title, fix: current.pendingFix)
             do {
@@ -181,6 +242,8 @@ extension RunEngine {
         }
         if let question = result.question {
             finish(id, key, .needsYou(.question(question)), output: result.text)
+        } else if let review {
+            await concludeReview(id, key, node: node, config: review, text: result.text, plan: plan)
         } else {
             finish(id, key, .succeeded, output: result.text)
             if isJudge {
@@ -190,15 +253,71 @@ extension RunEngine {
         }
     }
 
+    /// What a review decided at the end of a reply.
+    enum ReviewVerdict { case approve, changes }
+
+    /// Records a finished review turn: approved, sent back for changes (when attempts and an agent are left), or
+    /// not approved because the verdict was refused or unreadable.
+    private func concludeReview(_ id: RunID, _ key: NodeKey, node: Node, config: ReviewConfig, text: String,
+                                plan: FlowPlan) async {
+        func setPassed(_ passed: Bool) {
+            guard let laneID = key.lane else { return }
+            mutate(id) { run in
+                if let index = run.lanes.firstIndex(where: { $0.id == laneID }) { run.lanes[index].reviewPassed = passed }
+            }
+        }
+        switch Self.reviewVerdict(in: text) {
+        case .approve?:
+            setPassed(true)
+        case .changes?:
+            let n = (runs[id]?.nodes[key]?.fixAttemptsUsed ?? 0) + 1
+            let source = PendingFix(attempt: n, total: config.fixAttempts, command: node.title, label: "Review")
+            if beginFix(id, key, attempts: config.fixAttempts, message: Self.reviewFixMessage(findings: text),
+                        source: source, logLine: "✕ changes requested, fix \(n) of \(config.fixAttempts)", plan: plan) {
+                return
+            }
+            setPassed(false)
+        case nil:
+            updateNode(id, key) { $0.appendLog("⚠ no VERDICT line") }
+            setPassed(false)
+        }
+        finish(id, key, .succeeded, output: text)
+    }
+
+    /// The verdict on the last `VERDICT:` line; nil when there is none or it is neither `approve` nor `changes`.
+    static func reviewVerdict(in text: String) -> ReviewVerdict? {
+        switch lastMarkedValue("VERDICT:", in: text)?.lowercased() {
+        case "approve": .approve
+        case "changes": .changes
+        default: nil
+        }
+    }
+
+    /// The message that sends the agent back to work after a reviewer asked for changes.
+    static func reviewFixMessage(findings: String) -> String {
+        """
+        A reviewer asked for changes to your work:
+
+        \(lastLines(findings, 200))
+
+        Make the changes that are right. If you disagree with one, leave it and say why in your reply.
+        """
+    }
+
     /// The lane named by the last `RECOMMEND: <lane>` line, if it exists.
     static func recommendation(in text: String, lanes: [Lane]) -> LaneID? {
-        let marker = "RECOMMEND:"
+        guard let name = lastMarkedValue("RECOMMEND:", in: text) else { return nil }
+        return lanes.contains { $0.id == name } ? name : nil
+    }
+
+    /// What follows `marker` on the last line that starts with it, ignoring case, spaces, backticks and asterisks.
+    private static func lastMarkedValue(_ marker: String, in text: String) -> String? {
         let junk = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "`*"))
         let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: junk) }
-        guard let line = lines.last(where: { $0.hasPrefix(marker) }) else { return nil }
-        let name = line.dropFirst(marker.count).trimmingCharacters(in: junk)
-        return lanes.contains { $0.id == name } ? name : nil
+        guard let line = lines.last(where: { $0.range(of: marker, options: [.anchored, .caseInsensitive]) != nil })
+        else { return nil }
+        return line.dropFirst(marker.count).trimmingCharacters(in: junk)
     }
 
     // MARK: - Open PR
@@ -234,7 +353,13 @@ extension RunEngine {
         case false?: tests = "tests failed"
         case nil: tests = "no gate"
         }
-        var body = "Candidate \(lane.id) (\(lane.model)), \(tests), chosen in MetalFlow."
+        let review: String
+        switch lane.reviewPassed {
+        case true?: review = ", review approved"
+        case false?: review = ", review asked for changes"
+        case nil: review = ""
+        }
+        var body = "Candidate \(lane.id) (\(lane.model)), \(tests)\(review), chosen in MetalFlow."
         if let issue = Self.closedIssue(of: run, plan: plan) { body = "Closes #\(issue)\n\n" + body }
         let title = Self.commitName(runTitle: run.title, flowName: run.flow.name)
 
@@ -298,9 +423,14 @@ extension RunEngine {
             .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
         while lines.last?.isEmpty == true { lines.removeLast() }
         let tail = lines.suffix(Self.maxShellOutputLines).joined(separator: "\n")
-        if isGate, !result.succeeded,
-           beginFix(id, key, config: config, command: command, exitCode: result.exitCode, output: tail, plan: plan) {
-            return
+        if isGate, !result.succeeded {
+            let n = (run.nodes[key]?.fixAttemptsUsed ?? 0) + 1
+            let source = PendingFix(attempt: n, total: config.fixAttempts, command: command)
+            if beginFix(id, key, attempts: config.fixAttempts,
+                        message: Self.fixMessage(command: command, exitCode: result.exitCode, output: tail),
+                        source: source, logLine: "✕ exit \(result.exitCode), fix \(n) of \(config.fixAttempts)", plan: plan) {
+                return
+            }
         }
         if isGate, let lane {
             let stat = try? await git.diffStat(worktree: worktree, base: run.branch)

@@ -75,6 +75,14 @@ extension RunEngine {
                     run.lanes[index].removed = 0
                 }
             }
+            // A reset review has no verdict until it runs again.
+            for index in run.lanes.indices where resetLanes.contains(run.lanes[index].id) {
+                let reviewReset = (Array(keys) + [node]).contains { key in
+                    guard key.lane == run.lanes[index].id, case .review? = run.flow.node(key.node)?.kind else { return false }
+                    return true
+                }
+                if reviewReset { run.lanes[index].reviewPassed = nil }
+            }
             run.recommendation = nil
             // A pick that is reset must be made again.
             if let pickNode = pickNodeKey(run), keys.contains(pickNode) { run.pickedLane = nil }

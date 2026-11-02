@@ -20,7 +20,7 @@ extension RunEngine {
                                   fix: PendingFix?) -> String {
         let name = commitName(runTitle: runTitle, flowName: flowName)
         guard let fix else { return "\(name) (\(lane))\n\nNode: \(nodeTitle)" }
-        return "Fix attempt \(fix.attempt) of \(fix.total): \(name) (\(lane))\n\nNode: \(nodeTitle)\nGate: \(fix.command)"
+        return "Fix attempt \(fix.attempt) of \(fix.total): \(name) (\(lane))\n\nNode: \(nodeTitle)\n\(fix.label): \(fix.command)"
     }
 
     /// What a run's commits and pull request are called: its title without `#N `, else the flow's name.
@@ -66,36 +66,42 @@ extension RunEngine {
         return reach(from: agent, forward: true).intersection(reach(from: gate, forward: false)).subtracting([agent, gate])
     }
 
-    /// Sends a failed gate's agent back to work and puts the gate (and what lies between) up for a rerun, when the
-    /// gate has attempts left and an agent to resume. Returns false when it did nothing.
-    func beginFix(_ id: RunID, _ gate: NodeKey, config: ShellConfig, command: String, exitCode: Int32,
-                  output: String, plan: FlowPlan) -> Bool {
+    /// Sends a checker's agent back to work with `message` and puts the checker (and what lies between) up for a
+    /// rerun, when the checker has attempts left and an agent to resume. The checker is a gate or a review.
+    /// `source` labels the agent's commit and `logLine` goes in the checker's log. Returns false when it did nothing.
+    func beginFix(_ id: RunID, _ checker: NodeKey, attempts: Int, message: String, source: PendingFix,
+                  logLine: String, plan: FlowPlan) -> Bool {
         guard let run = runs[id], run.status == .running, !suspended.contains(id) else { return false }
-        let used = run.nodes[gate]?.fixAttemptsUsed ?? 0
-        guard used < config.fixAttempts,
-              let agentKey = Self.fixingAgent(for: gate, in: run, laneScoped: plan.laneScoped) else { return false }
-        let message = Self.fixMessage(command: command, exitCode: exitCode, output: output)
-        let between = Self.nodesBetween(agent: agentKey.node, gate: gate.node, flow: run.flow)
-            .map { NodeKey(node: $0, lane: gate.lane) }
+        let used = run.nodes[checker]?.fixAttemptsUsed ?? 0
+        guard used < attempts,
+              let agentKey = Self.fixingAgent(for: checker, in: run, laneScoped: plan.laneScoped) else { return false }
+        let between = Self.nodesBetween(agent: agentKey.node, gate: checker.node, flow: run.flow)
+            .map { NodeKey(node: $0, lane: checker.lane) }
         mutate(id) { run in
             var agent = run.nodes[agentKey] ?? NodeRun()
             agent.pendingReply = message
-            agent.pendingFix = PendingFix(attempt: used + 1, total: config.fixAttempts, command: command)
+            agent.pendingFix = source
             agent.state = .waiting
             agent.endedAt = nil
             run.nodes[agentKey] = agent
+            // Budgets do not refill: a node between keeps the fixes it has used.
             for key in between where run.nodes[key] != nil {
                 let old = run.nodes[key]
-                run.nodes[key] = NodeRun(extraAllowedTools: old?.extraAllowedTools ?? [], costUSD: old?.costUSD ?? 0)
+                run.nodes[key] = NodeRun(extraAllowedTools: old?.extraAllowedTools ?? [], costUSD: old?.costUSD ?? 0,
+                                         fixAttemptsUsed: old?.fixAttemptsUsed ?? 0)
             }
-            var node = run.nodes[gate] ?? NodeRun()
+            var node = run.nodes[checker] ?? NodeRun()
             node.fixAttemptsUsed = used + 1
             node.state = .waiting
             node.endedAt = nil
-            node.appendLog("✕ exit \(exitCode), fix \(used + 1) of \(config.fixAttempts)")
-            run.nodes[gate] = node
-            if let lane = gate.lane, let index = run.lanes.firstIndex(where: { $0.id == lane }) {
+            // A rerun review starts a new session instead of resuming the old one.
+            node.sessionID = nil
+            node.output = nil
+            node.appendLog(logLine)
+            run.nodes[checker] = node
+            if let lane = checker.lane, let index = run.lanes.firstIndex(where: { $0.id == lane }) {
                 run.lanes[index].gatePassed = nil
+                run.lanes[index].reviewPassed = nil
             }
         }
         requestPass(id)

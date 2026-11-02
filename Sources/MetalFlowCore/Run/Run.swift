@@ -157,19 +157,33 @@ public struct NodeRun: Codable, Hashable, Sendable {
     }
 }
 
-/// A fix attempt an agent is about to carry out for a failing gate.
+/// A fix attempt an agent is about to carry out for a failing gate or a review that asked for changes.
 public struct PendingFix: Codable, Hashable, Sendable {
     /// Which attempt this is, counting from 1.
     public var attempt: Int
-    /// How many attempts the gate allows.
+    /// How many attempts the gate or review allows.
     public var total: Int
-    /// The gate's command.
+    /// The gate's command, or the review's title.
     public var command: String
+    /// What asked for the fix: "Gate" or "Review". It heads the line in the commit message that names `command`.
+    public var label: String
     /// Creates a pending fix.
-    public init(attempt: Int, total: Int, command: String) {
+    public init(attempt: Int, total: Int, command: String, label: String = "Gate") {
         self.attempt = attempt
         self.total = total
         self.command = command
+        self.label = label
+    }
+
+    private enum CodingKeys: String, CodingKey { case attempt, total, command, label }
+
+    /// Decodes a pending fix; one saved before reviews existed has no `label` and came from a gate.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        attempt = try c.decode(Int.self, forKey: .attempt)
+        total = try c.decode(Int.self, forKey: .total)
+        command = try c.decode(String.self, forKey: .command)
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? "Gate"
     }
 }
 
