@@ -475,7 +475,7 @@ struct FlowInputFields: Component {
         .labelsHidden()
         .accessibilityIdentifier("inspector.flowInput.mode")
         switch Self.config(draft, id)?.binding {
-        case .fixed(let v)?:
+        case .fixed?:
             TextField("Value", text: Binding(
                 get: { if case .fixed(let v)? = Self.config(draft, id)?.binding { v } else { "" } },
                 set: { value in draft.editNode(id, "inputValue") { Self.update(&$0) { $0.binding = .fixed(value) } } }))

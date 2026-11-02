@@ -55,6 +55,16 @@ import Testing
         #expect(try window.element(identifier: "cand.b.pick").isEnabled)
     }
 
+    @Test func aGateOutsideTheLanesDoesNotMakeTestsNotFinished() async throws {
+        var run = pickRun()
+        run.flow.wires.removeAll { $0.to == "gate" || $0.from == "gate" }
+        run.flow.wires.append(Wire(from: "implement", to: "judge", input: "code"))
+        run.flow.wires.append(Wire(from: "pick", to: "gate", input: "after"))
+        #expect(try run.flow.validate().laneScoped.contains("gate") == false)
+        let (_, _, window) = try await fixture(run)
+        #expect(try window.element(identifier: "cand.c.gate").value == "No gate")
+    }
+
     @Test func allGatesFailedShowsBanner() async throws {
         let (_, _, window) = try await fixture(pickRun(allGatesFailed: true))
         #expect(try window.element(identifier: "detail.allGatesFailed").value == "No candidate passed the tests")

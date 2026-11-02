@@ -444,6 +444,34 @@ import os
         #expect(RunEngine.checksSummary(of: lane, in: run) == expected)
     }
 
+    private func unfinishedRun(gate: Bool) -> (Run, Lane) {
+        var flow = BuiltinFlows.fixGitHubIssue
+        if !gate {
+            // The gate moves after Pick: it runs once on the picked branch, not in a lane.
+            flow.wires.removeAll { $0.to == "gate" || $0.from == "gate" }
+            flow.wires.append(Wire(from: "implement", to: "judge", input: "code"))
+            flow.wires.append(Wire(from: "pick", to: "gate", input: "after"))
+        }
+        let lane = Lane(id: "a", model: "opus", branch: "b", worktree: URL(fileURLWithPath: "/w"))
+        let run = Run(id: RunID(rawValue: "R"), flow: flow, title: "t", repo: URL(fileURLWithPath: "/r"), baseBranch: "main",
+                      branch: "mf/t", worktree: URL(fileURLWithPath: "/w"), lanes: [lane])
+        return (run, lane)
+    }
+
+    @Test func aGateOutsideTheLanesNeverMakesTestsNotFinished() throws {
+        let (run, lane) = unfinishedRun(gate: false)
+        #expect(try run.flow.validate().laneScoped.contains("gate") == false)
+        #expect(run.testsStatus(of: lane) == .none)
+        #expect(RunEngine.checksSummary(of: lane, in: run) == "no gate")
+    }
+
+    @Test func aGateInsideTheLanesThatHasNotConcludedIsNotFinished() throws {
+        let (run, lane) = unfinishedRun(gate: true)
+        #expect(try run.flow.validate().laneScoped.contains("gate"))
+        #expect(run.testsStatus(of: lane) == .notFinished)
+        #expect(RunEngine.checksSummary(of: lane, in: run) == "tests not finished")
+    }
+
     @Test func reviewFindingsAreTheLast40LinesAndOnlyWhenItAskedForChanges() {
         let output = (1...60).map { "finding \($0)" }.joined(separator: "\n") + "\n\n"
         var lane = Lane(id: "a", model: "opus", branch: "b", worktree: URL(fileURLWithPath: "/w"), gatePassed: true, reviewPassed: false)

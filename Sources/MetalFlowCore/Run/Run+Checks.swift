@@ -16,15 +16,22 @@ extension Run {
     /// Whether the flow has a gate.
     public var hasGate: Bool { flow.nodes.contains { if case .gate = $0.kind { true } else { false } } }
 
+    /// Whether the flow has a gate inside the lanes. Only such a gate concludes for a lane (`Lane.gatePassed`);
+    /// one outside them runs once, so it can never make a lane's tests "not finished".
+    public var hasLaneGate: Bool {
+        guard let scoped = try? flow.validate().laneScoped else { return hasGate }
+        return flow.nodes.contains { if case .gate = $0.kind { scoped.contains($0.id) } else { false } }
+    }
+
     /// Whether the flow has a review.
     public var hasReview: Bool { flow.nodes.contains { if case .review = $0.kind { true } else { false } } }
 
-    /// How the tests went on `lane`: `.none` when the flow has no gate.
+    /// How the tests went on `lane`: `.none` when the flow has no gate inside the lanes.
     public func testsStatus(of lane: Lane) -> CheckStatus {
         switch lane.gatePassed {
         case true?: .passed
         case false?: .failed
-        case nil: hasGate ? .notFinished : .none
+        case nil: hasLaneGate ? .notFinished : .none
         }
     }
 

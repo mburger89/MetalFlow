@@ -233,7 +233,7 @@ func runSummary(_ run: Run) -> [String] {
     var lines = ["\(run.id.rawValue)  \(statusText(run.status))  \(run.title)",
                  "  repo \(run.repo.path)  base \(run.baseBranch)  branch \(run.branch)"]
     lines.append("nodes:")
-    for (key, node) in run.nodes.sorted(by: { $0.key.description < $1.key.description }) {
+    for (key, _) in run.nodes.sorted(by: { $0.key.description < $1.key.description }) {
         lines.append("  \(key) \(nodeText(key, in: run))")
     }
     let pending = run.needsYou
