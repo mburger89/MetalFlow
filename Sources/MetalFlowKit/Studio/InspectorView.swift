@@ -547,6 +547,9 @@ struct PromptFields: Component {
                 }
             }
         }
+        if !isReview {
+            ContinuesSessionPicker(draft: draft, id: id)
+        }
         Text(verbatim: "Prompt").font(size: 11).foregroundColor(Palette.muted)
         TextEditor(text: Binding(
             get: { draft.promptConfig(id)?.prompt ?? "" },
@@ -590,6 +593,44 @@ struct PromptFields: Component {
         .pickerStyle(.menu)
         .labelsHidden()
         .accessibilityIdentifier(identifier)
+    }
+}
+
+/// Which earlier step's conversation a prompt or judge carries on, or a new session.
+struct ContinuesSessionPicker: Component {
+    let draft: FlowDraft
+    let id: NodeID
+
+    /// The tag of "New session"; node ids are never empty.
+    static let newSession = ""
+
+    /// The steps to offer: the eligible ones, then the current one if it no longer qualifies, so the picker keeps
+    /// showing the choice the validation banner complains about. Read once per render.
+    static func sources(_ draft: FlowDraft, _ id: NodeID) -> [NodeID] {
+        var sources = draft.flow.sessionSources(for: id)
+        if let current = draft.promptConfig(id)?.continuesSessionOf, !sources.contains(current) { sources.append(current) }
+        return sources
+    }
+
+    var content: some ElementGroup {
+        let draft = draft, id = id
+        let sourceList = Self.sources(draft, id)
+        Text(verbatim: "Continue session from").font(size: 11).foregroundColor(Palette.muted)
+        Picker("", selection: Binding(
+            get: { draft.promptConfig(id)?.continuesSessionOf?.rawValue ?? Self.newSession },
+            set: { value in
+                draft.setContinuesSession(of: id, from: value == Self.newSession ? nil : NodeID(rawValue: value))
+            })) {
+            Text(verbatim: "New session").tag(Self.newSession)
+            ForEach(sourceList, id: \.self) { source in
+                Text(verbatim: draft.flow.node(source)?.title ?? source.rawValue).tag(source.rawValue)
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .accessibilityIdentifier("inspector.continuesSession")
+        Text(verbatim: "Sends this prompt as the next message of that step's conversation.")
+            .font(size: 12).foregroundColor(Palette.muted)
     }
 }
 

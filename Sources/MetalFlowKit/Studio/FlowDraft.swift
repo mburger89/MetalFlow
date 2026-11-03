@@ -195,6 +195,16 @@ public final class FlowDraft {
         }
     }
 
+    /// Makes the Prompt or Judge `id` continue the session of `source`, or start a new one when `source` is nil, as one
+    /// undo step. Other kinds are left alone.
+    public func setContinuesSession(of id: NodeID, from source: NodeID?) {
+        switch flow.node(id)?.kind {
+        case .prompt?, .judge?:
+            editPrompt(id, "continuesSession", coalescing: false) { $0.continuesSessionOf = source }
+        default: break
+        }
+    }
+
     // MARK: Structural edits
 
     /// The id `<prefix><n>` with the smallest positive `n` no node uses.
@@ -216,6 +226,18 @@ public final class FlowDraft {
             flow.nodes.removeAll { ids.contains($0.id) }
             flow.wires.removeAll { ids.contains($0.from) || ids.contains($0.to) }
             flow.notes.removeAll { noteIDs.contains($0.id) }
+            // A step that continued a removed step's session starts a new one instead of pointing at nothing.
+            for i in flow.nodes.indices {
+                switch flow.nodes[i].kind {
+                case .prompt(var c) where c.continuesSessionOf.map(ids.contains) == true:
+                    c.continuesSessionOf = nil
+                    flow.nodes[i].kind = .prompt(c)
+                case .judge(var c) where c.continuesSessionOf.map(ids.contains) == true:
+                    c.continuesSessionOf = nil
+                    flow.nodes[i].kind = .judge(c)
+                default: break
+                }
+            }
         }
         canvasSelection.nodes.subtract(ids)
         canvasSelection.notes.subtract(noteIDs)
