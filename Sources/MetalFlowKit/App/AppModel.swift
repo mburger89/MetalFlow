@@ -222,13 +222,23 @@ public final class AppModel {
 
     // MARK: - Updates
 
-    /// One pass over the runs another process drives: shows the progress it saved, and forgets the runs whose lock it
-    /// released.
+    /// One pass over every run that is not over (not merged, discarded or handed to a pull request): shows what another
+    /// process saved since, and keeps `runningElsewhere` to the runs whose lock another process holds. A run another
+    /// process left running after releasing its lock was cut short; its saved state stands.
     public func refreshElsewhere() async {
-        for id in runningElsewhere.sorted(by: { $0.rawValue < $1.rawValue }) {
-            // A run left running after its process released the lock was cut short; its saved state stands.
+        let open = runs.values.filter { run in
+            switch run.status {
+            case .merged, .discarded, .prOpened: false
+            default: true
+            }
+        }.map(\.id).sorted { $0.rawValue < $1.rawValue }
+        for id in open {
             if let run = await client.reload(id) { apply(run, restoring: false, fromElsewhere: true) }
-            if !(await client.isRunningElsewhere(id)) { runningElsewhere.remove(id) }
+            if await client.isRunningElsewhere(id), runs[id]?.status == .running {
+                runningElsewhere.insert(id)
+            } else {
+                runningElsewhere.remove(id)
+            }
         }
     }
 
@@ -253,6 +263,10 @@ public final class AppModel {
         runningElsewhere.remove(id)
         workingOn.removeAll { $0 == .run(id) }
         pickOutcomes[id] = nil
+        let prefix = id.rawValue + "."
+        answerDrafts = answerDrafts.filter { !$0.key.hasPrefix(prefix) }
+        followUpDrafts = followUpDrafts.filter { !$0.key.hasPrefix(prefix) }
+        followingUp = followingUp.filter { !$0.hasPrefix(prefix) }
         for key in diffChunks.keys where key.run == id { diffChunks[key] = nil }
         for key in diffRevisions.keys where key.run == id { diffRevisions[key] = nil }
         if openDiff?.run == id { openDiff = nil }
@@ -276,7 +290,7 @@ public final class AppModel {
             await pause()
             if Task.isCancelled { return }
             await discoverRuns()
-            if !runningElsewhere.isEmpty { await refreshElsewhere() }
+            await refreshElsewhere()
         }
     }
 
@@ -322,8 +336,15 @@ public final class AppModel {
         if let old, run.revision <= old.revision { return }
         runs[run.id] = run
         // A box left open on a step that can no longer take a follow-up closes (its draft stays).
-        for key in run.nodes.keys where !run.canFollowUp(key) {
-            followingUp.remove(Self.draftKey(run.id, key))
+        if !followingUp.isEmpty {
+            for key in run.nodes.keys where !run.canFollowUp(key) {
+                followingUp.remove(Self.draftKey(run.id, key))
+            }
+        }
+        // What a pick said is about the cards as they were: once the pick has been withdrawn, or is offered again after
+        // a follow-up, it no longer applies. A pick in flight writes its own outcome.
+        if pickingRun != run.id, pickOutcomes[run.id] != nil, !canPick(run) || old.map(canPick) == false {
+            pickOutcomes[run.id] = nil
         }
         // An update means this app's engine is driving the run now.
         if !restoring && !fromElsewhere { runningElsewhere.remove(run.id) }
@@ -534,7 +555,7 @@ public final class AppModel {
         defer { pickingRun = nil }
         pickOutcomes[id, default: [:]][lane] = nil
         do {
-            let result = try await client.pick(id, lane: lane)
+            let result = try await client.pick(id, lane: lane, expectedRevision: runs[id]?.revision)
             let outcome: PickOutcome
             switch result {
             case .merged: outcome = .merged
@@ -547,6 +568,12 @@ public final class AppModel {
             pickOutcomes[id, default: [:]][lane] = outcome
             if outcome == .merged, selectedRun == id { selectedRun = nil }
             return result
+        } catch RunEngineError.runChanged {
+            // Another process changed the run: show it as it is now, and let the user look again.
+            if let fresh = await client.reload(id) { apply(fresh, restoring: false, fromElsewhere: true) }
+            pickOutcomes[id] = nil
+            notice = Notice(RunEngineError.runChanged.localizedDescription)
+            return nil
         } catch {
             pickOutcomes[id, default: [:]][lane] = .failed(error.localizedDescription)
             return nil

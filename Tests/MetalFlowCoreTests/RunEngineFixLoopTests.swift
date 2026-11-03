@@ -330,9 +330,13 @@ import os
         _ = scriptLane(h, "a", session: "sa", fixesOn: nil, resumeEvents: failedFix)
         let id = try await launch(h, flow(h, attempts: 1))
         _ = try await finished(h, id)
-        // Retrying resets the gate to waiting behind the agent; the agent fails again.
+        // Retrying resets the gate to waiting behind the agent. The fix message was never answered, so the retry sends
+        // it again on the session the failed turn reported; the agent fails again.
+        h.agent.script({ $0.resumeSessionID == "x" }, events: failedFix)
         try await h.engine.retry(id, node: implement("a"))
         let run = try await finished(h, id)
+        let again = try #require(h.agent.requests.last { $0.resumeSessionID == "x" })
+        #expect(again.prompt.contains("failed with exit code"))
         #expect(run.nodes[implement("a")]?.state == .failed("boom"))
         #expect(run.nodes[gate("a")]?.state == .waiting)
         #expect(h.agent.requests.filter { $0.prompt.contains("judging candidate") }.count == 2)

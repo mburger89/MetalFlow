@@ -264,4 +264,44 @@ import Testing
         let result = try await h.engine.pick(id, lane: "b")
         guard case .merged = result else { Issue.record("expected a merge, got \(result)"); return }
     }
+
+    // MARK: - Picking on a stale card
+
+    @Test func pickRefusesAStaleRevision() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let shown = try #require(await h.engine.run(id)).revision
+        // Another process saves the run: a second engine over the same store.
+        let runner = RoutingRunner(gh: h.gh)
+        let other = RunEngine(store: h.store, runner: runner, agent: h.agent, issues: GitHubIssues(runner: runner))
+        _ = try await other.restore()
+        await other.setDirect(id) { $0.title = "changed elsewhere" }
+
+        await #expect(throws: RunEngineError.runChanged) {
+            _ = try await h.engine.pick(id, lane: "a", expectedRevision: shown)
+        }
+        #expect(RunEngineError.runChanged.errorDescription == "This run changed since you last saw it. Look again before picking.")
+        let after = try #require(await h.engine.run(id))
+        #expect(after.status == .needsYou && after.title == "changed elsewhere" && after.revision > shown)
+        // Seen again, it can be picked.
+        let result = try await h.engine.pick(id, lane: "a", expectedRevision: after.revision)
+        guard case .merged = result else { Issue.record("expected a merge, got \(result)"); return }
+    }
+
+    @Test func pickRefusesAnOlderRevisionWithoutAnyOtherProcess() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let shown = try #require(await h.engine.run(id)).revision
+        await #expect(throws: RunEngineError.runChanged) {
+            _ = try await h.engine.pick(id, lane: "a", expectedRevision: shown - 1)
+        }
+        #expect(await h.engine.run(id)?.status == .needsYou)
+    }
+
+    @Test func pickWithoutARevisionStillWorks() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let result = try await h.engine.pick(id, lane: "b")
+        guard case .merged = result else { Issue.record("expected a merge, got \(result)"); return }
+    }
 }

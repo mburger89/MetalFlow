@@ -125,7 +125,10 @@ actor FakeEngineClient: EngineClient {
     var diffText = ""
     func setDiff(_ text: String) { diffText = text }
 
-    func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult {
+    /// The revision each `pick` was given, in order.
+    private(set) var pickRevisions: [Int?] = []
+    func pick(_ id: RunID, lane: LaneID, expectedRevision: Int?) async throws -> MergeResult {
+        pickRevisions.append(expectedRevision)
         calls.append("pick-start(\(lane))")
         // Only the first call is held, so a second one (a broken in-flight guard) fails a test instead of hanging it.
         if holdingPicks && heldPicks.isEmpty { await withCheckedContinuation { heldPicks.append($0) } }

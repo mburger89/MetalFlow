@@ -27,8 +27,9 @@ public protocol EngineClient: Sendable {
     func reload(_ id: RunID) async -> Run?
     /// Runs another process saved that this app has not seen yet, and the ones it deleted.
     func discover() async -> RunEngine.Discovery
-    /// Merges a candidate lane into the base branch.
-    func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult
+    /// Merges a candidate lane into the base branch. `expectedRevision` is the revision of the run as shown: the
+    /// engine refuses with `runChanged` if the run has moved on since.
+    func pick(_ id: RunID, lane: LaneID, expectedRevision: Int?) async throws -> MergeResult
     /// Throws a run away.
     func discard(_ id: RunID) async throws
     /// Keeps a lane's branch under `name`.
@@ -120,7 +121,9 @@ public struct LiveEngineClient: EngineClient {
     public func isRunningElsewhere(_ id: RunID) async -> Bool { await engine.value.isRunningElsewhere(id) }
     public func reload(_ id: RunID) async -> Run? { await engine.value.reload(id) }
     public func discover() async -> RunEngine.Discovery { await engine.value.discover() }
-    public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult { try await engine.value.pick(id, lane: lane) }
+    public func pick(_ id: RunID, lane: LaneID, expectedRevision: Int?) async throws -> MergeResult {
+        try await engine.value.pick(id, lane: lane, expectedRevision: expectedRevision)
+    }
     public func discard(_ id: RunID) async throws { try await engine.value.discard(id) }
     public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws {
         try await engine.value.branchFromHere(id, lane: lane, name: name)

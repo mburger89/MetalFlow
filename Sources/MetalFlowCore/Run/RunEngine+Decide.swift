@@ -67,11 +67,18 @@ extension RunEngine {
     /// When the flow has an Open PR node nothing is merged: the choice is recorded in `Run.pickedLane`, the pick
     /// node succeeds, the run carries on to push the branch and open the pull request, and `.handedToPullRequest`
     /// is returned straight away. Follow the run (`waitUntilSettled`, `updates`) for the outcome.
-    public func pick(_ id: RunID, lane: LaneID) async throws -> MergeResult {
+    ///
+    /// `expectedRevision` is the revision of the run the caller is showing. If the run has moved on since (another
+    /// process saved it, for one), nothing is picked and `runChanged` is thrown, so a choice made on a stale card
+    /// cannot merge another candidate than the one shown. `nil` skips the check.
+    public func pick(_ id: RunID, lane: LaneID, expectedRevision: Int? = nil) async throws -> MergeResult {
         guard runs[id] != nil else { throw RunEngineError.notPickable }
         try ensureLock(id)
         defer { releaseLockIfIdle(id) }
         await waitForPass(id)
+        if let expectedRevision, let current = runs[id], current.revision != expectedRevision {
+            throw RunEngineError.runChanged
+        }
         guard let run = runs[id], run.status == .needsYou, !picking.contains(id),
               let pickNode = pickNodeKey(run),
               case .needsYou(.pickWinner)? = run.nodes[pickNode]?.state,
