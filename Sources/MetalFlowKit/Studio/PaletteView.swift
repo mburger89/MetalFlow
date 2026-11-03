@@ -8,8 +8,23 @@ struct PaletteView: Component {
 
     var content: some ElementGroup {
         let draft = draft
+        let groups = draft.visiblePaletteGroups
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            ForEach(PaletteEntry.groups, id: \.title) { group in
+            // Keys typed here stay in the field: it is focused, so the canvas's hover key region never sees them.
+            TextField("Find a node", text: draft.paletteFilter, onChange: { draft.paletteFilter = $0 })
+                .onSubmit { draft.addFirstPaletteMatch() }
+                .onKeyPress(.escape) {
+                    draft.paletteFilter = ""
+                    return .handled
+                }
+                .frame(height: Pixels(30))
+                .accessibilityIdentifier("palette.find")
+            if groups.isEmpty {
+                Text(verbatim: "No matches").font(size: 12).foregroundColor(Palette.muted)
+                    .padding(insets(top: 10, right: 4, bottom: 4, left: 4))
+                    .accessibilityIdentifier("palette.empty")
+            }
+            ForEach(groups, id: \.title) { group in
                 Text(verbatim: group.title).font(size: 11).foregroundColor(Palette.muted)
                     .padding(insets(top: 10, right: 4, bottom: 4, left: 4))
                 ForEach(group.items, id: \.idPrefix) { item in

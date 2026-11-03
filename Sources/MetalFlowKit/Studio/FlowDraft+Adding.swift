@@ -112,9 +112,8 @@ extension FlowDraft {
 
     /// The palette entries whose label contains the query, ignoring case, in palette order.
     var nodeSearchMatches: [PaletteEntry] {
-        let needle = (nodeSearch?.query ?? "").lowercased()
-        let all = PaletteEntry.groups.flatMap(\.items)
-        return needle.isEmpty ? all : all.filter { $0.label.lowercased().contains(needle) }
+        let query = nodeSearch?.query ?? ""
+        return PaletteEntry.groups.flatMap(\.items).filter { $0.matches(query) }
     }
 
     /// Opens the pane at the pointer, or at the canvas centre when the pointer is elsewhere. A node it adds lands
@@ -158,5 +157,34 @@ extension FlowDraft {
     /// Closes the pane, adding nothing.
     func closeNodeSearch() {
         nodeSearch = nil
+    }
+}
+
+// MARK: The palette's Find field and the zoom buttons
+
+extension FlowDraft {
+    /// How much one press of a zoom button scales the view.
+    static let zoomStep = 1.25
+
+    /// The palette groups with only the entries matching `paletteFilter`, groups with none left out.
+    var visiblePaletteGroups: [(title: String, items: [PaletteEntry])] {
+        PaletteEntry.groups.compactMap { group in
+            let items = group.items.filter { $0.matches(paletteFilter) }
+            return items.isEmpty ? nil : (group.title, items)
+        }
+    }
+
+    /// Return in the Find field: adds the first match at the canvas centre, selects it and clears the filter. With no
+    /// match nothing happens.
+    func addFirstPaletteMatch() {
+        guard let first = visiblePaletteGroups.first?.items.first else { return }
+        add(first)
+        paletteFilter = ""
+    }
+
+    /// Scales the view by `factor` about the canvas centre; nothing until the canvas is measured.
+    func zoomCanvas(by factor: Double) {
+        guard let canvasSize else { return }
+        geometry.zoom(to: geometry.zoom * factor, about: ScreenPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
     }
 }

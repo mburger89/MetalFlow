@@ -76,6 +76,8 @@ public final class FlowDraft {
     var paletteDrag: PaletteDrag?
     /// The pointer over the canvas in window points; nil while it is elsewhere.
     @ObservationIgnored var pointerInWindow: ScreenPoint?
+    /// What the palette's Find field holds. View state: filtering is never an edit.
+    var paletteFilter = ""
     /// The Tab search pane, while open.
     var nodeSearch: NodeSearch?
     /// The note being typed into, while its field is open. The text is written to the flow when the edit commits.
@@ -387,6 +389,12 @@ public enum PaletteEntry: Hashable, Sendable {
         case .node(let kind): kind.label
         case .note: "Note"
         }
+    }
+
+    /// Whether the label contains `query`, ignoring case; an empty query matches every entry. The Tab search pane and
+    /// the palette's Find field both match this way.
+    func matches(_ query: String) -> Bool {
+        query.isEmpty || label.lowercased().contains(query.lowercased())
     }
 
     /// The palette groups, in order: the node groups, then NOTES.

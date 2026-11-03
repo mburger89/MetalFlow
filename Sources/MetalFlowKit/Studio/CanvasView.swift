@@ -50,8 +50,16 @@ struct CanvasSurface: Component {
         .accessibilityIdentifier("canvas")
         .overlay(alignment: .bottomTrailing) {
             HStack(spacing: Spacing.xs) {
+                Button("\u{2212}") { draft.zoomCanvas(by: 1 / FlowDraft.zoomStep) }
+                    .buttonStyle(.bordered)
+                    .disabled(g.zoom <= CanvasGeometry.minZoom)
+                    .accessibilityIdentifier("canvas.zoomOut")
                 Text(verbatim: "\(Int((g.zoom * 100).rounded()))%").font(size: 12).foregroundColor(Palette.body)
                     .accessibilityIdentifier("canvas.zoom")
+                Button("+") { draft.zoomCanvas(by: FlowDraft.zoomStep) }
+                    .buttonStyle(.bordered)
+                    .disabled(g.zoom >= CanvasGeometry.maxZoom)
+                    .accessibilityIdentifier("canvas.zoomIn")
                 Button("Fit") { draft.fit() }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("canvas.fit")
