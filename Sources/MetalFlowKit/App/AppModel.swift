@@ -330,13 +330,18 @@ public final class AppModel {
         await withCheckedContinuation { readyWaiters.append($0) }
     }
 
-    /// Takes a snapshot of a run: stale ones (revision not above the stored one) are ignored.
+    /// Takes a snapshot of a run: stale ones (revision not above the stored one) are ignored. The one exception is the
+    /// engine finding that the process driving a run died after its last save: that snapshot, from elsewhere, has the
+    /// same revision and no longer says running.
     public func apply(_ run: Run) { apply(run, restoring: false) }
 
     /// `fromElsewhere`: the snapshot is another process's saved state, so the run stays in `runningElsewhere`.
     private func apply(_ run: Run, restoring: Bool, fromElsewhere: Bool = false) {
         let old = runs[run.id]
-        if let old, run.revision <= old.revision { return }
+        if let old, run.revision <= old.revision {
+            let cutShort = fromElsewhere && run.revision == old.revision && old.status == .running && run.status != .running
+            if !cutShort { return }
+        }
         runs[run.id] = run
         // A box left open on a step that can no longer take a follow-up closes (its draft stays).
         if !followingUp.isEmpty {

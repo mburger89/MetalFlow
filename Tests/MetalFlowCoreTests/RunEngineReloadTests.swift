@@ -142,4 +142,50 @@ import Testing
     }
 
     private func store(_ h: Harness) -> RunStore { h.store }
+
+    /// A run saved as running by another process, cached by `h.engine` through `discover`.
+    private func discoveredRunning(_ h: Harness, node: NodeState = .running) async throws -> Run {
+        let run = Run(flow: h.flow(), title: "from mflow", repo: h.repo.url, baseBranch: "main", branch: "mf/x",
+                      worktree: h.repo.url, createdAt: Date(timeIntervalSince1970: 5), status: .running,
+                      nodes: [NodeKey(node: "plan"): NodeRun(state: node)])
+        try RunStore(root: h.store.root).save(run)
+        _ = await h.engine.discover()
+        return try #require(await h.engine.run(run.id))
+    }
+
+    @Test func reloadMarksARunCutShortWhenItsDriverDiedAfterTheLastSave() async throws {
+        let h = try Harness()
+        let cached = try await discoveredRunning(h)
+        // The driver held the lock while the engine looked, then died without saving again.
+        let lock = try #require(h.store.tryLock(cached.id))
+        lock.release()
+        let reloaded = try #require(await h.engine.reload(cached.id))
+        #expect(reloaded.revision == cached.revision)
+        #expect(reloaded.status == .needsYou)
+        #expect(reloaded.nodes[NodeKey(node: "plan")]?.state == .interrupted)
+        #expect(await h.engine.run(cached.id) == reloaded, "the cache holds it")
+        #expect(h.store.load(cached.id)?.status == .running, "nothing was saved")
+    }
+
+    @Test func reloadLeavesALockedRunRunning() async throws {
+        let h = try Harness()
+        let cached = try await discoveredRunning(h)
+        let lock = try #require(h.store.tryLock(cached.id))
+        defer { lock.release() }
+        let reloaded = try #require(await h.engine.reload(cached.id))
+        #expect(reloaded == cached)
+        #expect(reloaded.status == .running)
+    }
+
+    @Test func reloadDoesNotProbeAnIdleRun() async throws {
+        let h = try Harness()
+        // Cached as needs-you, though one node reads running: a lock probe would cut that node short.
+        let run = Run(flow: h.flow(), title: "idle", repo: h.repo.url, baseBranch: "main", branch: "mf/y",
+                      worktree: h.repo.url, createdAt: Date(timeIntervalSince1970: 6), status: .needsYou,
+                      nodes: [NodeKey(node: "plan"): NodeRun(state: .running)])
+        try RunStore(root: h.store.root).save(run)
+        _ = await h.engine.discover()
+        let reloaded = try #require(await h.engine.reload(run.id))
+        #expect(reloaded.nodes[NodeKey(node: "plan")]?.state == .running)
+    }
 }

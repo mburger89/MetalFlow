@@ -339,8 +339,16 @@ public actor RunEngine {
     /// on `updates`: the caller applies the result.
     public func reload(_ id: RunID) -> Run? {
         if locks[id] != nil { return runs[id] }
+        // A run cached as running that nobody here drives may have lost its driver after the last save the cache saw.
+        // Only such a run is lock-probed when nothing newer was saved; an idle one never is.
+        let driverGone = tasks[id] == nil && runs[id]?.status == .running && !store.isLocked(id)
         guard let saved = store.load(id) else { return runs[id] }
-        if let cached = runs[id], saved.revision <= cached.revision { return cached }
+        if let cached = runs[id], saved.revision <= cached.revision {
+            guard driverGone else { return cached }
+            let cut = cached.markingCutShort()
+            runs[id] = cut
+            return cut
+        }
         // Saved as running with nobody holding the lock: the process that drove it died.
         let shown = store.isLocked(id) ? saved : saved.markingCutShort()
         runs[id] = shown

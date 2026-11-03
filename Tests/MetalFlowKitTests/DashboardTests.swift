@@ -493,6 +493,37 @@ import Testing
         #expect(model.statusText(done) != "Running in another mflow")
     }
 
+    @Test func pollShowsARunCutShortAtTheSameRevision() async throws {
+        var theirs = makeRun("theirs", status: .running)
+        theirs.nodes[NodeKey(node: "plan")] = NodeRun(state: .running)
+        let (model, client, _) = try await elsewhereFixture(theirs)
+        // Its driver died after the last save the app saw: the engine reports it cut short at the same revision.
+        await client.setReload(theirs.markingCutShort())
+        await client.setElsewhere([])
+        await model.refreshElsewhere()
+        #expect(model.runs[theirs.id]?.status == .needsYou)
+        #expect(model.runs[theirs.id]?.nodes[NodeKey(node: "plan")]?.state == .interrupted)
+        #expect(model.runs[theirs.id]?.revision == theirs.revision)
+        #expect(model.runningElsewhere.isEmpty)
+        #expect(!model.running.contains { $0.id == theirs.id })
+        #expect(model.statusText(model.runs[theirs.id]!) != "Running in another mflow")
+    }
+
+    @Test func anEqualRevisionIsOtherwiseStillIgnored() async throws {
+        let theirs = makeRun("theirs", status: .running)
+        let (model, client, _) = try await elsewhereFixture(theirs)
+        var same = theirs
+        same.title = "same revision, different"
+        await client.setReload(same)
+        await model.refreshElsewhere()
+        #expect(model.runs[theirs.id]?.title == theirs.title)
+        // Not from elsewhere, or not leaving running: ignored too.
+        var cut = theirs.markingCutShort()
+        cut.title = "direct"
+        model.apply(cut)
+        #expect(model.runs[theirs.id]?.status == .running)
+    }
+
     @Test func elsewhereShowsOtherProcessProgress() async throws {
         let theirs = makeRun("theirs", status: .running)
         let (model, client, _) = try await elsewhereFixture(theirs)
