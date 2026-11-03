@@ -233,13 +233,13 @@ import os
         let failed = await waitFor(h, id, "the turn to fail") { $0.nodes[self.implementA]?.state.isFailed == true
             && $0.nodes[self.pick]?.state != .running }
         await h.engine.waitForPass(id)
-        #expect(failed.nodes[implementA]?.state == .failed(Self.lostMessage + " and your message."))
+        #expect(failed.nodes[implementA]?.state == .failed(Self.lostMessage + " and the message it was sent."))
         #expect(failed.nodes[implementA]?.sessionID == nil)
         #expect(failed.nodes[implementA]?.pendingReply == "Tweak")
         #expect(!failed.canFollowUp(implementA))
         #expect(session == "s")
 
-        h.agent.script({ $0.prompt.hasSuffix("\n\nThe user's message about this step:\nTweak") },
+        h.agent.script({ $0.prompt.hasSuffix("\n\nA message about this step:\nTweak") },
                        events: finished("fresh", "tweaked"))
         let before = h.agent.requests.count
         try await h.engine.retry(id, node: implementA)
@@ -248,7 +248,7 @@ import os
         #expect(sent.count == 1)
         #expect(sent.first?.resumeSessionID == nil)
         #expect(sent.first?.prompt.contains("Fix this GitHub issue") == true)
-        #expect(sent.first?.prompt.hasSuffix("\n\nThe user's message about this step:\nTweak") == true)
+        #expect(sent.first?.prompt.hasSuffix("\n\nA message about this step:\nTweak") == true)
         #expect(run.nodes[implementA]?.sessionID == "fresh")
         #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
     }
@@ -289,7 +289,7 @@ import os
         h.agent.script({ $0.prompt == "Again" }, events: lostSession())
         try await h.engine.followUp(id, node: second, message: "Again")
         let failed = await waitFor(h, id, "the turn to fail") { $0.nodes[second]?.state.isFailed == true && $0.status != .running }
-        #expect(failed.nodes[second]?.state == .failed(Self.lostMessage + " and your message."))
+        #expect(failed.nodes[second]?.state == .failed(Self.lostMessage + " and the message it was sent."))
         #expect(failed.nodes[first]?.sessionID == nil && failed.nodes[second]?.sessionID == nil)
 
         h.agent.script({ $0.prompt.hasPrefix("Polish") }, events: finished("fresh", "polished again"))
@@ -298,7 +298,7 @@ import os
         let run = await waitFor(h, id, "the retry to finish") { $0.nodes[second]?.state == .succeeded && $0.status != .running }
         let sent = try #require(h.agent.requests.dropFirst(before).first)
         #expect(sent.resumeSessionID == nil)
-        #expect(sent.prompt == "Polish draft\n\nThe user's message about this step:\nAgain")
+        #expect(sent.prompt == "Polish draft\n\nA message about this step:\nAgain")
         #expect(run.nodes[second]?.sessionID == "fresh")
     }
 
@@ -730,13 +730,13 @@ import os
         #expect(failed.nodes[implementA]?.sessionID == nil)
         #expect(failed.nodes[implementA]?.followUpMessage == "Tweak")
 
-        h.agent.script({ $0.prompt.hasSuffix("\n\nThe user's message about this step:\nTweak") }, events: finished("fresh", "tweaked"))
+        h.agent.script({ $0.prompt.hasSuffix("\n\nA message about this step:\nTweak") }, events: finished("fresh", "tweaked"))
         let before = h.agent.requests.count
         try await h.engine.retry(id, node: implementA)
         await waitFor(h, id, "the retry") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.state == .succeeded }
         let sent = try #require(h.agent.requests.dropFirst(before).first { $0.workingDirectory.lastPathComponent == "a" })
         #expect(sent.resumeSessionID == nil)
-        #expect(sent.prompt.hasSuffix("\n\nThe user's message about this step:\nTweak"))
+        #expect(sent.prompt.hasSuffix("\n\nA message about this step:\nTweak"))
     }
 
     @Test func resumedFollowUpThatFailsRetriesWithTheMessage() async throws {
@@ -814,12 +814,24 @@ import os
         h.agent.script({ $0.prompt == "Redo" }, events: lostSession())
         try await h.engine.followUp(id, node: first, message: "Redo")
         await waitFor(h, id, "the loss") { $0.nodes[first]?.state.isFailed == true && $0.status != .running }
-        h.agent.script({ $0.prompt.hasSuffix("\n\nThe user's message about this step:\nRedo") }, events: finished("s9", "draft two"))
+        h.agent.script({ $0.prompt.hasSuffix("\n\nA message about this step:\nRedo") }, events: finished("s9", "draft two"))
         h.agent.script({ $0.prompt.contains("Polish") }, events: finished("s9", "polished two"))
         try await h.engine.retry(id, node: first)
         await waitFor(h, id, "the retry") { $0.status != .running && $0.nodes[second]?.output == "polished two" }
         let polish = try #require(h.agent.requests.last { $0.prompt.contains("Polish") })
         #expect(polish.prompt == "Polish draft two")
         #expect(polish.resumeSessionID == "s9")
+    }
+
+    // MARK: - Fix round 6. Not every kept message is the user's
+
+    @Test func lostSessionOnAResumedPlainStepSaysNothingAboutAMessage() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        await h.engine.setDirect(id) { $0.nodes[self.implementA]?.state = .interrupted }
+        h.agent.script({ $0.prompt == "Continue where you left off." }, events: lostSession())
+        try await h.engine.resumeInterrupted(id)
+        let failed = await waitFor(h, id, "the loss") { $0.nodes[self.implementA]?.state.isFailed == true && $0.status != .running }
+        #expect(failed.nodes[implementA]?.state == .failed(Self.lostMessage + "."), "the nudge is not a message")
     }
 }

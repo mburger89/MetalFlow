@@ -194,7 +194,7 @@ extension RunEngine {
             // A message with no session to resume goes along with the full prompt. The nudge that resumes an interrupted
             // node is not one: a fresh start needs no telling to continue.
             if let reply = current.pendingReply, reply != Self.continueNudge {
-                request.prompt += "\n\nThe user's message about this step:\n" + reply
+                request.prompt += "\n\nA message about this step:\n" + reply
             }
             if let source = config.continuesSessionOf, !isReview {
                 if let session = runs[id]?.nodes[NodeKey(node: source, lane: key.lane)]?.sessionID {
@@ -253,7 +253,9 @@ extension RunEngine {
                 for k in run.nodes.keys where run.nodes[k]?.sessionID == lost { run.nodes[k]?.sessionID = nil }
             }
             keepReply(id, key)
-            let withMessage = runs[id]?.nodes[key]?.pendingReply != nil ? " and your message" : ""
+            // Only a message the step was sent is promised; the resume nudge is not one.
+            let kept = runs[id]?.nodes[key]?.pendingReply
+            let withMessage = kept != nil && kept != Self.continueNudge ? " and the message it was sent" : ""
             finish(id, key, .failed("The agent's conversation can no longer be found. Retry starts this step again from its original prompt\(withMessage)."))
             return
         }
