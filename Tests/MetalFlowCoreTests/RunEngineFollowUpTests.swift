@@ -100,21 +100,6 @@ import Testing
         #expect(files.contains("extra.txt"))
     }
 
-    @Test func judgeFollowUpWithoutARecommendationLeavesNone() async throws {
-        let h = try Harness()
-        let id = try await atPick(h)
-        #expect(await h.engine.run(id)?.recommendation == "b")
-        h.agent.script({ $0.prompt == "Explain more" }, events: finished("s", "More words, no pick."))
-        try await h.engine.followUp(id, node: judge, message: "Explain more")
-        let run = await waitFor(h, id) { $0.status == .needsYou && $0.nodes[judge]?.state == .succeeded }
-        await h.engine.waitForPass(id)
-        #expect(run.recommendation == nil)
-        guard case .needsYou(.pickWinner)? = await h.engine.run(id)?.nodes[NodeKey(node: "pick")]?.state else {
-            Issue.record("the run did not reach the pick"); return
-        }
-        #expect(await h.engine.run(id)?.status == .needsYou)
-    }
-
     @Test(arguments: [RunStatus.merged("b"), .discarded, .cancelled, .prOpened("b", url: "https://x/pull/1")])
     func refusedWhile(_ status: RunStatus) async throws {
         let h = try Harness()

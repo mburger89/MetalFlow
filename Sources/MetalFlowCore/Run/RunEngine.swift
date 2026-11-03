@@ -249,9 +249,16 @@ public actor RunEngine {
 
     /// Cancels a running run: stops its task, marks running nodes and the run cancelled. Worktrees are kept.
     /// A run that is not `.running` (waiting for you, completed, failed, merged...) is left alone.
+    ///
+    /// A run that has had a follow-up is suspended instead (see `suspend`): cancelling it would lose the pick it
+    /// was waiting at, so it ends waiting for you with the running step interrupted, to resume or discard.
     public func cancel(_ id: RunID) {
         // Only a run this engine drives: a running run whose lock another process holds is not ours to touch.
         guard var run = runs[id], run.status == .running, locks[id] != nil else { return }
+        if run.followedUp {
+            suspend(id)
+            return
+        }
         tasks[id]?.cancel()
         rerunRequested.remove(id)
         let now = Date()
@@ -427,6 +434,7 @@ public actor RunEngine {
 
     /// Settles the run's status after a pass.
     private func finalize(_ id: RunID) {
+        restorePick(id)
         guard let run = runs[id], run.status == .running, !rerunRequested.contains(id) else { return }
         if !run.needsYou.isEmpty || hasInterrupted(run) {
             mutate(id) { $0.status = .needsYou }
@@ -440,6 +448,24 @@ public actor RunEngine {
         }
         // The pass ended with nothing runnable left and nothing waiting on the user; failed lanes count as finished.
         mutate(id) { $0.status = .completed }
+    }
+
+    /// After a follow-up to a step that does not belong to a candidate: if that step failed, the pick that waited
+    /// before it waits again, since no candidate changed. Done with the step once it has succeeded or failed.
+    private func restorePick(_ id: RunID) {
+        guard let run = runs[id], run.status == .running, !rerunRequested.contains(id),
+              let target = run.pickToRestore else { return }
+        switch run.nodes[target]?.state {
+        case .succeeded?:
+            mutate(id) { $0.pickToRestore = nil }
+        case .failed?:
+            guard let pickNode = pickNodeKey(run), run.nodes[pickNode]?.state == .waiting else { return }
+            mutate(id) { run in
+                run.nodes[pickNode]?.state = Self.pickWaiting(lanes: run.lanes, recommendation: run.recommendation)
+                run.pickToRestore = nil
+            }
+        default: break
+        }
     }
 
     /// True while any node is interrupted: it waits for an explicit answer or resume, never restarts on its own.

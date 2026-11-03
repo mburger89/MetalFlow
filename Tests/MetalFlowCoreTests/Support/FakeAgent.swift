@@ -11,6 +11,7 @@ final class FakeAgent: AgentSession {
         var effect: (@Sendable (AgentRequest) throws -> Void)?
         var events: [AgentEvent]
         var hold: AsyncStream<Void>?
+        var thenThrow: (any Error)?
     }
 
     private struct State {
@@ -40,6 +41,11 @@ final class FakeAgent: AgentSession {
         state.withLock { $0.scripts.append(Script(match: match, effect: effect, events: events, hold: hold)) }
     }
 
+    /// Registers a script that yields `events` and then fails its stream with `error`.
+    func script(_ match: @escaping @Sendable (AgentRequest) -> Bool, events: [AgentEvent], thenThrowing error: any Error) {
+        state.withLock { $0.scripts.append(Script(match: match, effect: nil, events: events, hold: nil, thenThrow: error)) }
+    }
+
     /// Registers a script whose stream fails with `error` as soon as it starts.
     func script(_ match: @escaping @Sendable (AgentRequest) -> Bool, throwing error: any Error) {
         script(match, effect: { _ in throw error }, events: [])
@@ -66,6 +72,7 @@ final class FakeAgent: AgentSession {
                         }
                         continuation.yield(event)
                     }
+                    if let failure = script.thenThrow { throw failure }
                     continuation.finish()
                 } catch {
                     if error is CancellationError { state.withLock { $0.cancelledCount += 1 } }

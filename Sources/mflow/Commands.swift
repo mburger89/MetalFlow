@@ -23,8 +23,9 @@ commands:
 
 Runs execute only while an mflow command is running: launch, answer, follow-up and resume
 stay alive until the run settles (needs you, completed, failed or cancelled).
-Press Ctrl-C (or send SIGTERM/SIGHUP) to cancel a running run (exit 130). pick, discard and branch
-ignore these signals until they finish.
+Press Ctrl-C (or send SIGTERM/SIGHUP) to cancel a running run (exit 130). A run that has had a follow-up is
+stopped instead of cancelled: it keeps its pick, waits for you with the running step interrupted, and `resume`
+continues it (exit 130 too). pick, discard and branch ignore these signals until they finish.
 
 launch: VALUE fills the flow's first input (not the repo); --set name=value fills any input by name and
 can be repeated. --flow takes a flow file, or a flow name (case-insensitive) from the built-in (Fix GitHub issue, Build a feature), library and
@@ -377,6 +378,12 @@ private func finish(_ engine: RunEngine, _ id: RunID, _ run: Run, _ interrupted:
     if interrupted.withLock({ $0 }), run.status == .cancelled {
         await engine.waitUntilSettled(id)
         print("cancelled")
+        return 130
+    }
+    // A run that has had a follow-up is suspended, not cancelled: it stays resumable.
+    if interrupted.withLock({ $0 }), run.followedUp, run.status == .needsYou, run.nodes.values.contains(where: { $0.state == .interrupted }) {
+        await engine.waitUntilSettled(id)
+        print("stopped; `mflow resume \(id.rawValue)` continues it")
         return 130
     }
     if case .needsYou = run.status {

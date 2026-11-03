@@ -36,11 +36,14 @@ extension RunEngine {
                 await runAgent(id, key, node: node, config: config.agent, plan: plan, role: .review(config))
             }
         case .pick:
-            let lanes = runs[id]?.lanes ?? []
-            let allFailed = lanes.contains { $0.gatePassed != nil } && !lanes.contains { $0.gatePassed == true }
-            let recommended = runs[id]?.recommendation
-            finish(id, key, .needsYou(.pickWinner(recommended: recommended, allGatesFailed: allFailed)))
+            finish(id, key, Self.pickWaiting(lanes: runs[id]?.lanes ?? [], recommendation: runs[id]?.recommendation))
         }
+    }
+
+    /// The state of a pick that waits for the user: the recommended candidate, and whether every gate failed.
+    static func pickWaiting(lanes: [Lane], recommendation: LaneID?) -> NodeState {
+        let allFailed = lanes.contains { $0.gatePassed != nil } && !lanes.contains { $0.gatePassed == true }
+        return .needsYou(.pickWinner(recommended: recommendation, allGatesFailed: allFailed))
     }
 
     func finish(_ id: RunID, _ key: NodeKey, _ state: NodeState, output: String? = nil) {
@@ -200,7 +203,12 @@ extension RunEngine {
                 for try await event in agent.run(finalRequest) {
                     switch event {
                     case .started(let session):
-                        await self.updateNode(id, key) { $0.sessionID = session; $0.pendingReply = nil }
+                        // The message is on its way: if the turn fails it goes back to `pendingReply`.
+                        await self.updateNode(id, key) {
+                            $0.sessionID = session
+                            $0.replyInFlight = $0.pendingReply
+                            $0.pendingReply = nil
+                        }
                     case .text(let text):
                         let line = String(text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
                             .first ?? "").prefix(200)
@@ -215,18 +223,23 @@ extension RunEngine {
             }
         } catch {
             // A cancelled run ignores this write; otherwise the node must not stay `.running`.
+            // An interrupted turn keeps its message in flight: the resumed session already has it.
+            if !(error is CancellationError) { keepReply(id, key) }
             finish(id, key, .failed(error is CancellationError ? "interrupted" : error.localizedDescription))
             return
         }
         guard let result else {
+            keepReply(id, key)
             finish(id, key, .failed("The agent ended without a result"))
             return
         }
         updateNode(id, key) { $0.costUSD += result.costUSD }
         if result.isError {
+            keepReply(id, key)
             finish(id, key, .failed(result.text))
             return
         }
+        updateNode(id, key) { $0.replyInFlight = nil }
         // A reviewer never edits, so there is nothing of its to commit.
         if let lane, review == nil {
             let message = Self.laneCommitMessage(
@@ -249,11 +262,29 @@ extension RunEngine {
         } else if let review {
             await concludeReview(id, key, node: node, config: review, text: result.text, plan: plan)
         } else {
-            finish(id, key, .succeeded, output: result.text)
-            if isJudge {
-                let recommended = Self.recommendation(in: result.text, lanes: runs[id]?.lanes ?? [])
-                mutate(id) { $0.recommendation = recommended }
+            // Only the reply is read for a recommendation, never the question or the earlier verdict.
+            let recommended = isJudge ? Self.recommendation(in: result.text, lanes: runs[id]?.lanes ?? []) : nil
+            var output = result.text
+            let base = isJudge ? runs[id]?.nodes[key]?.followUpBase : nil
+            if let base, recommended == nil {
+                output = base.previousOutput + "\n\nFollow-up: " + base.message + "\n\n" + result.text
             }
+            finish(id, key, .succeeded, output: output)
+            if isJudge {
+                mutate(id) { run in
+                    // A question put to the judge keeps the recommendation it had unless the reply names another.
+                    if base == nil || recommended != nil { run.recommendation = recommended }
+                    run.nodes[key]?.followUpBase = nil
+                }
+            }
+        }
+    }
+
+    /// Puts the message of a turn that failed back to be sent again, so a retry resumes the session with it.
+    private func keepReply(_ id: RunID, _ key: NodeKey) {
+        updateNode(id, key) { n in
+            if let reply = n.replyInFlight { n.pendingReply = reply }
+            n.replyInFlight = nil
         }
     }
 

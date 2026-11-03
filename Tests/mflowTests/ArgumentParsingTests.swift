@@ -96,6 +96,10 @@ import MetalFlowCore
         }
     }
 
+    @Test func usageSaysAFollowedUpRunIsStoppedNotCancelled() {
+        #expect(usageText.contains("A run that has had a follow-up is\nstopped instead of cancelled"))
+    }
+
     @Test func followUpIsKnownAndNeedsAMessage() throws {
         #expect(knownCommands.contains("follow-up"))
         #expect(commandLineProblem(["follow-up"]) == nil)

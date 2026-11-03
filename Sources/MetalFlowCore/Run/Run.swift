@@ -110,6 +110,12 @@ public struct NodeRun: Codable, Hashable, Sendable {
     public var fixAttemptsUsed: Int
     /// Set while the agent works on a failing gate's behalf: the fix its next turn carries out. It labels that turn's commit.
     public var pendingFix: PendingFix?
+    /// The reply the current turn is carrying: moved here from `pendingReply` when the turn starts, back if the turn fails,
+    /// dropped when it finishes. A retry after a failure then still resumes the session with it.
+    public var replyInFlight: String?
+    /// Set while a Judge works on a follow-up: what the verdict was and what was asked, so a reply that carries no
+    /// `RECOMMEND:` line is shown beside the verdict instead of replacing it. Cleared when the turn finishes.
+    public var followUpBase: FollowUpBase?
     /// Creates a node run with defaults (waiting, empty log).
     public init(
         state: NodeState = .waiting, output: String? = nil, sessionID: String? = nil,
@@ -132,6 +138,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed, pendingFix
+        case replyInFlight, followUpBase
     }
 
     /// Decodes a node run; runs saved before fix attempts existed have no `fixAttemptsUsed` and mean 0.
@@ -148,12 +155,27 @@ public struct NodeRun: Codable, Hashable, Sendable {
         endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         fixAttemptsUsed = try c.decodeIfPresent(Int.self, forKey: .fixAttemptsUsed) ?? 0
         pendingFix = try c.decodeIfPresent(PendingFix.self, forKey: .pendingFix)
+        replyInFlight = try c.decodeIfPresent(String.self, forKey: .replyInFlight)
+        followUpBase = try c.decodeIfPresent(FollowUpBase.self, forKey: .followUpBase)
     }
 
     /// Appends a log line, keeping only the last 50.
     public mutating func appendLog(_ line: String) {
         log.append(line)
         if log.count > Self.maxLogLines { log.removeFirst(log.count - Self.maxLogLines) }
+    }
+}
+
+/// What a Judge said before it was asked a follow-up question.
+public struct FollowUpBase: Codable, Hashable, Sendable {
+    /// The Judge's output before the follow-up.
+    public var previousOutput: String
+    /// The message the user sent.
+    public var message: String
+    /// Creates a base.
+    public init(previousOutput: String, message: String) {
+        self.previousOutput = previousOutput
+        self.message = message
     }
 }
 
@@ -275,6 +297,10 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
     public var keptBranches: [String]
     /// Monotonic counter the engine increments on every save, so consumers can order snapshots.
     public var revision: Int
+    /// True once a follow-up was sent: cancelling the run then suspends it (it stays resumable) instead of cancelling.
+    public var followedUp: Bool = false
+    /// The step a follow-up is working on while the pick waited for the user; if it fails, the pick is offered again.
+    public var pickToRestore: NodeKey?
 
     /// Creates a run.
     public init(
@@ -367,7 +393,7 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, flow, title, repo, baseBranch, branch, worktree, inputs, createdAt
-        case status, nodes, lanes, recommendation, keptBranches, revision, flowFile, pickedLane
+        case status, nodes, lanes, recommendation, keptBranches, revision, flowFile, pickedLane, followedUp, pickToRestore
     }
 
     /// Decodes a run; `nodes` is a JSON object keyed by `NodeKey.description`.
@@ -389,6 +415,8 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         revision = try c.decodeIfPresent(Int.self, forKey: .revision) ?? 0
         pickedLane = try c.decodeIfPresent(LaneID.self, forKey: .pickedLane)
         flowFile = try c.decodeIfPresent(URL.self, forKey: .flowFile)
+        followedUp = try c.decodeIfPresent(Bool.self, forKey: .followedUp) ?? false
+        pickToRestore = try c.decodeIfPresent(NodeKey.self, forKey: .pickToRestore)
         let raw = try c.decode([String: NodeRun].self, forKey: .nodes)
         var parsed: [NodeKey: NodeRun] = [:]
         for (k, v) in raw {
@@ -420,6 +448,8 @@ public struct Run: Identifiable, Codable, Equatable, Sendable {
         try c.encode(revision, forKey: .revision)
         try c.encodeIfPresent(flowFile, forKey: .flowFile)
         try c.encodeIfPresent(pickedLane, forKey: .pickedLane)
+        if followedUp { try c.encode(true, forKey: .followedUp) }
+        try c.encodeIfPresent(pickToRestore, forKey: .pickToRestore)
         var raw: [String: NodeRun] = [:]
         for (k, v) in nodes { raw[k.description] = v }
         try c.encode(raw, forKey: .nodes)

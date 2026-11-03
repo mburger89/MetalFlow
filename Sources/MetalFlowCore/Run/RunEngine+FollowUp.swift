@@ -50,12 +50,27 @@ extension RunEngine {
         try clearSuspension(id)
 
         mutate(id) { run in
+            let recommendation = run.recommendation
+            let previousOutput = run.nodes[node]?.output
+            let pickWasOffered = pickNodeKey(run).map { key in
+                if case .needsYou(.pickWinner)? = run.nodes[key]?.state { true } else { false }
+            } ?? false
             resetForRerun(node, plan: plan, in: &run)
             run.nodes[node]?.pendingReply = reply
+            run.nodes[node]?.appendLog("↩ follow-up: " + reply.prefix(200))
+            if case .judge? = run.flow.node(node.node)?.kind {
+                // A question put to the judge does not withdraw its verdict.
+                run.recommendation = recommendation
+                run.nodes[node]?.followUpBase = FollowUpBase(previousOutput: previousOutput ?? "", message: reply)
+            }
+            run.followedUp = true
+            run.pickToRestore = nil
             // A pick still waiting on the user would stop the pass before it reached a step that does not feed the
             // pick; it asks again once the pass gets there.
-            if let pickNode = pickNodeKey(run), case .needsYou(.pickWinner)? = run.nodes[pickNode]?.state {
+            if pickWasOffered, let pickNode = pickNodeKey(run) {
                 run.nodes[pickNode]?.state = .waiting
+                // If this step fails the pick is offered again, since no candidate changed.
+                if node.lane == nil { run.pickToRestore = node }
             }
             run.status = .running
         }

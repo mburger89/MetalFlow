@@ -22,7 +22,12 @@ extension RunEngine {
         try clearSuspension(id)
 
         mutate(id) { run in
+            // A step whose failure left the pick on offer (see `followUp`) gives it back if it fails again.
+            let pickWasOffered = pickNodeKey(run).map { key in
+                if case .needsYou(.pickWinner)? = run.nodes[key]?.state { true } else { false }
+            } ?? false
             resetForRerun(node, plan: plan, in: &run)
+            run.pickToRestore = pickWasOffered && node.lane == nil ? node : nil
             run.status = .running
         }
         requestPass(id)
@@ -92,7 +97,8 @@ extension RunEngine {
             if case .judge? = run.flow.node(key.node)?.kind { return true }
             return false
         }
-        if judgeResets { run.recommendation = nil }
+        // A judge answering a follow-up keeps the verdict it had, even when its turn is retried.
+        if judgeResets && run.nodes[node]?.followUpBase == nil { run.recommendation = nil }
         // A pick that is reset must be made again.
         if let pickNode = pickNodeKey(run), keys.contains(pickNode) { run.pickedLane = nil }
     }
