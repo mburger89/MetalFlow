@@ -455,21 +455,21 @@ public actor RunEngine {
         mutate(id) { $0.status = .completed }
     }
 
-    /// After a follow-up to a step that does not belong to a candidate: if that step failed, the pick that waited
-    /// before it waits again, since no candidate changed. Done with the step once it has succeeded or failed.
+    /// After a follow-up to a step that does not belong to a candidate: the pick that waited before it waits again if a
+    /// step outside the candidates failed, since no candidate changed. Done once the pick is no longer waiting. While a
+    /// later step is parked (on a question, say) nothing is decided: once answered it can still fail.
     private func restorePick(_ id: RunID) {
         guard let run = runs[id], run.status == .running, !rerunRequested.contains(id),
-              let target = run.pickToRestore else { return }
-        switch run.nodes[target]?.state {
-        case .succeeded?:
+              run.pickToRestore != nil, let pickNode = pickNodeKey(run),
+              let pickState = run.nodes[pickNode]?.state else { return }
+        if pickState != .waiting {
             mutate(id) { $0.pickToRestore = nil }
-        case .failed?:
-            guard let pickNode = pickNodeKey(run), run.nodes[pickNode]?.state == .waiting else { return }
-            mutate(id) { run in
-                run.nodes[pickNode]?.state = Self.pickWaiting(lanes: run.lanes, recommendation: run.recommendation)
-                run.pickToRestore = nil
-            }
-        default: break
+            return
+        }
+        guard run.nodes.contains(where: { $0.key.lane == nil && $0.value.state.isFailed }) else { return }
+        mutate(id) { run in
+            run.nodes[pickNode]?.state = Self.pickWaiting(lanes: run.lanes, recommendation: run.recommendation)
+            run.pickToRestore = nil
         }
     }
 
