@@ -397,4 +397,66 @@ import os
         let run = await waitFor(h, id, "notes done") { self.pickIsOffered($0) && $0.nodes[self.notes]?.output == "short" }
         #expect(run.nodes[notes]?.followUpMessage == nil)
     }
+
+    // MARK: - 6. Refuse a follow-up that could not run
+
+    /// What a refused follow-up must leave alone, revision included.
+    private func snapshot(_ run: Run) -> [String] {
+        run.orderedNodeKeys.map { "\($0) \(run.nodes[$0]!.state) \(run.nodes[$0]!.output ?? "") \(run.nodes[$0]!.pendingReply ?? "")" }
+            + ["\(run.status) \(run.revision) \(run.recommendation ?? "-") \(run.followedUp) \(String(describing: run.pickToRestore))"]
+    }
+
+    @Test func followUpRefusedWhileALaneQuestionWaits() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        await h.engine.setDirect(id) { $0.nodes[NodeKey(node: "implement", lane: "b")]?.state = .needsYou(.question("Keep?")) }
+        let run = try #require(await h.engine.run(id))
+        let title = try #require(run.flow.node("implement")?.title)
+        let requests = h.agent.requests.count
+        await #expect(throws: RunEngineError.followUpBlocked("Answer the question on \"\(title)\" first, then send this.")) {
+            try await h.engine.followUp(id, node: judge, message: "Explain")
+        }
+        let after = try #require(await h.engine.run(id))
+        #expect(snapshot(after) == snapshot(run))
+        #expect(after.revision == run.revision)
+        #expect(h.agent.requests.count == requests)
+        #expect(RunEngineError.followUpBlocked("Resume \"X\" first, then send this.").errorDescription == "Resume \"X\" first, then send this.")
+    }
+
+    @Test func followUpRefusedWhileAnEarlierStepIsInterrupted() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "summary"))
+        let id = try await atPick(h, flow: notesFlow(h))
+        await h.engine.setDirect(id) { $0.nodes[self.judge]?.state = .interrupted }
+        let run = try #require(await h.engine.run(id))
+        let title = try #require(run.flow.node("judge")?.title)
+        await #expect(throws: RunEngineError.followUpBlocked("Resume \"\(title)\" first, then send this.")) {
+            try await h.engine.followUp(id, node: notes, message: "Shorter")
+        }
+        let after = try #require(await h.engine.run(id))
+        #expect(snapshot(after) == snapshot(run))
+    }
+
+    @Test func followUpAllowedWhenTheQuestionIsDownstream() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "summary"))
+        let id = try await atPick(h, flow: notesFlow(h))
+        // The step after the judge waits on a question; following up the judge resets it anyway.
+        await h.engine.setDirect(id) { $0.nodes[self.notes]?.state = .needsYou(.question("Which part?")) }
+        h.agent.script({ $0.prompt == "Explain" }, events: finished("sj", "Because.\nRECOMMEND: b"))
+        try await h.engine.followUp(id, node: judge, message: "Explain")
+        let run = await waitFor(h, id, "the pick") { self.pickIsOffered($0) && $0.nodes[self.judge]?.output?.contains("Because.") == true }
+        #expect(run.nodes[notes]?.state == .succeeded)
+    }
+
+    @Test func laneFollowUpNotRefusedByAnotherLanesQuestion() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        await h.engine.setDirect(id) { $0.nodes[NodeKey(node: "implement", lane: "b")]?.state = .needsYou(.question("Keep?")) }
+        h.agent.script({ $0.prompt == "Tweak" }, events: finished("s", "tweaked"))
+        try await h.engine.followUp(id, node: implementA, message: "Tweak")
+        let run = await waitFor(h, id, "a's turn to finish") { $0.nodes[self.implementA]?.output == "tweaked"
+            && $0.nodes[self.implementA]?.state == .succeeded }
+        #expect(run.nodes[NodeKey(node: "implement", lane: "b")]?.state == .needsYou(.question("Keep?")))
+    }
 }

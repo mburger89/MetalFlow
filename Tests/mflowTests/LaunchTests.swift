@@ -229,6 +229,8 @@ private final class Scratch: Sendable {
         #expect(failureReport(LaunchArgumentError.unknownInput("n")) == (1, "mflow: the flow has no input named 'n'"))
         #expect(failureReport(UsageError(message: "oops")) == (64, "mflow: oops\n\n\(usageText)"))
         #expect(failureReport(CommandFailure(message: "bad")) == (1, "mflow: bad"))
+        #expect(failureReport(RunEngineError.followUpBlocked("Resume \"Judge\" first, then send this."))
+            == (1, "mflow: Resume \"Judge\" first, then send this."))
         #expect(failureReport(Boom()) == (1, "mflow: not a repo"))
     }
 }

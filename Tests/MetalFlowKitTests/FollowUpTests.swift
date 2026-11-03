@@ -145,6 +145,23 @@ import Testing
         _ = try window.element(identifier: "\(id).field")
     }
 
+    @Test func blockedFollowUpShowsTheNoticeAndKeepsTheDraft() async throws {
+        let run = seeded()
+        let (model, client, window) = try await fixture(run)
+        let message = "Answer the question on \"Implement\" first, then send this."
+        await client.setFailure(RunEngineError.followUpBlocked(message))
+        try await press("detail.node.judge.followUp", in: window)
+        let id = field(run, judge)
+        try window.click(window.element(identifier: "\(id).field"))
+        window.typeText("Explain")
+        try await window.runUntilIdle()
+        try await press("\(id).send", in: window)
+        #expect(model.notice?.text == message)
+        #expect(model.followUpDrafts[AppModel.draftKey(run.id, judge)] == "Explain")
+        #expect(model.followingUp.contains(AppModel.draftKey(run.id, judge)), "the box stays open")
+        _ = try window.element(identifier: "\(id).field")
+    }
+
     @Test func closingKeepsTheDraft() async throws {
         let run = seeded()
         let (model, _, window) = try await fixture(run)

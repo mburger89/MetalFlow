@@ -47,6 +47,7 @@ extension RunEngine {
         guard let run = runs[id], !picking.contains(id), !deciding.contains(id), !reply.isEmpty,
               run.canFollowUp(node) else { throw RunEngineError.notFollowable(node) }
         guard let plan = try? run.flow.validate() else { throw RunEngineError.notFollowable(node) }
+        if let blocked = followUpBlocker(node, in: run, plan: plan) { throw RunEngineError.followUpBlocked(blocked) }
         try clearSuspension(id)
 
         mutate(id) { run in
@@ -76,5 +77,27 @@ extension RunEngine {
             run.status = .running
         }
         requestPass(id)
+    }
+
+    /// Why a follow-up to the step outside the candidates `node` could not run, or nil. Its pass stops at a question or an
+    /// interrupted step before it, so the message would wait with the step unrun. Nodes the follow-up would reset do not
+    /// count, and a candidate's follow-up is never blocked this way: its own lane runs anyway.
+    func followUpBlocker(_ node: NodeKey, in run: Run, plan: FlowPlan) -> String? {
+        guard node.lane == nil else { return nil }
+        var scratch = run
+        resetForRerun(node, plan: plan, in: &scratch)
+        let target = plan.order.firstIndex(of: node.node) ?? Int.max
+        for key in scratch.orderedNodeKeys {
+            guard let state = scratch.nodes[key]?.state else { continue }
+            let title = scratch.flow.node(key.node)?.title ?? key.node.rawValue
+            let before = key.lane != nil || (plan.order.firstIndex(of: key.node) ?? Int.max) < target
+            guard before else { continue }
+            switch state {
+            case .needsYou(.question): return "Answer the question on \"\(title)\" first, then send this."
+            case .interrupted: return "Resume \"\(title)\" first, then send this."
+            default: continue
+            }
+        }
+        return nil
     }
 }
