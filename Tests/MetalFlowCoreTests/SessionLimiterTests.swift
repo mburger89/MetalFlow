@@ -61,3 +61,79 @@ private actor Probe {
         #expect(await probe.peak == 1)
     }
 }
+
+/// Lets a test hold and release each named holder of a slot.
+private actor Gates {
+    private var open: Set<String> = []
+    private var waiting: [String: CheckedContinuation<Void, Never>] = [:]
+    private(set) var entered: [String] = []
+    private let entries: AsyncStream<String>.Continuation
+
+    init(entries: AsyncStream<String>.Continuation) { self.entries = entries }
+
+    func hold(_ name: String) async {
+        entered.append(name)
+        entries.yield(name)
+        if open.contains(name) { return }
+        await withCheckedContinuation { waiting[name] = $0 }
+    }
+
+    func release(_ name: String) {
+        open.insert(name)
+        waiting.removeValue(forKey: name)?.resume()
+    }
+}
+
+extension SessionLimiterTests {
+    private func holder(_ name: String, _ limiter: SessionLimiter, _ gates: Gates) -> Task<Void, Error> {
+        Task { try await limiter.withSlot { await gates.hold(name) } }
+    }
+
+    @Test func raisingMaxStartsWaiters() async throws {
+        let (entries, cont) = AsyncStream<String>.makeStream()
+        let gates = Gates(entries: cont)
+        let limiter = SessionLimiter(max: 1)
+        var names = entries.makeAsyncIterator()
+        let first = holder("a", limiter, gates)
+        #expect(await names.next() == "a")
+        let second = holder("b", limiter, gates)
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await gates.entered == ["a"])
+        await limiter.setMax(2)
+        #expect(await names.next() == "b")  // ran while the first still holds
+        await gates.release("a")
+        await gates.release("b")
+        try await first.value
+        try await second.value
+    }
+
+    @Test func loweringMaxStopsNoOneAndAdmitsNoOneUntilBelow() async throws {
+        let (entries, cont) = AsyncStream<String>.makeStream()
+        let gates = Gates(entries: cont)
+        let limiter = SessionLimiter(max: 2)
+        var names = entries.makeAsyncIterator()
+        let a = holder("a", limiter, gates)
+        let b = holder("b", limiter, gates)
+        _ = await names.next()
+        _ = await names.next()
+        let c = holder("c", limiter, gates)
+        await limiter.setMax(1)
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await gates.entered.count == 2, "lowering stops no one")
+        await gates.release("a")
+        try await a.value
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await gates.entered.count == 2, "one holder is still at the new limit")
+        await gates.release("b")
+        #expect(await names.next() == "c")
+        await gates.release("c")
+        try await b.value
+        try await c.value
+    }
+
+    @Test func maxNeverDropsBelowOne() async {
+        let limiter = SessionLimiter(max: 3)
+        await limiter.setMax(0)
+        #expect(await limiter.max == 1)
+    }
+}

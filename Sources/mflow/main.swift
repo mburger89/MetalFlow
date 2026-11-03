@@ -28,9 +28,11 @@ func run() async -> Int32 {
         }
 
         let path = await resolver.searchPath().joined(separator: ":")
+        let store = RunStore(root: storeRoot())
         let engine = RunEngine(
-            store: RunStore(root: storeRoot()), runner: runner, agent: ClaudeCLI(runner: runner),
-            issues: GitHubIssues(runner: runner), shellEnvironment: ["PATH": path])
+            store: store, runner: runner, agent: ClaudeCLI(runner: runner),
+            issues: GitHubIssues(runner: runner), maxSessions: store.settings().maxSessions,
+            shellEnvironment: ["PATH": path])
         let runs = try await engine.restore()
 
         switch command {

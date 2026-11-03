@@ -122,6 +122,13 @@ actor FakeEngineClient: EngineClient {
         try record("branch(\(lane), \(name))")
     }
     nonisolated func knownRepos() -> [URL] { repos }
+    /// The saved session limit.
+    nonisolated let limit = IntBox(4)
+    nonisolated func maxSessions() -> Int { limit.value }
+    func setMaxSessions(_ max: Int) async throws {
+        try record("setMaxSessions(\(max))")
+        limit.value = max
+    }
     func addKnownRepo(_ url: URL) async throws {
         try record("addKnownRepo(\(url.path))")
         repoList.add(url)
@@ -281,4 +288,15 @@ final class URLList: @unchecked Sendable {
     init(_ urls: [URL]) { _urls = urls }
     var urls: [URL] { lock.withLock { _urls } }
     func add(_ url: URL) { lock.withLock { if !_urls.contains(url) { _urls.append(url) } } }
+}
+
+/// A lock-guarded integer for `FakeEngineClient`.
+final class IntBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: Int
+    init(_ value: Int) { _value = value }
+    var value: Int {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
 }

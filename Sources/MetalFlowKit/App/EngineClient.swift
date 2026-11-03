@@ -33,6 +33,10 @@ public protocol EngineClient: Sendable {
     func branchFromHere(_ id: RunID, lane: LaneID, name: String) async throws
     /// Repositories runs were launched in.
     func knownRepos() -> [URL]
+    /// How many agent sessions may run at once, as saved.
+    func maxSessions() -> Int
+    /// Saves a new limit (held to 1...16) and applies it to the running engine.
+    func setMaxSessions(_ max: Int) async throws
     /// Remembers `url` as a known repo, so it is listed on the next start.
     func addKnownRepo(_ url: URL) async throws
     /// Every flow the app can open: built-ins, the library, then each known repo's `.flows`.
@@ -92,7 +96,8 @@ public struct LiveEngineClient: EngineClient {
             let path = await resolver.searchPath().joined(separator: ":")
             return RunEngine(
                 store: store, runner: runner, agent: ClaudeCLI(runner: runner),
-                issues: GitHubIssues(runner: runner), shellEnvironment: ["PATH": path])
+                issues: GitHubIssues(runner: runner), maxSessions: store.settings().maxSessions,
+                shellEnvironment: ["PATH": path])
         }
     }
 
@@ -116,6 +121,13 @@ public struct LiveEngineClient: EngineClient {
         try await engine.value.branchFromHere(id, lane: lane, name: name)
     }
     public func knownRepos() -> [URL] { store.knownRepos() }
+    public func maxSessions() -> Int { store.settings().maxSessions }
+    public func setMaxSessions(_ max: Int) async throws {
+        let store = store
+        let settings = RunSettings(maxSessions: max)
+        try await Task.detached { try store.saveSettings(settings) }.value
+        await engine.value.setMaxSessions(settings.maxSessions)
+    }
     public func addKnownRepo(_ url: URL) async throws {
         let store = store
         try await Task.detached { try store.addKnownRepo(url) }.value

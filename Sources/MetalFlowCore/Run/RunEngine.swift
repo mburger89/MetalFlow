@@ -94,7 +94,7 @@ public actor RunEngine {
 
     /// Creates an engine. `shellEnvironment` is merged into the environment of shell and gate nodes.
     public init(store: RunStore, runner: any CommandRunner, agent: any AgentSession, issues: GitHubIssues,
-                maxSessions: Int = 4, shellEnvironment: [String: String] = [:]) {
+                maxSessions: Int = RunSettings.defaultMaxSessions, shellEnvironment: [String: String] = [:]) {
         self.store = store
         self.runner = runner
         self.agent = agent
@@ -105,6 +105,9 @@ public actor RunEngine {
         self.shellEnvironment = shellEnvironment
         (updates, continuation) = AsyncStream.makeStream(of: Run.self, bufferingPolicy: .bufferingNewest(256))
     }
+
+    /// Changes how many agent sessions run at once; takes effect for waiting and future sessions.
+    public func setMaxSessions(_ max: Int) async { await limiter.setMax(max) }
 
     /// Loads persisted runs into memory and returns them; does not start any run.
     ///

@@ -24,7 +24,11 @@ public struct DashboardView: Component {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
-            ActivityFeed(model: model)
+            VStack(spacing: 0) {
+                SessionLimitControl(model: model)
+                ActivityFeed(model: model)
+            }
+            .frame(width: ActivityFeed.width)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.ground)
@@ -129,5 +133,22 @@ struct RunningSection: Component {
                 }
             }
         }
+    }
+}
+
+/// The "Sessions at once" stepper, above the activity feed.
+struct SessionLimitControl: Component {
+    let model: AppModel
+
+    var content: some ElementGroup {
+        Stepper(
+            "Sessions at once: \(model.maxSessions)",
+            value: Binding(get: { model.maxSessions }, set: { n in Task { await model.setMaxSessions(n) } }),
+            in: RunSettings.sessionRange
+        )
+        .foregroundColor(Palette.muted)
+        .padding(insets(top: 14, right: 16, bottom: 0, left: 16))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("dashboard.maxSessions")
     }
 }

@@ -129,3 +129,41 @@ import Testing
         #expect(run.needsYou.map(\.0.description) == ["plan", "implement@a", "implement@b"])
     }
 }
+
+extension RunStoreTests {
+    @Test func settingsDefaultWhenMissing() {
+        let store = RunStore(root: tempRoot())
+        #expect(store.settings() == RunSettings())
+        #expect(store.settings().maxSessions == RunSettings.defaultMaxSessions)
+    }
+
+    @Test func settingsDefaultWhenCorrupt() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("not json {".utf8).write(to: root.appendingPathComponent("settings.json"))
+        #expect(RunStore(root: root).settings() == RunSettings())
+    }
+
+    @Test func settingsClampOnRead() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("settings.json")
+        let store = RunStore(root: root)
+        try Data(#"{"maxSessions":0}"#.utf8).write(to: file)
+        #expect(store.settings().maxSessions == 1)
+        try Data(#"{"maxSessions":9999}"#.utf8).write(to: file)
+        #expect(store.settings().maxSessions == 16)
+    }
+
+    @Test func settingsRoundTrip() throws {
+        let root = tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RunStore(root: root)
+        try store.saveSettings(RunSettings(maxSessions: 7))
+        #expect(store.settings().maxSessions == 7)
+        try store.saveSettings(RunSettings(maxSessions: 500))
+        #expect(store.settings().maxSessions == 16)
+    }
+}

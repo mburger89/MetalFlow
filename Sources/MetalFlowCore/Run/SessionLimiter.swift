@@ -2,7 +2,8 @@ import Foundation
 
 /// Caps how many agent sessions run at once; extra callers wait in FIFO order.
 public actor SessionLimiter {
-    private let max: Int
+    /// The current limit.
+    public private(set) var max: Int
     private var active = 0
     private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
 
@@ -39,11 +40,21 @@ public actor SessionLimiter {
         }
     }
 
+    /// Changes the limit (at least one). Raising it starts waiters at once; lowering it stops no one, and no
+    /// waiter starts until enough holders have finished to get below the new limit.
+    public func setMax(_ newMax: Int) {
+        max = Swift.max(1, newMax)
+        while active < max, !waiters.isEmpty {
+            active += 1
+            waiters.removeFirst().continuation.resume()
+        }
+    }
+
     private func release() {
-        if waiters.isEmpty {
-            active -= 1
-        } else {
+        if active <= max, !waiters.isEmpty {
             waiters.removeFirst().continuation.resume()  // the slot passes straight to the next waiter
+        } else {
+            active -= 1
         }
     }
 

@@ -19,6 +19,7 @@ public struct RunStore: Sendable {
 
     private var runsDirectory: URL { root.appendingPathComponent("runs") }
     private var reposFile: URL { root.appendingPathComponent("repos.json") }
+    private var settingsFile: URL { root.appendingPathComponent("settings.json") }
 
     private static func encoder() -> JSONEncoder {
         let e = JSONEncoder()
@@ -140,6 +141,22 @@ public struct RunStore: Sendable {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let data = try Self.encoder().encode(paths)
         try data.write(to: reposFile, options: .atomic)
+    }
+
+    /// The saved settings; the defaults when the file is missing or unreadable. Values are held to their ranges.
+    public func settings() -> RunSettings {
+        guard let data = try? Data(contentsOf: settingsFile),
+              let settings = try? JSONDecoder().decode(RunSettings.self, from: data) else { return RunSettings() }
+        return settings
+    }
+
+    /// Saves settings atomically. Values are held to their ranges (`RunSettings` clamps when made, and again here
+    /// in case a field was set afterwards).
+    public func saveSettings(_ settings: RunSettings) throws {
+        var settings = settings
+        settings.maxSessions = RunSettings.clamped(settings.maxSessions)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Self.encoder().encode(settings).write(to: settingsFile, options: .atomic)
     }
 
     private static func normalize(_ url: URL) -> String {

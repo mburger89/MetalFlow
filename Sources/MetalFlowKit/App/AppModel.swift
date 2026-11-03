@@ -145,6 +145,10 @@ public final class AppModel {
     /// True while a launch from the launch bar is in flight.
     public internal(set) var isLaunching = false
     var addedRepos: [URL] = []
+    /// How many agent sessions may run at once. Changed through `setMaxSessions`.
+    public private(set) var maxSessions = RunSettings.defaultMaxSessions
+    /// The limit last saved, which `maxSessions` returns to when a save fails.
+    private var savedMaxSessions = RunSettings.defaultMaxSessions
 
     /// What the last pick of each lane showed, per run. Cleared for a lane when it is picked again.
     public internal(set) var pickOutcomes: [RunID: [LaneID: PickOutcome]] = [:]
@@ -271,6 +275,8 @@ public final class AppModel {
         guard !started else { return }
         started = true
         enqueue(.removeAll)
+        savedMaxSessions = client.maxSessions()
+        maxSessions = savedMaxSessions
         await refreshRepos()
         do {
             for run in try await client.restore() { apply(run, restoring: true) }
@@ -523,6 +529,17 @@ public final class AppModel {
     @discardableResult
     public func branchFromHere(_ id: RunID, lane: LaneID, name: String) async -> Bool {
         await perform { try await self.client.branchFromHere(id, lane: lane, name: name) }
+    }
+
+    /// Saves a new session limit. It shows at once; if the save fails, a notice appears and the saved value returns.
+    public func setMaxSessions(_ max: Int) async {
+        let value = min(Swift.max(max, RunSettings.sessionRange.lowerBound), RunSettings.sessionRange.upperBound)
+        maxSessions = value
+        if await perform({ try await self.client.setMaxSessions(value) }) {
+            savedMaxSessions = value
+        } else {
+            maxSessions = savedMaxSessions
+        }
     }
 
     @discardableResult
