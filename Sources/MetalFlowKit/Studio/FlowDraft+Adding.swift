@@ -1,3 +1,4 @@
+import Foundation
 import MetalFlowCore
 import MetalUI
 
@@ -171,7 +172,7 @@ extension FlowDraft {
 // MARK: The palette's Find field and the zoom buttons
 
 extension FlowDraft {
-    /// How much one press of a zoom button scales the view.
+    /// The ratio between neighbouring zoom stops.
     static let zoomStep = 1.25
 
     /// The palette groups with only the entries matching `paletteFilter`, groups with none left out.
@@ -193,9 +194,27 @@ extension FlowDraft {
         return true
     }
 
-    /// Scales the view by `factor` about the canvas centre; nothing until the canvas is measured.
-    func zoomCanvas(by factor: Double) {
+    /// The zoom levels the buttons step through, ascending: the minimum, 1.25^n for every whole n strictly between the
+    /// limits, then the maximum.
+    static let zoomStops: [Double] = {
+        let low = CanvasGeometry.minZoom, high = CanvasGeometry.maxZoom
+        let inside = (-40...40).map { pow(zoomStep, Double($0)) }.filter { $0 > low && $0 < high }
+        return [low] + inside + [high]
+    }()
+
+    /// Zooms to the next stop above the current zoom (a zoom within 0.001 of a stop counts as on it), about the canvas
+    /// centre; nothing at the top or before the canvas is measured.
+    func zoomCanvasIn() {
+        if let stop = Self.zoomStops.first(where: { $0 > geometry.zoom + 0.001 }) { zoomCanvas(to: stop) }
+    }
+
+    /// Zooms to the next stop below the current zoom, about the canvas centre; nothing at the bottom.
+    func zoomCanvasOut() {
+        if let stop = Self.zoomStops.last(where: { $0 < geometry.zoom - 0.001 }) { zoomCanvas(to: stop) }
+    }
+
+    private func zoomCanvas(to zoom: Double) {
         guard let canvasSize else { return }
-        geometry.zoom(to: geometry.zoom * factor, about: ScreenPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
+        geometry.zoom(to: zoom, about: ScreenPoint(x: canvasSize.width / 2, y: canvasSize.height / 2))
     }
 }

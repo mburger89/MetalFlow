@@ -244,24 +244,58 @@ import Testing
         #expect(draft.geometry.zoom == 4)
     }
 
+    @Test func zoomStopsRunFromTheMinimumToTheMaximum() {
+        let stops = FlowDraft.zoomStops
+        #expect(stops.first == CanvasGeometry.minZoom && stops.last == CanvasGeometry.maxZoom)
+        #expect(stops == stops.sorted() && Set(stops).count == stops.count)
+        #expect(stops.contains { abs($0 - 1) < 1e-9 })
+        #expect(stops.dropFirst().dropLast().allSatisfy { stop in
+            (-20...20).contains { abs(pow(1.25, Double($0)) - stop) < 1e-9 } })
+    }
+
     @Test func zoomOutThenInRetracesTheSamePercentages() async throws {
         let (_, draft, window) = try await fixture()
         draft.geometry = CanvasGeometry(pan: ScreenPoint(x: Pixels(0), y: Pixels(0)), zoom: 1)
         try await window.runUntilIdle()
+        func step(_ id: String) async throws -> String? {
+            try window.click(window.element(identifier: id))
+            try await window.runUntilIdle()
+            return try percent(window)
+        }
         var down: [String?] = [try percent(window)]
-        for _ in 0..<5 {
-            try window.click(window.element(identifier: "canvas.zoomOut"))
-            try await window.runUntilIdle()
-            down.append(try percent(window))
-        }
-        #expect(down == ["100%", "80%", "64%", "51%", "41%", "33%"])
+        while try window.element(identifier: "canvas.zoomOut").isEnabled { down.append(try await step("canvas.zoomOut")) }
+        #expect(down == ["100%", "80%", "64%", "51%", "41%", "33%", "26%", "25%"])
         var up: [String?] = [try percent(window)]
-        for _ in 0..<5 {
-            try window.click(window.element(identifier: "canvas.zoomIn"))
-            try await window.runUntilIdle()
-            up.append(try percent(window))
-        }
+        while try percent(window) != "100%" { up.append(try await step("canvas.zoomIn")) }
         #expect(up == down.reversed(), "each step back shows the percentage the step down came from")
+        var top: [String?] = [try percent(window)]
+        while try window.element(identifier: "canvas.zoomIn").isEnabled { top.append(try await step("canvas.zoomIn")) }
+        #expect(top.last == "400%")
+        var back: [String?] = [try percent(window)]
+        while try percent(window) != "100%" { back.append(try await step("canvas.zoomOut")) }
+        #expect(back == top.reversed())
+        #expect(draft.geometry.zoom == 1)
+    }
+
+    @Test func offStopZoomSnapsToTheNextStop() async throws {
+        let (_, draft, _) = try await fixture()
+        func zoomed(_ z: Double, _ body: () -> Void) -> Double {
+            draft.geometry = CanvasGeometry(pan: ScreenPoint(x: Pixels(0), y: Pixels(0)), zoom: z)
+            body()
+            return draft.geometry.zoom
+        }
+        #expect(abs(zoomed(1.1) { draft.zoomCanvasIn() } - 1.25) < 1e-9)
+        #expect(abs(zoomed(1.1) { draft.zoomCanvasOut() } - 1) < 1e-9)
+        #expect(abs(zoomed(0.3) { draft.zoomCanvasOut() } - pow(1.25, -6)) < 1e-9)
+        #expect(abs(zoomed(0.3) { draft.zoomCanvasIn() } - pow(1.25, -5)) < 1e-9)
+        #expect(abs(zoomed(3.9) { draft.zoomCanvasIn() } - CanvasGeometry.maxZoom) < 1e-9)
+        #expect(abs(zoomed(3.9) { draft.zoomCanvasOut() } - pow(1.25, 6)) < 1e-9)
+        // On a stop, within the tolerance, the step goes past it.
+        #expect(abs(zoomed(1.0004) { draft.zoomCanvasIn() } - 1.25) < 1e-9)
+        #expect(abs(zoomed(1.0004) { draft.zoomCanvasOut() } - 0.8) < 1e-9)
+        // At the limits nothing moves.
+        #expect(zoomed(CanvasGeometry.maxZoom) { draft.zoomCanvasIn() } == CanvasGeometry.maxZoom)
+        #expect(zoomed(CanvasGeometry.minZoom) { draft.zoomCanvasOut() } == CanvasGeometry.minZoom)
     }
 
     @Test func zoomIsNotAnEdit() async throws {
@@ -274,7 +308,8 @@ import Testing
 
     @Test func zoomDoesNothingBeforeTheCanvasIsMeasured() {
         let draft = FlowDraft(flow: BuiltinFlows.fixGitHubIssue, location: .unsaved)
-        draft.zoomCanvas(by: FlowDraft.zoomStep)
+        draft.zoomCanvasIn()
+        draft.zoomCanvasOut()
         #expect(draft.geometry.zoom == 1)
     }
 }
