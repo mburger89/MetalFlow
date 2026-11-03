@@ -201,6 +201,15 @@ struct StepRow: Component {
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("\(id).retry")
         }
+        // The engine decides; a run another process drives is not ours to change.
+        if !model.runningElsewhere.contains(runID), run.canFollowUp(key) {
+            Button("Follow up") { model.toggleFollowUp(run: runID, node: key) }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("\(id).followUp")
+            if model.followingUp.contains(AppModel.draftKey(runID, key)) {
+                FollowUpBox(model: model, runID: runID, key: key)
+            }
+        }
     }
 
 }

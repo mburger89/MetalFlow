@@ -142,6 +142,10 @@ public final class AppModel {
     public internal(set) var launchResolvedRepo: String?
     /// Unsent answer text, keyed by `AppModel.draftKey(_:_:)`.
     public var answerDrafts: [String: String] = [:]
+    /// Unsent follow-up text, keyed by `AppModel.draftKey(_:_:)`. Closing the box keeps it.
+    public var followUpDrafts: [String: String] = [:]
+    /// The steps whose follow-up box is open, keyed by `AppModel.draftKey(_:_:)`.
+    public var followingUp: Set<String> = []
     /// True while a launch from the launch bar is in flight.
     public internal(set) var isLaunching = false
     var addedRepos: [URL] = []
@@ -475,6 +479,26 @@ public final class AppModel {
         guard !reply.isEmpty else { return false }
         guard await answer(id, node: node, reply: reply) else { return false }
         if answerDrafts[key] == typed { answerDrafts[key] = nil }
+        return true
+    }
+
+    /// Opens or closes a step's follow-up box. Closing keeps the draft.
+    public func toggleFollowUp(run id: RunID, node: NodeKey) {
+        let key = Self.draftKey(id, node)
+        if followingUp.contains(key) { followingUp.remove(key) } else { followingUp.insert(key) }
+    }
+
+    /// Sends the follow-up drafted for a step. The box closes and the draft clears only once the engine accepts it,
+    /// and the draft only if the user has not typed something else meanwhile. Does nothing for an empty message.
+    @discardableResult
+    public func sendFollowUp(run id: RunID, node: NodeKey) async -> Bool {
+        let key = Self.draftKey(id, node)
+        let typed = followUpDrafts[key] ?? ""
+        let message = Self.trimmed(typed)
+        guard !message.isEmpty else { return false }
+        guard await perform({ try await self.client.followUp(id, node: node, message: message) }) else { return false }
+        if followUpDrafts[key] == typed { followUpDrafts[key] = nil }
+        followingUp.remove(key)
         return true
     }
 

@@ -10,18 +10,12 @@ struct AnswerBox: Component {
 
     var content: some ElementGroup {
         let draftKey = AppModel.draftKey(runID, key)
-        let id = "answer.\(runID.rawValue).\(key)"
-        HStack(spacing: Spacing.sm) {
-            TextField("Reply", text: Binding(
+        ReplyField(
+            placeholder: "Reply", id: "answer.\(runID.rawValue).\(key)",
+            text: Binding(
                 get: { model.answerDrafts[draftKey] ?? "" },
-                set: { model.answerDrafts[draftKey] = $0 }))
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("\(id).field")
-            Button("Send") { send() }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("\(id).send")
-                .disabled(AppModel.trimmed(model.answerDrafts[draftKey] ?? "").isEmpty)
-        }
+                set: { model.answerDrafts[draftKey] = $0 }),
+            send: send)
     }
 
     private func send() {
