@@ -295,7 +295,17 @@ extension RunEngine {
             await concludeReview(id, key, node: node, config: review, text: result.text, plan: plan)
         } else {
             // Only the reply is read for a recommendation, never the question or the earlier verdict.
-            let recommended = isJudge ? Self.recommendation(in: result.text, lanes: runs[id]?.lanes ?? []) : nil
+            // A candidate with a failed step cannot be recommended: the judge was told it failed.
+            let allLanes = runs[id]?.lanes ?? []
+            let failedLanes = Set(allLanes.map(\.id).filter { laneID in
+                runs[id]?.nodes.contains { $0.key.lane == laneID && $0.value.state.isFailed } == true
+            })
+            let named = isJudge ? Self.recommendation(in: result.text, lanes: allLanes) : nil
+            let namedFailed = named.map { failedLanes.contains($0) } ?? false
+            let recommended = namedFailed ? nil : named
+            if namedFailed, let named {
+                updateNode(id, key) { $0.appendLog("⚠ recommended \(named), which failed; no recommendation") }
+            }
             var output = result.text
             let base = isJudge ? runs[id]?.nodes[key]?.followUpBase : nil
             if let base, recommended == nil {
@@ -306,6 +316,7 @@ extension RunEngine {
                 mutate(id) { run in
                     // A question put to the judge keeps the recommendation it had unless the reply names another.
                     if base == nil || recommended != nil { run.recommendation = recommended }
+                    else if namedFailed, run.recommendation == named { run.recommendation = nil }
                     run.nodes[key]?.followUpBase = nil
                 }
             }

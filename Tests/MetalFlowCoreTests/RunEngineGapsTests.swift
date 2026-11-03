@@ -970,4 +970,35 @@ import os
         #expect(sent.prompt == "Continue where you left off." && sent.resumeSessionID == session)
         #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
     }
+
+    // MARK: - Fix round 8. A judge can't recommend a failed candidate
+
+    /// Runs the harness flow with candidate b failing; the judge replies `reply`.
+    private func atPickWithFailedB(_ h: Harness, reply: String) async throws -> Run {
+        h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "b" },
+                       events: finished("sb", "limit", isError: true))
+        h.agent.script({ $0.prompt.contains("judging candidate") }, events: finished("sj", reply))
+        let id = try await atPick(h)
+        let run = try #require(await h.engine.run(id))
+        #expect(run.nodes[NodeKey(node: "implement", lane: "b")]?.state.isFailed == true)
+        return run
+    }
+
+    @Test func judgeRecommendingAFailedCandidateLeavesNone() async throws {
+        let h = try Harness()
+        let run = try await atPickWithFailedB(h, reply: "b is best.\nRECOMMEND: b")
+        #expect(run.recommendation == nil)
+        #expect(run.nodes[pick]?.state == .needsYou(.pickWinner(recommended: nil, allGatesFailed: false)))
+        #expect(run.nodes[judge]?.log.contains("⚠ recommended b, which failed; no recommendation") == true)
+        _ = try await h.engine.pick(run.id, lane: "b")
+        #expect(await h.engine.run(run.id)?.status == .merged("b"))
+    }
+
+    @Test func judgeRecommendingAGoodCandidateAlongsideAFailedOneStands() async throws {
+        let h = try Harness()
+        let run = try await atPickWithFailedB(h, reply: "a is best.\nRECOMMEND: a")
+        #expect(run.recommendation == "a")
+        #expect(run.nodes[pick]?.state == .needsYou(.pickWinner(recommended: "a", allGatesFailed: false)))
+        #expect(run.nodes[judge]?.log.contains { $0.contains("which failed") } != true)
+    }
 }
