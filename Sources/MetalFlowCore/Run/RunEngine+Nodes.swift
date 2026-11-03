@@ -199,7 +199,7 @@ extension RunEngine {
             if let source = config.continuesSessionOf, !isReview {
                 if let session = runs[id]?.nodes[NodeKey(node: source, lane: key.lane)]?.sessionID {
                     request.resumeSessionID = session
-                    if current.rerunsInSession { request.prompt = Self.rerunNotice + request.prompt }
+                    if let ran = current.ranInSession, ran == session { request.prompt = Self.rerunNotice + request.prompt }
                 } else {
                     updateNode(id, key) { $0.appendLog("⚠ no session to continue; starting fresh") }
                 }
@@ -277,7 +277,7 @@ extension RunEngine {
             }
         }
         // The turn's work is committed (or there is none to commit): the message no longer labels anything.
-        updateNode(id, key) { $0.replyInFlight = nil; $0.rerunsInSession = false; $0.followUpMessage = nil }
+        updateNode(id, key) { $0.replyInFlight = nil; $0.ranInSession = nil; $0.followUpMessage = nil }
         // The turn is over: a later one (an answer to a question) is ordinary work.
         if current.pendingFix != nil { updateNode(id, key) { $0.pendingFix = nil } }
         if !result.deniedTools.isEmpty {

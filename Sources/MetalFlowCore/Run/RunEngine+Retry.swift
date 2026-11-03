@@ -87,9 +87,7 @@ extension RunEngine {
             let old = run.nodes[key]
             var fresh = NodeRun(extraAllowedTools: old?.extraAllowedTools ?? [], costUSD: old?.costUSD ?? 0)
             // A step that continues a session it already ran in is told, when it runs again, that this is a rerun.
-            if old?.rerunsInSession == true || (old?.sessionID != nil && Self.continuesSession(key.node, in: run.flow)) {
-                fresh.rerunsInSession = true
-            }
+            if Self.continuesSession(key.node, in: run.flow) { fresh.ranInSession = old?.ranInSession ?? old?.sessionID }
             run.nodes[key] = fresh
         }
         let resetLanes = Set(keys.compactMap(\.lane) + (node.lane.map { [$0] } ?? []))

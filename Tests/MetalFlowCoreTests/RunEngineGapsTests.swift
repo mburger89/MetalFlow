@@ -321,7 +321,7 @@ import os
         let polish = try #require(h.agent.requests.first { $0.prompt.contains("Polish") })
         #expect(polish.prompt == "Polish draft")
         #expect(polish.resumeSessionID == "s1")
-        #expect(await h.engine.run(id)?.nodes[NodeKey(node: "second")]?.rerunsInSession == false)
+        #expect(await h.engine.run(id)?.nodes[NodeKey(node: "second")]?.ranInSession == nil)
     }
 
     @Test func rerunContinuerIsToldItIsARerun() async throws {
@@ -333,13 +333,13 @@ import os
         h.agent.script({ $0.prompt == "Redo" }, hold: hold, events: finished("s1", "draft two"))
         try await h.engine.followUp(id, node: NodeKey(node: "first"), message: "Redo")
         let held = await waitFor(h, id, "first running") { $0.nodes[NodeKey(node: "first")]?.state == .running }
-        #expect(held.nodes[second]?.rerunsInSession == true)
+        #expect(held.nodes[second]?.ranInSession == "s1")
         release.finish()
         let run = await waitFor(h, id, "second done") { $0.status != .running && $0.nodes[second]?.state == .succeeded }
         let sent = try #require(h.agent.requests.last { $0.prompt.contains("Polish") })
         #expect(sent.prompt == Self.rerunPrefix + "Polish draft two")
         #expect(sent.resumeSessionID == "s1")
-        #expect(run.nodes[second]?.rerunsInSession == false)
+        #expect(run.nodes[second]?.ranInSession == nil)
     }
 
     @Test func retriedFailedContinuerKeepsThePrefix() async throws {
@@ -350,22 +350,22 @@ import os
         h.agent.script({ $0.prompt.contains("Polish") }, events: finished("s1", "limit", isError: true))
         try await h.engine.followUp(id, node: NodeKey(node: "first"), message: "Redo")
         let failed = await waitFor(h, id, "second fails") { $0.status != .running && $0.nodes[second]?.state.isFailed == true }
-        #expect(failed.nodes[second]?.rerunsInSession == true)
+        #expect(failed.nodes[second]?.ranInSession == "s1")
         h.agent.script({ $0.prompt.contains("Polish") }, events: finished("s1", "polished two"))
         try await h.engine.retry(id, node: second)
         let run = await waitFor(h, id, "second done") { $0.status != .running && $0.nodes[second]?.state == .succeeded }
         let sent = try #require(h.agent.requests.last { $0.prompt.contains("Polish") })
         #expect(sent.prompt == Self.rerunPrefix + "Polish draft two")
-        #expect(run.nodes[second]?.rerunsInSession == false)
+        #expect(run.nodes[second]?.ranInSession == nil)
     }
 
-    @Test func rerunFlagCodableDefaultsAndStaysOutOfFilesWhenFalse() throws {
+    @Test func rerunSessionCodableDefaultsAndStaysOutOfFilesWhenNil() throws {
         var node = NodeRun()
         let plain = String(decoding: try JSONEncoder().encode(node), as: UTF8.self)
-        #expect(!plain.contains("rerunsInSession"))
-        #expect(try JSONDecoder().decode(NodeRun.self, from: Data(plain.utf8)).rerunsInSession == false)
-        node.rerunsInSession = true
-        #expect(try JSONDecoder().decode(NodeRun.self, from: JSONEncoder().encode(node)).rerunsInSession)
+        #expect(!plain.contains("ranInSession"))
+        #expect(try JSONDecoder().decode(NodeRun.self, from: Data(plain.utf8)).ranInSession == nil)
+        node.ranInSession = "s1"
+        #expect(try JSONDecoder().decode(NodeRun.self, from: JSONEncoder().encode(node)).ranInSession == "s1")
     }
 
     // MARK: - 5. A follow-up's commit says so
@@ -769,5 +769,57 @@ import os
         let sent = try #require(h.agent.requests.dropFirst(before).first { $0.workingDirectory.lastPathComponent == "a" })
         #expect(sent.prompt == "Continue where you left off." && sent.resumeSessionID == session)
         #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
+    }
+
+    // MARK: - Fix round 5. The rerun notice is only for the same conversation
+
+    @Test func continuerOfAResetSourceGetsNoNotice() async throws {
+        let h = try Harness()
+        let flow = Flow(name: "xpc", nodes: [
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 0)),
+            prompt("x", "Think in {repo}"),
+            prompt("p", "Write {thought}"),
+            Node(id: "c", title: "C", kind: .prompt(PromptConfig(
+                model: "opus", prompt: "Polish {code}", candidates: [], allowedTools: [], maxTurns: nil,
+                continuesSessionOf: "p")), position: Point(x: 3, y: 0)),
+        ], wires: [Wire(from: "repo", to: "x", input: "repo"), Wire(from: "x", to: "p", input: "thought"),
+                   Wire(from: "p", to: "c", input: "code")])
+        h.agent.script({ $0.prompt.hasPrefix("Think") }, events: finished("sx", "idea"))
+        h.agent.script({ $0.prompt.hasPrefix("Write") }, events: finished("sp", "draft"))
+        h.agent.script({ $0.prompt.contains("Polish") }, events: finished("sp", "polished"))
+        let id = try await h.engine.launch(flow: flow, location: h.repoLocation, values: ["repo": h.repo.url.path])
+        _ = await h.settled(id)
+        await h.engine.waitForPass(id)
+        // Following up X restarts P in a new conversation, so C is not rerunning anything in its old one.
+        h.agent.script({ $0.prompt == "Redo" }, events: finished("sx", "idea two"))
+        h.agent.script({ $0.prompt.hasPrefix("Write") }, events: finished("sp2", "draft two"))
+        h.agent.script({ $0.prompt.contains("Polish") }, events: finished("sp2", "polished two"))
+        try await h.engine.followUp(id, node: NodeKey(node: "x"), message: "Redo")
+        await waitFor(h, id, "the rerun") { $0.status != .running && $0.nodes[NodeKey(node: "c")]?.state == .succeeded
+            && $0.nodes[NodeKey(node: "c")]?.output == "polished two" }
+        let polish = try #require(h.agent.requests.last { $0.prompt.contains("Polish") })
+        #expect(polish.prompt == "Polish draft two")
+        #expect(polish.resumeSessionID == "sp2")
+    }
+
+    @Test func continuerAfterALostSessionGetsNoNotice() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.hasPrefix("Write in") }, events: finished("s1", "draft"))
+        h.agent.script({ $0.prompt.contains("Polish") }, events: finished("s1", "polished"))
+        let id = try await h.engine.launch(flow: chainFlow(), location: h.repoLocation, values: ["repo": h.repo.url.path])
+        _ = await h.settled(id)
+        await h.engine.waitForPass(id)
+        let first = NodeKey(node: "first"), second = NodeKey(node: "second")
+        // The source's conversation is lost on its follow-up; its retry starts a new one the continuer was never in.
+        h.agent.script({ $0.prompt == "Redo" }, events: lostSession())
+        try await h.engine.followUp(id, node: first, message: "Redo")
+        await waitFor(h, id, "the loss") { $0.nodes[first]?.state.isFailed == true && $0.status != .running }
+        h.agent.script({ $0.prompt.hasSuffix("\n\nThe user's message about this step:\nRedo") }, events: finished("s9", "draft two"))
+        h.agent.script({ $0.prompt.contains("Polish") }, events: finished("s9", "polished two"))
+        try await h.engine.retry(id, node: first)
+        await waitFor(h, id, "the retry") { $0.status != .running && $0.nodes[second]?.output == "polished two" }
+        let polish = try #require(h.agent.requests.last { $0.prompt.contains("Polish") })
+        #expect(polish.prompt == "Polish draft two")
+        #expect(polish.resumeSessionID == "s9")
     }
 }

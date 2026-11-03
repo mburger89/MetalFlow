@@ -116,9 +116,10 @@ public struct NodeRun: Codable, Hashable, Sendable {
     /// Set while a Judge works on a follow-up: what the verdict was and what was asked, so a reply that carries no
     /// `RECOMMEND:` line is shown beside the verdict instead of replacing it. Cleared when the turn finishes.
     public var followUpBase: FollowUpBase?
-    /// Set when a step that continues an earlier step's session is reset to run again: its work is built on a conversation
-    /// that already had it. The next turn through the session says so; a clean finish clears it. Not written when false.
-    public var rerunsInSession: Bool = false
+    /// Set when a step that continues an earlier step's session is reset to run again: the session it already ran in. A
+    /// turn that resumes that same session is told it is a rerun; one in any other conversation is not. A clean finish
+    /// clears it. Not written when nil.
+    public var ranInSession: String?
     /// The message of a follow-up whose work is not committed yet. It labels that commit; it survives a failed turn and
     /// Retry, and is cleared once the commit has succeeded (a step outside the candidates: when the turn finishes).
     public var followUpMessage: String?
@@ -144,10 +145,10 @@ public struct NodeRun: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed, pendingFix
-        case replyInFlight, followUpBase, rerunsInSession, followUpMessage
+        case replyInFlight, followUpBase, ranInSession, followUpMessage
     }
 
-    /// Encodes a node run; `rerunsInSession` is left out while false.
+    /// Encodes a node run; `ranInSession` is left out while nil.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(state, forKey: .state)
@@ -163,7 +164,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
         try c.encodeIfPresent(pendingFix, forKey: .pendingFix)
         try c.encodeIfPresent(replyInFlight, forKey: .replyInFlight)
         try c.encodeIfPresent(followUpBase, forKey: .followUpBase)
-        if rerunsInSession { try c.encode(true, forKey: .rerunsInSession) }
+        try c.encodeIfPresent(ranInSession, forKey: .ranInSession)
         try c.encodeIfPresent(followUpMessage, forKey: .followUpMessage)
     }
 
@@ -183,7 +184,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
         pendingFix = try c.decodeIfPresent(PendingFix.self, forKey: .pendingFix)
         replyInFlight = try c.decodeIfPresent(String.self, forKey: .replyInFlight)
         followUpBase = try c.decodeIfPresent(FollowUpBase.self, forKey: .followUpBase)
-        rerunsInSession = try c.decodeIfPresent(Bool.self, forKey: .rerunsInSession) ?? false
+        ranInSession = try c.decodeIfPresent(String.self, forKey: .ranInSession)
         followUpMessage = try c.decodeIfPresent(String.self, forKey: .followUpMessage)
     }
 
