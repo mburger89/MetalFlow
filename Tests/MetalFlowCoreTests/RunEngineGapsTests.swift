@@ -482,4 +482,76 @@ import os
         let after = try #require(await h.engine.run(id))
         #expect(snapshot(after) == snapshot(run))
     }
+
+    // MARK: - 9. Discard waits for a suspended pass
+
+    /// Holds callers until opened, and does not notice cancellation while they wait, as a running git process does not.
+    private final class Gate: Sendable {
+        private struct State { var isOpen = false; var waiters: [CheckedContinuation<Void, Never>] = [] }
+        private let state = OSAllocatedUnfairLock(initialState: State())
+        private let entries = OSAllocatedUnfairLock(initialState: 0)
+        var entered: Int { entries.withLock { $0 } }
+        func wait() async {
+            entries.withLock { $0 += 1 }
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                let open = state.withLock { s -> Bool in
+                    if !s.isOpen { s.waiters.append(c) }
+                    return s.isOpen
+                }
+                if open { c.resume() }
+            }
+        }
+        func open() {
+            let waiting = state.withLock { s -> [CheckedContinuation<Void, Never>] in
+                s.isOpen = true
+                defer { s.waiters = [] }
+                return s.waiters
+            }
+            for c in waiting { c.resume() }
+        }
+    }
+
+    @Test func discardWaitsForASuspendedPass() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        // The follow-up's turn ends in a commit that stays stuck until released, and a stuck commit ignores cancellation.
+        let gate = Gate()
+        defer { gate.open() }
+        let real = ProcessRunner(resolver: ExecutableResolver(searchPath: ["/usr/bin", "/bin", "/opt/homebrew/bin", "/usr/local/bin"]))
+        h.hooks.override({ $0.executable == "git" && CommandHooks.gitArguments($0).first == "commit"
+            && $0.arguments.contains { $0.hasSuffix("/a") } }) { c in
+            await gate.wait()
+            return try await real.run(c)
+        }
+        h.agent.script({ $0.prompt == "Tweak" }, effect: writes("one.txt"), events: finished("s", "tweaked"))
+        try await h.engine.followUp(id, node: implementA, message: "Tweak")
+        await waitUntil("the commit to start") { gate.entered == 1 }
+
+        // Cancelling a followed-up run suspends it: saved cut short, the pass still stuck in its commit.
+        await h.engine.cancel(id)
+        #expect(await h.engine.suspended.contains(id))
+        #expect(await h.engine.run(id)?.status == .needsYou)
+        let passAlive = await h.engine.tasks[id] != nil
+
+        let done = OSAllocatedUnfairLock(initialState: false)
+        let discarding = Task {
+            defer { done.withLock { $0 = true } }
+            try await h.engine.discard(id)
+        }
+        // Give discard a bounded time to run ahead of the pass (a discard that does not wait finishes in far less); it must
+        // be stuck behind it.
+        let deadline = ContinuousClock.now + .seconds(1)
+        while ContinuousClock.now < deadline, !done.withLock({ $0 }) { await Task.yield() }
+        let early = done.withLock { $0 }
+        let before = await h.engine.run(id)?.status
+        gate.open()
+        try await discarding.value
+        #expect(passAlive, "the stopped pass is still stuck in its commit")
+        #expect(!early, "discard finished before the suspended pass ended")
+        #expect(before == .needsYou, "nothing discarded the run early")
+        await h.engine.waitForPass(id)
+        #expect(await h.engine.run(id)?.status == .discarded)
+        #expect(h.store.load(id)?.status == .discarded, "nothing overwrote it")
+        #expect(await h.engine.tasks[id] == nil)
+    }
 }
