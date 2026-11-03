@@ -265,4 +265,49 @@ private func wire(_ from: NodeID, _ to: NodeID, _ input: String = "in") -> Wire 
                         wires: [wire("f", "r")])
         #expect(flow.sessionSources(for: "r") == [])
     }
+
+    @Test func interruptedContinuerUsesItsTemplateOnTheSourcesSession() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.hasPrefix("Write in") }, events: [.started(sessionID: "s1"), .finished(result("s1", "draft"))])
+        h.agent.script({ $0.prompt.hasPrefix("Polish") }, events: [.started(sessionID: "s1"), .finished(result("s1", "polished"))])
+        let id = try await h.engine.launch(flow: chain(), location: h.repoLocation, values: ["repo": h.repo.url.path])
+        _ = await h.settled(id)
+        await h.engine.waitForPass(id)
+        // The continuer was cut short before its agent reported a session: it has none of its own to resume.
+        let key = NodeKey(node: "second")
+        await h.engine.setDirect(id) { run in
+            run.nodes[key] = NodeRun(state: .interrupted)
+            run.status = .needsYou
+        }
+        let before = h.agent.requests.count
+        try await h.engine.resumeInterrupted(id)
+        await waitUntil("the continuer to finish") { await h.engine.run(id)?.nodes[key]?.state == .succeeded }
+        await h.engine.waitForPass(id)
+        let sent = h.agent.requests.dropFirst(before)
+        #expect(sent.count == 1)
+        #expect(sent.first?.prompt == "Polish draft", "its own template, not \"Continue where you left off.\"")
+        #expect(sent.first?.resumeSessionID == "s1", "on the source's session")
+    }
+
+    @Test func gateFixWithAContinuerResumesTheContinuer() async throws {
+        let h = try Harness()
+        var flow = chain()
+        flow.nodes.append(Node(id: "check", title: "Check", kind: .gate(ShellConfig(command: "test -f ok.txt", fixAttempts: 1)),
+                               position: Point(x: 3, y: 0)))
+        flow.wires.append(Wire(from: "second", to: "check", input: "in"))
+        h.agent.script({ $0.prompt.hasPrefix("Write in") }, events: [.started(sessionID: "s1"), .finished(result("s1", "draft"))])
+        h.agent.script({ $0.prompt.hasPrefix("Polish") }, events: [.started(sessionID: "s2"), .finished(result("s2", "polished"))])
+        h.agent.script({ $0.prompt.contains("test -f ok.txt") }, effect: { r in
+            try "ok".write(to: r.workingDirectory.appendingPathComponent("ok.txt"), atomically: true, encoding: .utf8)
+        }, events: [.started(sessionID: "s2"), .finished(result("s2", "fixed"))])
+        let id = try await h.engine.launch(flow: flow, location: h.repoLocation, values: ["repo": h.repo.url.path])
+        let run = await h.settled(id)
+        await h.engine.waitForPass(id)
+        #expect(run.status == .completed)
+        let fix = try #require(h.agent.requests.first { $0.prompt.contains("test -f ok.txt") })
+        #expect(fix.resumeSessionID == "s2", "the continuer's own session, not the source's")
+        #expect(h.agent.requests.filter { $0.prompt.hasPrefix("Write in") }.count == 1)
+        #expect(h.agent.requests.filter { $0.prompt.hasPrefix("Polish") }.count == 1)
+        #expect(await h.engine.run(id)?.nodes[NodeKey(node: "check")]?.state == .succeeded)
+    }
 }

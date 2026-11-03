@@ -59,6 +59,6 @@ struct PaletteRow: Component {
                 .onEnded { draft.endPaletteDrag(entry, from: $0.startLocation, at: $0.location) }
                 .onCancelled { draft.cancelPaletteDrag() })
             .accessibilityIdentifier("palette.\(entry.idPrefix)")
-            .accessibilityAction { draft.add(entry) }
+            .accessibilityAction { draft.addFromPalette(entry) }
     }
 }

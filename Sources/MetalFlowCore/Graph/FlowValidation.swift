@@ -235,7 +235,7 @@ extension Flow {
             guard let n = node(id) else { continue }
             if case .review(let review) = n.kind, review.agent.continuesSessionOf != nil { throw .badSessionSource(id) }
             guard let source = n.continuesSessionOf else { continue }
-            if let problem = sessionSourceProblem(source, for: id, scoped: scoped) { throw problem }
+            if let problem = sessionSourceProblem(source, for: id, scoped: scoped, upstream: upstream(of: id)) { throw problem }
             if !continued.insert(source).inserted { throw .sessionContinuedTwice(id) }
         }
         return FlowPlan(order: order, fanOut: fanOut, laneScoped: scoped)
@@ -253,22 +253,29 @@ extension Flow {
         let plan = try? validate()
         let scoped = plan?.laneScoped ?? []
         let order = plan?.order ?? nodes.map(\.id)
+        let upstream = upstream(of: id)
         return order.filter { source in
-            sessionSourceProblem(source, for: id, scoped: scoped) == nil
+            sessionSourceProblem(source, for: id, scoped: scoped, upstream: upstream) == nil
                 && !nodes.contains { $0.id != id && $0.continuesSessionOf == source }
         }
     }
 
     /// The one rule for an eligible session source, shared by `validate` and `sessionSources`: a Prompt strictly
-    /// upstream of `id` that runs in the same worktree scope (`scoped` is the set of nodes that run once per candidate).
-    private func sessionSourceProblem(_ source: NodeID, for id: NodeID, scoped: Set<NodeID>) -> FlowError? {
+    /// upstream of `id` (`upstream` is every node that feeds it) that runs in the same worktree scope (`scoped` is the
+    /// set of nodes that run once per candidate).
+    private func sessionSourceProblem(_ source: NodeID, for id: NodeID, scoped: Set<NodeID>, upstream: Set<NodeID>) -> FlowError? {
         guard case .prompt? = node(source)?.kind else { return .badSessionSource(id) }
-        var parents: [NodeID: [NodeID]] = [:]
-        for w in wires { parents[w.to, default: []].append(w.from) }
-        var upstream = Set<NodeID>(), stack = parents[id] ?? []
-        while let n = stack.popLast() { if upstream.insert(n).inserted { stack += parents[n] ?? [] } }
         guard upstream.contains(source) else { return .badSessionSource(id) }
         return scoped.contains(source) == scoped.contains(id) ? nil : .sessionScopeMismatch(id)
+    }
+
+    /// Every node that feeds `id`, directly or through others.
+    private func upstream(of id: NodeID) -> Set<NodeID> {
+        var parents: [NodeID: [NodeID]] = [:]
+        for w in wires { parents[w.to, default: []].append(w.from) }
+        var result = Set<NodeID>(), stack = parents[id] ?? []
+        while let n = stack.popLast() { if result.insert(n).inserted { stack += parents[n] ?? [] } }
+        return result
     }
 
     private func topologicalOrder() throws(FlowError) -> [NodeID] {

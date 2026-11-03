@@ -85,9 +85,17 @@ extension FlowDraft {
     func endPaletteDrag(_ entry: PaletteEntry, from start: ScreenPoint, at point: ScreenPoint) -> AddedItem? {
         let dragged = paletteDrag?.entry == entry || Self.distance(start, point) >= Self.paletteDragThreshold
         paletteDrag = nil
-        guard dragged else { return add(entry) }
+        guard dragged else { return addFromPalette(entry) }
         guard let frame = canvasFrame, frame.contains(point) else { return nil }
+        paletteFilter = ""
         return add(entry, centredAt: ScreenPoint(x: point.x - frame.origin.x, y: point.y - frame.origin.y))
+    }
+
+    /// Adds `entry` at the canvas centre for a click on its palette row, and clears the Find filter like Return does.
+    @discardableResult
+    func addFromPalette(_ entry: PaletteEntry) -> AddedItem {
+        paletteFilter = ""
+        return add(entry)
     }
 
     /// The press on a palette row was dropped without a release: nothing is added, not even as a click.
@@ -174,10 +182,11 @@ extension FlowDraft {
         }
     }
 
-    /// Return in the Find field: adds the first match at the canvas centre, selects it and clears the filter. With no
-    /// match nothing happens.
+    /// Return in the Find field: adds the first match at the canvas centre, selects it and clears the filter. With nothing
+    /// typed, or no match, nothing happens.
     func addFirstPaletteMatch() {
-        guard let first = visiblePaletteGroups.first?.items.first else { return }
+        guard !paletteFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let first = visiblePaletteGroups.first?.items.first else { return }
         add(first)
         paletteFilter = ""
     }

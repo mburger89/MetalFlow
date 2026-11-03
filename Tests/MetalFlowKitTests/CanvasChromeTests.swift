@@ -102,7 +102,11 @@ import Testing
 
     @Test func escapeInFindClearsIt() async throws {
         let (_, draft, window) = try await fixture()
+        try window.click(window.element(identifier: "node.plan"))
+        try await window.runUntilIdle()
+        #expect(draft.selection == "plan")
         try await focusFind(window)
+        window.hover(at: try center(window, "node.gate"))
         window.typeText("gat")
         try await window.runUntilIdle()
         #expect(draft.paletteFilter == "gat")
@@ -110,6 +114,46 @@ import Testing
         try await window.runUntilIdle()
         #expect(draft.paletteFilter == "")
         #expect(try window.element(identifier: "palette.find").value == "")
+        #expect(draft.selection == "plan", "Esc went to the field, not the canvas")
+        #expect(draft.nodeSearch == nil)
+    }
+
+    @Test func returnOnAnEmptyFindAddsNothing() async throws {
+        let (_, draft, window) = try await fixture()
+        try await focusFind(window)
+        let before = draft.flow
+        window.typeKey(.return)
+        try await window.runUntilIdle()
+        #expect(draft.flow == before)
+        draft.addFirstPaletteMatch()
+        draft.paletteFilter = "   "
+        draft.addFirstPaletteMatch()
+        #expect(draft.flow == before, "spaces are not a search")
+        #expect(draft.paletteFilter == "   ")
+    }
+
+    @Test func aClickOnAFilteredRowClearsTheFilter() async throws {
+        let (_, draft, _) = try await fixture()
+        draft.paletteFilter = "gat"
+        let at = ScreenPoint(x: Pixels(10), y: Pixels(10))
+        let added = draft.endPaletteDrag(.node(.gate), from: at, at: at)
+        #expect(added != nil)
+        #expect(draft.paletteFilter == "")
+    }
+
+    @Test func aDropFromAFilteredRowClearsTheFilter() async throws {
+        let (_, draft, _) = try await fixture()
+        let frame = try #require(draft.canvasFrame)
+        let start = ScreenPoint(x: Pixels(5), y: Pixels(5))
+        let drop = ScreenPoint(x: frame.origin.x + frame.size.width / 2, y: frame.origin.y + frame.size.height / 2)
+        draft.paletteFilter = "gat"
+        #expect(draft.endPaletteDrag(.node(.gate), from: start, at: drop) != nil)
+        #expect(draft.paletteFilter == "")
+        // A drop off the canvas adds nothing and leaves the filter.
+        draft.paletteFilter = "gat"
+        let before = draft.flow
+        #expect(draft.endPaletteDrag(.node(.gate), from: start, at: ScreenPoint(x: Pixels(-50), y: Pixels(-50))) == nil)
+        #expect(draft.flow == before && draft.paletteFilter == "gat")
     }
 
     @Test func typingInFindStaysInTheField() async throws {
@@ -173,6 +217,26 @@ import Testing
         #expect(try percent(window) == "400%")
         #expect(try !window.element(identifier: "canvas.zoomIn").isEnabled)
         #expect(draft.geometry.zoom == 4)
+    }
+
+    @Test func zoomOutThenInRetracesTheSamePercentages() async throws {
+        let (_, draft, window) = try await fixture()
+        draft.geometry = CanvasGeometry(pan: ScreenPoint(x: Pixels(0), y: Pixels(0)), zoom: 1)
+        try await window.runUntilIdle()
+        var down: [String?] = [try percent(window)]
+        for _ in 0..<5 {
+            try window.click(window.element(identifier: "canvas.zoomOut"))
+            try await window.runUntilIdle()
+            down.append(try percent(window))
+        }
+        #expect(down == ["100%", "80%", "64%", "51%", "41%", "33%"])
+        var up: [String?] = [try percent(window)]
+        for _ in 0..<5 {
+            try window.click(window.element(identifier: "canvas.zoomIn"))
+            try await window.runUntilIdle()
+            up.append(try percent(window))
+        }
+        #expect(up == down.reversed(), "each step back shows the percentage the step down came from")
     }
 
     @Test func zoomIsNotAnEdit() async throws {
