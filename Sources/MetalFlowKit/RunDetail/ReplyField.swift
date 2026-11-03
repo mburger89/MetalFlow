@@ -7,6 +7,7 @@ struct ReplyField: Component {
     let placeholder: String
     let id: String
     let text: Binding<String>
+    var sending = false
     let send: () -> Void
 
     var content: some ElementGroup {
@@ -17,7 +18,7 @@ struct ReplyField: Component {
             Button("Send") { send() }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("\(id).send")
-                .disabled(AppModel.trimmed(text.wrappedValue).isEmpty)
+                .disabled(sending || AppModel.trimmed(text.wrappedValue).isEmpty)
         }
     }
 }

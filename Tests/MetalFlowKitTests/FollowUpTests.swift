@@ -67,17 +67,17 @@ import Testing
     }
 
     @Test func notOfferedWhileRunningElsewhere() async throws {
-        var run = seeded(status: .running)
-        run.status = .running
+        let run = seeded()
         let client = FakeEngineClient(restored: [run], repos: [URL(fileURLWithPath: "/repo")])
         await client.setElsewhere([run.id])
         let model = AppModel(client: client, notifier: NoopNotifier())
         let window = try appWindow(model: model)
         try await window.runUntilIdle()
         await model.waitUntilReady()
+        model.runningElsewhere.insert(run.id)
         model.open(run: run.id)
         try await window.runUntilIdle()
-        #expect(model.runningElsewhere.contains(run.id))
+        #expect(run.canFollowUp(implementA), "the engine rule alone would offer it")
         #expect((try? window.element(identifier: "detail.node.implement@a.followUp")) == nil)
     }
 
@@ -158,5 +158,76 @@ import Testing
         #expect(model.followUpDrafts[AppModel.draftKey(run.id, implementA)] == "later")
         try await press("detail.node.implement@a.followUp", in: window)
         #expect(try window.element(identifier: "\(id).field").value == "later")
+    }
+
+    @Test func textTypedWhileSendingSurvives() async throws {
+        let run = seeded()
+        let (model, client, window) = try await fixture(run)
+        let key = AppModel.draftKey(run.id, implementA)
+        await client.holdFollowUps()
+        model.toggleFollowUp(run: run.id, node: implementA)
+        model.followUpDrafts[key] = "first"
+        let task = Task { await model.sendFollowUp(run: run.id, node: implementA) }
+        try await window.runUntil { model.followUpSending.contains(key) }
+        model.followUpDrafts[key] = "second"
+        await client.releaseFollowUps()
+        #expect(await task.value)
+        #expect(model.followUpDrafts[key] == "second")
+        #expect(!model.followingUp.contains(key))
+        #expect(await client.calls.filter { $0.hasPrefix("followUp") } == ["followUp(implement@a, first)"])
+    }
+
+    @Test func unchangedDraftIsClearedAfterSending() async throws {
+        let run = seeded()
+        let (model, client, window) = try await fixture(run)
+        let key = AppModel.draftKey(run.id, implementA)
+        await client.holdFollowUps()
+        model.followUpDrafts[key] = "only"
+        let task = Task { await model.sendFollowUp(run: run.id, node: implementA) }
+        try await window.runUntil { model.followUpSending.contains(key) }
+        await client.releaseFollowUps()
+        #expect(await task.value)
+        #expect(model.followUpDrafts[key] == nil)
+    }
+
+    @Test func aSecondSendWhileInFlightDoesNothing() async throws {
+        let run = seeded()
+        let (model, client, window) = try await fixture(run)
+        let key = AppModel.draftKey(run.id, implementA)
+        let id = field(run, implementA)
+        await client.holdFollowUps()
+        model.toggleFollowUp(run: run.id, node: implementA)
+        model.followUpDrafts[key] = "go"
+        try await window.runUntilIdle()
+        let task = Task { await model.sendFollowUp(run: run.id, node: implementA) }
+        try await window.runUntil { model.followUpSending.contains(key) }
+        try await window.runUntilIdle()
+        #expect(try !window.element(identifier: "\(id).send").isEnabled)
+        let second = Task { await model.sendFollowUp(run: run.id, node: implementA) }
+        await client.releaseFollowUps()
+        #expect(await task.value)
+        #expect(await !second.value)
+        #expect(await client.calls.filter { $0.hasPrefix("followUp") }.count == 1)
+        #expect(model.followUpSending.isEmpty)
+    }
+
+    @Test func anOpenBoxClosesWhenTheStepStopsBeingFollowable() async throws {
+        let run = seeded()
+        let (model, _, window) = try await fixture(run)
+        let key = AppModel.draftKey(run.id, implementA)
+        model.toggleFollowUp(run: run.id, node: implementA)
+        model.followUpDrafts[key] = "keep"
+        var running = run
+        running.status = .running
+        running.revision += 1
+        model.apply(running)
+        #expect(!model.followingUp.contains(key))
+        var back = run
+        back.revision += 2
+        model.apply(back)
+        try await window.runUntilIdle()
+        #expect(!model.followingUp.contains(key), "it does not reopen by itself")
+        #expect((try? window.element(identifier: "\(field(run, implementA)).field")) == nil)
+        #expect(model.followUpDrafts[key] == "keep")
     }
 }

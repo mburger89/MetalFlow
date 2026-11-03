@@ -74,7 +74,18 @@ actor FakeEngineClient: EngineClient {
     func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
         try record("answer(\(node), \(reply), \(allowTools))")
     }
+    private var holdingFollowUps = false
+    private var heldFollowUps: [CheckedContinuation<Void, Never>] = []
+    /// Makes `followUp` suspend until `releaseFollowUps()`.
+    func holdFollowUps() { holdingFollowUps = true }
+    /// Resumes every suspended `followUp`.
+    func releaseFollowUps() {
+        holdingFollowUps = false
+        for c in heldFollowUps { c.resume() }
+        heldFollowUps = []
+    }
     func followUp(_ id: RunID, node: NodeKey, message: String) async throws {
+        if holdingFollowUps { await withCheckedContinuation { heldFollowUps.append($0) } }
         try record("followUp(\(node), \(message))")
     }
     func resumeInterrupted(_ id: RunID) async throws { try record("resume") }

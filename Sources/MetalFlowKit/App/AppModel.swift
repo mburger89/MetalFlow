@@ -146,6 +146,8 @@ public final class AppModel {
     public var followUpDrafts: [String: String] = [:]
     /// The steps whose follow-up box is open, keyed by `AppModel.draftKey(_:_:)`.
     public var followingUp: Set<String> = []
+    /// The steps whose follow-up is being sent, keyed like `followUpDrafts`. Send is refused and disabled meanwhile.
+    public internal(set) var followUpSending: Set<String> = []
     /// True while a launch from the launch bar is in flight.
     public internal(set) var isLaunching = false
     var addedRepos: [URL] = []
@@ -319,6 +321,10 @@ public final class AppModel {
         let old = runs[run.id]
         if let old, run.revision <= old.revision { return }
         runs[run.id] = run
+        // A box left open on a step that can no longer take a follow-up closes (its draft stays).
+        for key in run.nodes.keys where !run.canFollowUp(key) {
+            followingUp.remove(Self.draftKey(run.id, key))
+        }
         // An update means this app's engine is driving the run now.
         if !restoring && !fromElsewhere { runningElsewhere.remove(run.id) }
 
@@ -495,7 +501,9 @@ public final class AppModel {
         let key = Self.draftKey(id, node)
         let typed = followUpDrafts[key] ?? ""
         let message = Self.trimmed(typed)
-        guard !message.isEmpty else { return false }
+        guard !message.isEmpty, !followUpSending.contains(key) else { return false }
+        followUpSending.insert(key)
+        defer { followUpSending.remove(key) }
         guard await perform({ try await self.client.followUp(id, node: node, message: message) }) else { return false }
         if followUpDrafts[key] == typed { followUpDrafts[key] = nil }
         followingUp.remove(key)

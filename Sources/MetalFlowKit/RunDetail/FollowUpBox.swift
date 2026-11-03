@@ -18,7 +18,7 @@ struct FollowUpBox: Component {
                 text: Binding(
                     get: { model.followUpDrafts[draftKey] ?? "" },
                     set: { model.followUpDrafts[draftKey] = $0 }),
-                send: send)
+                sending: model.followUpSending.contains(draftKey), send: send)
             Text(verbatim: "The steps after this one run again.").font(size: 12).foregroundColor(Palette.muted)
                 .accessibilityIdentifier("\(id).hint")
         }
