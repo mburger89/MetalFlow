@@ -109,6 +109,15 @@ import MetalFlowCore
         #expect(full.positionals.dropFirst(2).joined(separator: " ") == "--allow more tests")
     }
 
+    @Test func followUpRejectsOptions() throws {
+        for options in [["--allow", "Edit"], ["--repo", "/r"], ["--flow", "f"], ["--set", "a=b"], ["--force"]] {
+            let a = try parseArguments(["id", "implement@a"] + options + ["more"])
+            #expect(usageMessage { try rejectOptions(a, for: "follow-up") } == "follow-up takes no options (use -- before a message that starts with --)")
+        }
+        let plain = try parseArguments(["id", "implement@a", "--", "--allow", "x"])
+        try rejectOptions(plain, for: "follow-up")
+    }
+
     @Test func parsesForceFlag() throws {
         #expect(try parseArguments(["--force", "--repo", "/r"]).force)
         #expect(try parseArguments([]).force == false)

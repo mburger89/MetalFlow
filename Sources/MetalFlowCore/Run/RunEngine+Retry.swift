@@ -87,7 +87,12 @@ extension RunEngine {
             }
             if reset({ if case .review = $0 { true } else { false } }) { run.lanes[index].reviewPassed = nil }
         }
-        run.recommendation = nil
+        // The recommendation is stale only when the judge runs again.
+        let judgeResets = (Array(keys) + [node]).contains { key in
+            if case .judge? = run.flow.node(key.node)?.kind { return true }
+            return false
+        }
+        if judgeResets { run.recommendation = nil }
         // A pick that is reset must be made again.
         if let pickNode = pickNodeKey(run), keys.contains(pickNode) { run.pickedLane = nil }
     }

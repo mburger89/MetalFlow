@@ -85,6 +85,7 @@ func run() async -> Int32 {
             return await follow(engine: engine, id: id, seed: seed)
 
         case "follow-up":
+            try rejectOptions(args, for: command)
             try requirePositionals(args, min: 3, name: command)
             let id = try parseRunID(args.positionals[0])
             guard let key = NodeKey(description: args.positionals[1]) else {

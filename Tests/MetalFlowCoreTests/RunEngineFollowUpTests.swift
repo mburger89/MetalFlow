@@ -27,9 +27,11 @@ import Testing
         return id
     }
 
-    private func waitFor(_ h: Harness, _ id: RunID, _ done: (Run) -> Bool) async -> Run {
-        for await r in h.engine.updates where r.id == id && done(r) { return r }
-        fatalError("updates ended")
+    /// Polls the engine's current run until `done` holds; records an issue (and returns the last state) on a timeout.
+    private func waitFor(_ h: Harness, _ id: RunID, _ what: String = "the run to reach the expected state",
+                         _ done: (Run) -> Bool) async -> Run {
+        await waitUntil(what) { await h.engine.run(id).map(done) ?? false }
+        return await h.engine.run(id)!
     }
 
     @Test func resumesTheSameSessionWithTheMessage() async throws {
@@ -146,11 +148,12 @@ import Testing
     @Test func refusedForNodesThatCannot() async throws {
         let h = try Harness()
         h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "c" },
-                       events: [.finished(AgentResult(sessionID: "sc", text: "boom", isError: true, deniedTools: [],
-                                                      costUSD: 0, turns: 1))])
+                       events: [.started(sessionID: "sc"), .finished(AgentResult(sessionID: "sc", text: "boom", isError: true,
+                                                                         deniedTools: [], costUSD: 0, turns: 1))])
         let id = try await atPick(h)
         let failed = NodeKey(node: "implement", lane: "c")
         #expect(await h.engine.run(id)?.nodes[failed]?.state == .failed("boom"))
+        #expect(await h.engine.run(id)?.nodes[failed]?.sessionID == "sc", "refused for being failed, not for lacking a session")
         let gate = NodeKey(node: "gate", lane: "a")
         let noSession = NodeKey(node: "plan")
         await h.engine.setDirect(id) { $0.nodes[noSession]?.sessionID = nil }
@@ -161,7 +164,7 @@ import Testing
             }
         }
         #expect(RunEngineError.notFollowable(gate).errorDescription
-            == "Only a finished Prompt or Judge step of an open run can take a follow-up.")
+            == "Only a finished Prompt or Judge step of an open run can take a follow-up, and not a step before the candidates split.")
     }
 
     @Test func refusesAReviewStep() async throws {
@@ -206,7 +209,111 @@ import Testing
         let engine = RunEngine(store: h.store, runner: runner, agent: h.agent, issues: GitHubIssues(runner: runner))
         _ = try await engine.restore()
         try await engine.resumeInterrupted(id)
-        for await r in engine.updates where r.id == id && r.status == .needsYou && r.recommendation == "b" { break }
+        await waitUntil("the resumed run to stop at the pick") {
+            await engine.run(id).map { $0.status == .needsYou && $0.recommendation == "b" } ?? false
+        }
+        let sent = h.agent.requests.dropFirst(before)
+        #expect(sent.contains { $0.prompt == "Do more" && $0.resumeSessionID != nil })
+        #expect(!sent.contains { $0.prompt == "Continue where you left off." })
+    }
+
+    @Test func refusedUpstreamOfCandidates() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let plan = NodeKey(node: "plan")
+        let run = try #require(await h.engine.run(id))
+        #expect(run.nodes[plan]?.state == .succeeded && run.nodes[plan]?.sessionID != nil)
+        #expect(run.status == .needsYou)
+        #expect(run.canFollowUp(implementA), "positive control")
+        #expect(run.canFollowUp(judge))
+        #expect(!run.canFollowUp(plan))
+        await #expect(throws: RunEngineError.notFollowable(plan)) {
+            try await h.engine.followUp(id, node: plan, message: "Rethink")
+        }
+        let after = try #require(await h.engine.run(id))
+        #expect(after.status == run.status && Self.shape(after) == Self.shape(run))
+        #expect(RunEngineError.notFollowable(plan).errorDescription
+            == "Only a finished Prompt or Judge step of an open run can take a follow-up, and not a step before the candidates split.")
+    }
+
+    @Test func aStepAfterTheJudgeKeepsTheRecommendation() async throws {
+        let h = try Harness()
+        var flow = h.flow()
+        // Before the pick in the plan, which stops the pass.
+        flow.nodes.insert(Node(id: "notes", title: "Notes", kind: .prompt(PromptConfig(
+            model: "sonnet", prompt: "Summarize {rec}", candidates: [], allowedTools: [], maxTurns: nil)),
+                               position: Point(x: 0, y: 0)), at: flow.nodes.firstIndex { $0.id == "pick" }!)
+        flow.wires.append(Wire(from: "judge", to: "notes", input: "rec"))
+        h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "summary"))
+        h.agent.script({ $0.prompt == "Shorter" }, events: finished("sn", "short"))
+        let id = try await h.engine.launch(flow: flow, location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
+        let notes = NodeKey(node: "notes")
+        _ = await waitFor(h, id) { $0.status == .needsYou && $0.nodes[notes]?.state == .succeeded }
+        await h.engine.waitForPass(id)
+        #expect(await h.engine.run(id)?.recommendation == "b")
+        let (hold, release) = AsyncStream<Void>.makeStream()
+        defer { release.finish() }
+        h.agent.script({ $0.prompt == "Shorter" }, hold: hold, events: finished("sn", "short"))
+        try await h.engine.followUp(id, node: notes, message: "Shorter")
+        let held = await waitFor(h, id, "notes running") { $0.nodes[notes]?.state == .running }
+        #expect(held.recommendation == "b")
+        #expect(held.nodes[judge]?.state == .succeeded)
+        release.finish()
+        let done = await waitFor(h, id, "notes done") { $0.status == .needsYou && $0.nodes[notes]?.output == "short" }
+        #expect(done.recommendation == "b")
+        #expect(done.nodes[NodeKey(node: "pick")]?.state == .needsYou(.pickWinner(recommended: "b", allGatesFailed: false)))
+        #expect(h.agent.requests.filter { $0.prompt.contains("judging candidate") }.count == 1)
+    }
+
+    @Test(arguments: [RunStatus.completed, .failed("boom")])
+    func acceptedFromAnOpenStatus(_ status: RunStatus) async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        await h.engine.setDirect(id) { $0.status = status }
+        #expect(await h.engine.run(id)?.canFollowUp(implementA) == true)
+        h.agent.script({ $0.prompt == "Again" }, events: finished("s", "again"))
+        try await h.engine.followUp(id, node: implementA, message: "Again")
+        let run = await waitFor(h, id) { $0.status == .needsYou && $0.recommendation == "b" }
+        #expect(run.nodes[implementA]?.output == "again")
+    }
+
+    @Test func anotherLanesQuestionSurvives() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.contains("Fix this GitHub issue") && $0.workingDirectory.lastPathComponent == "b" },
+                       events: finished("sb", "hmm\nQUESTION: Keep the API?"))
+        let id = try await h.engine.launch(flow: h.flow(), location: .builtin, values: ["issue": "7", "repo": h.repo.url.path])
+        _ = await waitFor(h, id) { $0.status == .needsYou && $0.nodes[NodeKey(node: "gate", lane: "a")]?.state == .succeeded
+            && $0.nodes[NodeKey(node: "gate", lane: "c")]?.state == .succeeded }
+        await h.engine.waitForPass(id)
+        let question = NodeState.needsYou(.question("Keep the API?"))
+        #expect(await h.engine.run(id)?.nodes[implementB]?.state == question)
+        h.agent.script({ $0.prompt == "Tweak" }, events: finished("s", "tweaked"))
+        try await h.engine.followUp(id, node: implementA, message: "Tweak")
+        let run = await waitFor(h, id) { $0.status == .needsYou && $0.nodes[self.implementA]?.output == "tweaked"
+            && $0.nodes[NodeKey(node: "gate", lane: "a")]?.state == .succeeded }
+        await h.engine.waitForPass(id)
+        #expect(run.nodes[implementB]?.state == question)
+        #expect(run.nodes[judge] == nil)
+        #expect(run.needsYou.count == 1)
+    }
+
+    @Test func survivesQuittingWhenInterruptedBeforeTheTurnStarted() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        h.agent.script({ $0.prompt == "Do more" }, events: finished("s", "did more"))
+        try await h.engine.followUpThenSuspend(id, node: implementA, message: "Do more")
+        await h.engine.waitForPass(id)
+        // The turn was running but the agent had not reported its session yet: the node is interrupted with the reply unsent.
+        await h.engine.setDirect(id) { $0.nodes[self.implementA]?.state = .interrupted }
+        let before = h.agent.requests.count
+
+        let runner = RoutingRunner(gh: h.gh)
+        let engine = RunEngine(store: h.store, runner: runner, agent: h.agent, issues: GitHubIssues(runner: runner))
+        _ = try await engine.restore()
+        try await engine.resumeInterrupted(id)
+        await waitUntil("the resumed run to stop at the pick") {
+            await engine.run(id).map { $0.status == .needsYou && $0.recommendation == "b" } ?? false
+        }
         let sent = h.agent.requests.dropFirst(before)
         #expect(sent.contains { $0.prompt == "Do more" && $0.resumeSessionID != nil })
         #expect(!sent.contains { $0.prompt == "Continue where you left off." })

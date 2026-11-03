@@ -56,7 +56,7 @@ extension RunEngineError: LocalizedError {
         case .runBusy(let id): return "run \(id.rawValue) is busy: running in another mflow, or still stopping"
         case .invalidBranchName(let name): return "'\(name)' is not a valid branch name"
         case .notRetryable(let key): return "\(key) cannot be retried: it has not failed, or the run is busy or over"
-        case .notFollowable: return "Only a finished Prompt or Judge step of an open run can take a follow-up."
+        case .notFollowable: return "Only a finished Prompt or Judge step of an open run can take a follow-up, and not a step before the candidates split."
         case .missingInput(let name): return "'\(name)' needs a value"
         case .repoMismatch(let expected): return "this flow always runs on \(expected.path)"
         case .launch(let error): return error.localizedDescription

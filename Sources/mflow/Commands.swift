@@ -84,6 +84,14 @@ func parseArguments(_ args: [String]) throws -> Arguments {
     return out
 }
 
+/// Throws a usage error when `command` (which takes none) was given an option, so an option never silently drops or
+/// changes what the command sends. `--` ends options, so a message may start with `--`.
+func rejectOptions(_ a: Arguments, for command: String) throws {
+    if a.repo != nil || a.flow != nil || !a.allow.isEmpty || a.force || !a.sets.isEmpty {
+        throw UsageError(message: "\(command) takes no options (use -- before a message that starts with --)")
+    }
+}
+
 /// Throws unless `init-flow` may write `file`: it must not exist, or `force` must be set.
 func checkInitFlowTarget(_ file: URL, force: Bool) throws {
     if !force, FileManager.default.fileExists(atPath: file.path) {

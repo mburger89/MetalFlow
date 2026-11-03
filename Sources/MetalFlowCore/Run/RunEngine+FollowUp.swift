@@ -1,7 +1,7 @@
 import Foundation
 
 extension Run {
-    /// Whether `key` can take a follow-up message: a finished Prompt or Judge step with a session, in a run that is
+    /// Whether `key` can take a follow-up message: a finished Prompt or Judge step with a session that is not before the candidates split, in a run that is
     /// waiting on the user, failed or completed. A Review is left out: a resumed turn sends only the message, so the
     /// reviewer would get no `VERDICT` instruction.
     public func canFollowUp(_ key: NodeKey) -> Bool {
@@ -15,6 +15,19 @@ extension Run {
         default: return false
         }
         guard let node = nodes[key], node.state == .succeeded, node.sessionID != nil else { return false }
+        // A step before the candidates split would reset every lane and restart them on worktrees that already hold
+        // the earlier attempt's commits.
+        guard let plan = try? flow.validate() else { return false }
+        if key.lane == nil {
+            var children: [NodeID: [NodeID]] = [:]
+            for w in flow.wires { children[w.from, default: []].append(w.to) }
+            var seen = Set<NodeID>()
+            var stack = [key.node]
+            while let n = stack.popLast() {
+                for c in children[n] ?? [] where seen.insert(c).inserted { stack.append(c) }
+            }
+            if !seen.isDisjoint(with: plan.laneScoped) { return false }
+        }
         return true
     }
 }
@@ -39,6 +52,11 @@ extension RunEngine {
         mutate(id) { run in
             resetForRerun(node, plan: plan, in: &run)
             run.nodes[node]?.pendingReply = reply
+            // A pick still waiting on the user would stop the pass before it reached a step that does not feed the
+            // pick; it asks again once the pass gets there.
+            if let pickNode = pickNodeKey(run), case .needsYou(.pickWinner)? = run.nodes[pickNode]?.state {
+                run.nodes[pickNode]?.state = .waiting
+            }
             run.status = .running
         }
         requestPass(id)
