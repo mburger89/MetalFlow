@@ -28,6 +28,9 @@ extension RunEngine {
             } ?? false
             resetForRerun(node, plan: plan, in: &run)
             run.pickToRestore = pickWasOffered && node.lane == nil ? node : nil
+            // The offered pick would stop the pass before a step that does not feed it: it asks again when the pass
+            // gets there (or is restored if the step fails again).
+            if pickWasOffered, node.lane == nil, let pickNode = pickNodeKey(run) { run.nodes[pickNode]?.state = .waiting }
             run.status = .running
         }
         requestPass(id)

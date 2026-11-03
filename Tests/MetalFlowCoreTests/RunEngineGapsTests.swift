@@ -59,13 +59,62 @@ import os
         #expect(run.pickToRestore == nil)
         #expect(run.nodes[judge]?.state == .succeeded)
 
-        // The failed step's Retry is accepted before the pick (it does not rerun the step while the pick is on offer:
-        // see the report), and the pick still works.
+        // The failed step's Retry reruns it, and the pick is offered when the pass reaches it.
+        h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "summary"))
         try await h.engine.retry(id, node: notes)
+        let retried = await waitFor(h, id, "the retry to finish") { self.pickIsOffered($0) && $0.nodes[self.notes]?.state == .succeeded }
         await h.engine.waitForPass(id)
-        let retried = try #require(await h.engine.run(id))
-        #expect(pickIsOffered(retried))
+        #expect(retried.nodes[notes]?.output == "summary")
         #expect(retried.pickToRestore == nil)
+        let result = try await h.engine.pick(id, lane: "b")
+        guard case .merged = result else { Issue.record("expected a merge, got \(result)"); return }
+    }
+
+    @Test func retryOfASiblingThatFailsAgainOffersThePickAgain() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "summary"))
+        let id = try await atPick(h, flow: notesFlow(h))
+        h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "limit", isError: true))
+        h.agent.script({ $0.prompt == "Explain" }, events: finished("sj", "Because.\nRECOMMEND: b"))
+        try await h.engine.followUp(id, node: judge, message: "Explain")
+        await waitFor(h, id, "the first failure") { self.pickIsOffered($0) && $0.nodes[self.notes]?.state.isFailed == true }
+        await h.engine.waitForPass(id)
+        let before = h.agent.requests.filter { $0.prompt.hasPrefix("Summarize") }.count
+
+        try await h.engine.retry(id, node: notes)
+        let again = await waitFor(h, id, "the second failure") { self.pickIsOffered($0) && $0.nodes[self.notes]?.state.isFailed == true
+            && h.agent.requests.filter { $0.prompt.hasPrefix("Summarize") }.count > before }
+        await h.engine.waitForPass(id)
+        #expect(again.pickToRestore == nil)
+        #expect(h.agent.requests.filter { $0.prompt.hasPrefix("Summarize") }.count == before + 1, "the step reran")
+        let result = try await h.engine.pick(id, lane: "b")
+        guard case .merged = result else { Issue.record("expected a merge, got \(result)"); return }
+    }
+
+    @Test func retryOfAFailedFollowUpSiblingSendsTheKeptMessageAndOffersThePickAgain() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "summary"))
+        let id = try await atPick(h, flow: notesFlow(h))
+        h.agent.script({ $0.prompt == "Shorter" }, events: finished("sn", "limit", isError: true))
+        try await h.engine.followUp(id, node: notes, message: "Shorter")
+        await waitFor(h, id, "the first failure") { self.pickIsOffered($0) && $0.nodes[self.notes]?.state.isFailed == true }
+        await h.engine.waitForPass(id)
+        let before = h.agent.requests.count
+
+        try await h.engine.retry(id, node: notes)
+        await waitFor(h, id, "the second failure") { self.pickIsOffered($0) && $0.nodes[self.notes]?.state.isFailed == true
+            && h.agent.requests.count > before }
+        await h.engine.waitForPass(id)
+        var sent = h.agent.requests.dropFirst(before).filter { $0.prompt == "Shorter" }
+        #expect(sent.count == 1 && sent.first?.resumeSessionID == "sn", "the kept message reached the agent")
+
+        h.agent.script({ $0.prompt == "Shorter" }, events: finished("sn", "short"))
+        let again = h.agent.requests.count
+        try await h.engine.retry(id, node: notes)
+        let run = await waitFor(h, id, "the success") { self.pickIsOffered($0) && $0.nodes[self.notes]?.state == .succeeded }
+        sent = h.agent.requests.dropFirst(again).filter { $0.prompt == "Shorter" }
+        #expect(sent.count == 1)
+        #expect(run.nodes[notes]?.output == "short")
         let result = try await h.engine.pick(id, lane: "b")
         guard case .merged = result else { Issue.record("expected a merge, got \(result)"); return }
     }
