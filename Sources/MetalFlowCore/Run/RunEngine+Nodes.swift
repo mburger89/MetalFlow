@@ -418,7 +418,9 @@ extension RunEngine {
             return
         }
         // Backstop: a gate outside the candidates that has not passed (say, one skipped after the pick) blocks the PR.
-        if let open = plan.order.first(where: { node in
+        // Only gates earlier in the plan count: one after Open PR cannot hold up a PR that runs before it.
+        let upToHere = plan.order.prefix { $0 != key.node }
+        if let open = upToHere.first(where: { node in
             guard case .gate? = run.flow.node(node)?.kind, !plan.laneScoped.contains(node) else { return false }
             return run.nodes[NodeKey(node: node)]?.state != .succeeded
         }) {

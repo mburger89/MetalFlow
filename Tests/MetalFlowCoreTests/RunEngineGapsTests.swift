@@ -1228,4 +1228,21 @@ import os
         #expect(done.nodes[t]?.output == "tee two")
         #expect(done.status == .prOpened("b", url: Self.prURL))
     }
+
+    @Test func gateAfterOpenPRDoesNotBlockIt() async throws {
+        let h = try Harness()
+        stubPR(h)
+        var flow = h.flow()
+        flow.nodes.append(Node(id: "openpr", title: "Open PR", kind: .openPR(OpenPRConfig(draft: true)),
+                               position: Point(x: 0, y: 0)))
+        flow.nodes.append(Node(id: "g", title: "G", kind: .gate(ShellConfig(command: "true", fixAttempts: 1)),
+                               position: Point(x: 0, y: 0)))
+        flow.wires += [Wire(from: "pick", to: "openpr", input: "approval"), Wire(from: "openpr", to: "g", input: "url")]
+        let id = try await atPick(h, flow: flow)
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        #expect(run.nodes[openPR]?.state == .succeeded)
+        #expect(h.hooks.gitCalls("push").count == 1)
+    }
 }
