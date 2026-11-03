@@ -834,4 +834,25 @@ import os
         let failed = await waitFor(h, id, "the loss") { $0.nodes[self.implementA]?.state.isFailed == true && $0.status != .running }
         #expect(failed.nodes[implementA]?.state == .failed(Self.lostMessage + "."), "the nudge is not a message")
     }
+
+    // MARK: - Fix round 7. The failure banner names the last failed step
+
+    @Test func openPRFailureAfterAPickPastAFailedStepNamesOpenPR() async throws {
+        let h = try Harness()
+        h.hooks.stubGit("push", exit: 1, stderr: "remote said no")
+        h.agent.script({ $0.prompt.hasPrefix("Zone") }, events: finished("sz", "zone"))
+        let id = try await atPick(h, flow: zFlow(h))
+        h.agent.script({ $0.prompt == "More" }, events: finished("sz", "limit", isError: true))
+        try await h.engine.followUp(id, node: NodeKey(node: "z1"), message: "More")
+        await waitFor(h, id, "the pick offered again") { self.pickIsOffered($0) && $0.nodes[NodeKey(node: "z1")]?.state.isFailed == true }
+        await h.engine.waitForPass(id)
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        guard case .failed(let openPRMessage)? = run.nodes[NodeKey(node: "openpr")]?.state else {
+            Issue.record("Open PR should have failed, got \(String(describing: run.nodes[NodeKey(node: "openpr")]?.state))"); return
+        }
+        #expect(openPRMessage != "limit")
+        #expect(run.status == .failed(openPRMessage), "the banner names Open PR, the last failed step")
+    }
 }

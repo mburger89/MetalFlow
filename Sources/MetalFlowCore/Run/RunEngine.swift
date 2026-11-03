@@ -459,8 +459,9 @@ public actor RunEngine {
             mutate(id) { $0.status = .needsYou }
             return
         }
-        for (key, node) in run.nodes where key.lane == nil {
-            if case .failed(let message) = node.state {
+        // The last failed step in flow order names the failure, not whichever the dictionary lists first.
+        for key in run.orderedNodeKeys.reversed() where key.lane == nil {
+            if case .failed(let message)? = run.nodes[key]?.state {
                 mutate(id) { $0.status = .failed(message) }
                 return
             }
