@@ -21,7 +21,8 @@ public struct RunSettings: Codable, Equatable, Sendable {
         self.init(maxSessions: try c.decodeIfPresent(Int.self, forKey: .maxSessions) ?? Self.defaultMaxSessions)
     }
 
-    static func clamped(_ n: Int) -> Int {
+    /// `n` held to `sessionRange`.
+    public static func clamped(_ n: Int) -> Int {
         min(max(n, sessionRange.lowerBound), sessionRange.upperBound)
     }
 }

@@ -143,7 +143,7 @@ struct SessionLimitControl: Component {
     var content: some ElementGroup {
         Stepper(
             "Sessions at once: \(model.maxSessions)",
-            value: Binding(get: { model.maxSessions }, set: { n in Task { await model.setMaxSessions(n) } }),
+            value: Binding(get: { model.maxSessions }, set: { model.changeMaxSessions($0) }),
             in: RunSettings.sessionRange
         )
         .foregroundColor(Palette.muted)

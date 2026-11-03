@@ -45,4 +45,38 @@ import Testing
         let (_, _, window) = try await fixture(limit: 5)
         _ = try window.element(identifier: "dashboard.maxSessions")
     }
+
+    @Test func rapidChangesEndOnTheLatestValue() async throws {
+        let (model, client, _) = try await fixture(limit: 4)
+        await client.holdFirstSetMax()
+        var starts = client.setMaxStarts.makeAsyncIterator()
+        model.changeMaxSessions(5)
+        #expect(await starts.next() == 5)
+        model.changeMaxSessions(6)
+        model.changeMaxSessions(7)
+        #expect(model.maxSessions == 7)
+        await client.releaseSetMax()
+        await model.waitForMaxSessionsSaved()
+        #expect(await client.setMaxCalls.last == 7)
+        #expect(await client.peakSetMax == 1)
+        #expect(model.maxSessions == 7)
+        #expect(client.limit.value == 7)
+        #expect(model.savedMaxSessions == 7)
+    }
+
+    @Test func failedOlderSaveDoesNotRevertANewerValue() async throws {
+        let (model, client, _) = try await fixture(limit: 4)
+        await client.holdFirstSetMax()
+        await client.setSetMaxFailures([true])
+        var starts = client.setMaxStarts.makeAsyncIterator()
+        model.changeMaxSessions(5)
+        #expect(await starts.next() == 5)
+        model.changeMaxSessions(6)
+        await client.releaseSetMax()
+        await model.waitForMaxSessionsSaved()
+        #expect(model.maxSessions == 6)
+        #expect(client.limit.value == 6)
+        #expect(model.savedMaxSessions == 6)
+        #expect(await client.setMaxCalls == [5, 6])
+    }
 }

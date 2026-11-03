@@ -24,6 +24,7 @@ actor FakeEngineClient: EngineClient {
 
     init(restored: [Run] = [], repos: [URL] = [], flowFiles: [URL] = [], gitRepoPaths: Set<String> = []) {
         self.restored = restored
+        (setMaxStarts, setMaxStartsContinuation) = AsyncStream.makeStream(of: Int.self, bufferingPolicy: .unbounded)
         self.repoList = URLList(repos)
         self.flowFiles = flowFiles
         self.gitRepoPaths = gitRepoPaths
@@ -125,8 +126,33 @@ actor FakeEngineClient: EngineClient {
     /// The saved session limit.
     nonisolated let limit = IntBox(4)
     nonisolated func maxSessions() -> Int { limit.value }
+    /// Every `setMaxSessions` call's value, in arrival order.
+    var setMaxCalls: [Int] = []
+    /// The most `setMaxSessions` calls that were ever in flight together.
+    var peakSetMax = 0
+    private var activeSetMax = 0
+    /// Calls start here as they arrive (their value).
+    nonisolated let setMaxStarts: AsyncStream<Int>
+    private let setMaxStartsContinuation: AsyncStream<Int>.Continuation
+    private var holdingFirstSetMax = false
+    private var heldSetMax: CheckedContinuation<Void, Never>?
+    /// Whether each upcoming `setMaxSessions` call throws, consumed one per call.
+    var setMaxFailures: [Bool] = []
+    /// Makes the first `setMaxSessions` call suspend until `releaseSetMax()`.
+    func holdFirstSetMax() { holdingFirstSetMax = true }
+    func releaseSetMax() { heldSetMax?.resume(); heldSetMax = nil; holdingFirstSetMax = false }
+    func setSetMaxFailures(_ failures: [Bool]) { setMaxFailures = failures }
     func setMaxSessions(_ max: Int) async throws {
-        try record("setMaxSessions(\(max))")
+        calls.append("setMaxSessions(\(max))")
+        setMaxCalls.append(max)
+        activeSetMax += 1
+        peakSetMax = Swift.max(peakSetMax, activeSetMax)
+        defer { activeSetMax -= 1 }
+        setMaxStartsContinuation.yield(max)
+        if holdingFirstSetMax, setMaxCalls.count == 1 { await withCheckedContinuation { heldSetMax = $0 } }
+        let fails = setMaxFailures.isEmpty ? false : setMaxFailures.removeFirst()
+        if let failure { throw failure }
+        if fails { throw FakeFailure() }
         limit.value = max
     }
     func addKnownRepo(_ url: URL) async throws {

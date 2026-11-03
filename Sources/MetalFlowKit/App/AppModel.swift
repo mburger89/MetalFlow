@@ -148,7 +148,11 @@ public final class AppModel {
     /// How many agent sessions may run at once. Changed through `setMaxSessions`.
     public private(set) var maxSessions = RunSettings.defaultMaxSessions
     /// The limit last saved, which `maxSessions` returns to when a save fails.
-    private var savedMaxSessions = RunSettings.defaultMaxSessions
+    private(set) var savedMaxSessions = RunSettings.defaultMaxSessions
+    /// The newest value asked for that no save has taken yet.
+    private var pendingMaxSessions: Int?
+    /// The running save loop; nil when idle.
+    private var maxSessionsSaves: Task<Void, Never>?
 
     /// What the last pick of each lane showed, per run. Cleared for a lane when it is picked again.
     public internal(set) var pickOutcomes: [RunID: [LaneID: PickOutcome]] = [:]
@@ -531,15 +535,38 @@ public final class AppModel {
         await perform { try await self.client.branchFromHere(id, lane: lane, name: name) }
     }
 
-    /// Saves a new session limit. It shows at once; if the save fails, a notice appears and the saved value returns.
-    public func setMaxSessions(_ max: Int) async {
-        let value = min(Swift.max(max, RunSettings.sessionRange.lowerBound), RunSettings.sessionRange.upperBound)
+    /// Shows a new session limit at once and saves it. One save runs at a time; while it runs, newer values replace
+    /// the pending one, so the latest value is the one that lands and in-between ones may be skipped. A failed save
+    /// shows a notice and, unless a newer value is pending, returns the display to the saved limit.
+    public func changeMaxSessions(_ value: Int) {
+        let value = RunSettings.clamped(value)
         maxSessions = value
-        if await perform({ try await self.client.setMaxSessions(value) }) {
-            savedMaxSessions = value
-        } else {
-            maxSessions = savedMaxSessions
+        pendingMaxSessions = value
+        if maxSessionsSaves == nil { maxSessionsSaves = Task { await self.saveMaxSessionsLoop() } }
+    }
+
+    /// `changeMaxSessions`, returning once every save it started has finished.
+    public func setMaxSessions(_ max: Int) async {
+        changeMaxSessions(max)
+        await waitForMaxSessionsSaved()
+    }
+
+    /// Returns once no save is running or pending.
+    func waitForMaxSessionsSaved() async {
+        while let saves = maxSessionsSaves { await saves.value }
+    }
+
+    private func saveMaxSessionsLoop() async {
+        while let value = pendingMaxSessions {
+            pendingMaxSessions = nil
+            if value == savedMaxSessions { continue }
+            if await perform({ try await self.client.setMaxSessions(value) }) {
+                savedMaxSessions = value
+            } else if pendingMaxSessions == nil {
+                maxSessions = savedMaxSessions
+            }
         }
+        maxSessionsSaves = nil
     }
 
     @discardableResult

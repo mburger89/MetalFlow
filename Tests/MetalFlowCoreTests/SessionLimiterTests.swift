@@ -131,6 +131,28 @@ extension SessionLimiterTests {
         try await c.value
     }
 
+    @Test func raisingMaxSkipsACancelledWaiter() async throws {
+        let (entries, cont) = AsyncStream<String>.makeStream()
+        let gates = Gates(entries: cont)
+        let limiter = SessionLimiter(max: 1)
+        var names = entries.makeAsyncIterator()
+        let a = holder("a", limiter, gates)
+        #expect(await names.next() == "a")
+        let b = holder("b", limiter, gates)
+        for _ in 0..<50 { await Task.yield() }
+        let c = holder("c", limiter, gates)
+        for _ in 0..<50 { await Task.yield() }
+        b.cancel()
+        await #expect(throws: CancellationError.self) { try await b.value }
+        await limiter.setMax(2)
+        #expect(await names.next() == "c")
+        #expect(await gates.entered == ["a", "c"])
+        await gates.release("a")
+        await gates.release("c")
+        try await a.value
+        try await c.value
+    }
+
     @Test func maxNeverDropsBelowOne() async {
         let limiter = SessionLimiter(max: 3)
         await limiter.setMax(0)
