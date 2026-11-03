@@ -913,4 +913,39 @@ import os
         #expect(run.nodes[NodeKey(node: "g")]?.state == .succeeded)
         #expect(run.status == .prOpened("b", url: Self.prURL))
     }
+
+    // MARK: - Fix round 8. A follow-up after the pick
+
+    @Test func followUpAfterThePickIsNotBlockedByAFailedStep() async throws {
+        let h = try Harness()
+        var flow = zFlow(h)
+        let openAt = flow.nodes.firstIndex { $0.id == "openpr" }!
+        flow.nodes.insert(prompt("t", "Tee {pick}"), at: openAt)
+        flow.wires += [Wire(from: "pick", to: "t", input: "pick"), Wire(from: "t", to: "openpr", input: "t")]
+        h.hooks.stubGit("push", exit: 1, stderr: "remote said no")
+        h.agent.script({ $0.prompt.hasPrefix("Zone") }, events: finished("sz", "zone"))
+        h.agent.script({ $0.prompt.hasPrefix("Tee") }, events: finished("st", "tee"))
+        let id = try await atPick(h, flow: flow)
+        h.agent.script({ $0.prompt == "More" }, events: finished("sz", "limit", isError: true))
+        try await h.engine.followUp(id, node: NodeKey(node: "z1"), message: "More")
+        await waitFor(h, id, "the pick offered again") { self.pickIsOffered($0) && $0.nodes[NodeKey(node: "z1")]?.state.isFailed == true }
+        await h.engine.waitForPass(id)
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let t = NodeKey(node: "t"), openPR = NodeKey(node: "openpr")
+        let failed = try #require(await h.engine.run(id))
+        #expect(failed.nodes[openPR]?.state.isFailed == true && failed.nodes[t]?.state == .succeeded)
+
+        h.hooks.stubGit("push")
+        h.gh.stub("gh", ["pr", "create"], result: CommandResult(exitCode: 0, stdout: Self.prURL + "\n", stderr: ""))
+        h.agent.script({ $0.prompt == "Again" }, events: finished("st", "tee two"))
+        try await h.engine.followUp(id, node: t, message: "Again")
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        #expect(h.agent.requests.contains { $0.prompt == "Again" && $0.resumeSessionID == "st" })
+        #expect(run.nodes[t]?.output == "tee two")
+        #expect(run.nodes[NodeKey(node: "z1")]?.state.isFailed == true, "Z1 was not retried")
+        #expect(run.nodes[openPR]?.state == .succeeded)
+        #expect(run.status == .prOpened("b", url: Self.prURL))
+    }
 }

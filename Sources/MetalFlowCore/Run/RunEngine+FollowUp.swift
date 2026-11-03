@@ -79,14 +79,16 @@ extension RunEngine {
         requestPass(id)
     }
 
-    /// Why a follow-up to the step outside the candidates `node` could not run, or nil. Its pass stops at a question or an
-    /// interrupted step before it, so the message would wait with the step unrun. Nodes the follow-up would reset do not
+    /// Why a follow-up to the step outside the candidates `node` could not run, or nil. Its pass stops at a question, an
+    /// interrupted step or (before the pick is made) a failed step before it, so the message would wait with the step unrun. Nodes the follow-up would reset do not
     /// count, and a candidate's follow-up is never blocked this way: its own lane runs anyway.
     func followUpBlocker(_ node: NodeKey, in run: Run, plan: FlowPlan) -> String? {
         guard node.lane == nil else { return nil }
         var scratch = run
         resetForRerun(node, plan: plan, in: &scratch)
         let target = plan.order.firstIndex(of: node.node) ?? Int.max
+        // Once the pick is made the pass goes past failed steps, so they no longer stop it.
+        let pickMade = pickNodeKey(scratch).map { scratch.nodes[$0]?.state == .succeeded } ?? false
         for key in scratch.orderedNodeKeys {
             guard let state = scratch.nodes[key]?.state else { continue }
             let title = scratch.flow.node(key.node)?.title ?? key.node.rawValue
@@ -95,8 +97,9 @@ extension RunEngine {
             switch state {
             case .needsYou(.question): return "Answer the question on \"\(title)\" first, then send this."
             case .interrupted: return "Resume \"\(title)\" first, then send this."
-            // A failed step ahead of the target stops the pass before it gets there; a failed candidate does not.
-            case .failed where key.lane == nil: return "Retry \"\(title)\" first, then send this."
+            // Until the pick is made a failed step ahead of the target stops the pass before it gets there; a failed
+            // candidate does not.
+            case .failed where key.lane == nil && !pickMade: return "Retry \"\(title)\" first, then send this."
             default: continue
             }
         }
