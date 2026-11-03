@@ -554,10 +554,37 @@ public actor RunEngine {
             return true
         case .needsYou where !isPick: return false
         case .interrupted: return false
+        case .waiting where skipsAfterPick(id, nodeID):
+            updateNode(id, key) { node in
+                let note = "Skipped: the pick was made without this step."
+                if !node.log.contains(note) { node.appendLog(note) }
+            }
+            return true
         default: break
         }
         await runNode(id, key, plan: plan)
         return nodeState(id, key) == .succeeded
+    }
+
+    /// True for a waiting step the pass leaves alone because the pick was made past a failed step: the pick has
+    /// succeeded with a chosen lane, and the step is not downstream of the pick but either feeds it or depends on a failed
+    /// step (it would run on blank input).
+    private func skipsAfterPick(_ id: RunID, _ nodeID: NodeID) -> Bool {
+        guard let run = runs[id], run.pickedLane != nil, let pickKey = pickNodeKey(run),
+              run.nodes[pickKey]?.state == .succeeded else { return false }
+        var children: [NodeID: [NodeID]] = [:], parents: [NodeID: [NodeID]] = [:]
+        for w in run.flow.wires {
+            children[w.from, default: []].append(w.to)
+            parents[w.to, default: []].append(w.from)
+        }
+        func reach(_ start: NodeID, _ edges: [NodeID: [NodeID]]) -> Set<NodeID> {
+            var seen = Set<NodeID>(), stack = [start]
+            while let n = stack.popLast() { for c in edges[n] ?? [] where seen.insert(c).inserted { stack.append(c) } }
+            return seen
+        }
+        if reach(pickKey.node, children).contains(nodeID) { return false }
+        if reach(nodeID, children).contains(pickKey.node) { return true }
+        return reach(nodeID, parents).contains { run.nodes[NodeKey(node: $0)]?.state.isFailed == true }
     }
 
     private func isOpenPR(_ flow: Flow, _ id: NodeID) -> Bool {

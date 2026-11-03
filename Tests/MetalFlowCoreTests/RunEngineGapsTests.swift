@@ -637,4 +637,65 @@ import os
         #expect(h.store.load(id)?.status == .discarded, "nothing overwrote it")
         #expect(await h.engine.tasks[id] == nil)
     }
+
+    // MARK: - Fix round 3. Picking past a failed step
+
+    private func prompt(_ id: String, _ text: String) -> Node {
+        Node(id: NodeID(rawValue: id), title: id.uppercased(), kind: .prompt(PromptConfig(
+            model: "sonnet", prompt: text, candidates: [], allowedTools: [], maxTurns: nil)), position: Point(x: 0, y: 0))
+    }
+
+    /// The harness flow with Z1 (fed by the plan) -> Z2 -> pick, an optional Z3 fed by Z1 only, and an Open PR after the pick.
+    private func zFlow(_ h: Harness, z3: Bool = false) -> Flow {
+        var flow = h.flow()
+        let at = flow.nodes.firstIndex { $0.id == "implement" }!
+        flow.nodes.insert(contentsOf: [prompt("z1", "Zone1 {plan}"), prompt("z2", "Zone2 {z1}")] + (z3 ? [prompt("z3", "Zone3 {z1}")] : []), at: at)
+        flow.wires += [Wire(from: "plan", to: "z1", input: "plan"), Wire(from: "z1", to: "z2", input: "z1"),
+                       Wire(from: "z2", to: "pick", input: "z2")]
+        if z3 { flow.wires.append(Wire(from: "z1", to: "z3", input: "z1")) }
+        flow.nodes.append(Node(id: "openpr", title: "Open PR", kind: .openPR(OpenPRConfig(draft: true)),
+                               position: Point(x: 0, y: 0)))
+        flow.wires.append(Wire(from: "pick", to: "openpr", input: "approval"))
+        return flow
+    }
+
+    private static let prURL = "https://github.com/acme/widgets/pull/12"
+
+    /// Runs the Z flow to the pick, follows up Z1 so it fails (the pick is offered again), and picks lane b.
+    private func pickedPastFailedZ1(_ h: Harness, z3: Bool) async throws -> (RunID, Run) {
+        h.hooks.stubGit("push")
+        h.gh.stub("gh", ["pr", "create"], result: CommandResult(exitCode: 0, stdout: Self.prURL + "\n", stderr: ""))
+        h.agent.script({ $0.prompt.hasPrefix("Zone") }, events: finished("sz", "zone"))
+        let id = try await atPick(h, flow: zFlow(h, z3: z3))
+        h.agent.script({ $0.prompt == "More" }, events: finished("sz", "limit", isError: true))
+        try await h.engine.followUp(id, node: NodeKey(node: "z1"), message: "More")
+        await waitFor(h, id, "the pick offered again") { self.pickIsOffered($0) && $0.nodes[NodeKey(node: "z1")]?.state.isFailed == true }
+        await h.engine.waitForPass(id)
+        #expect(await h.engine.run(id)?.nodes[NodeKey(node: "z2")]?.state == .waiting)
+        let result = try await h.engine.pick(id, lane: "b")
+        #expect(result == .handedToPullRequest)
+        await h.engine.waitUntilSettled(id)
+        return (id, try #require(await h.engine.run(id)))
+    }
+
+    @Test func pickPastAFailedStepSkipsWhatItFed() async throws {
+        let h = try Harness()
+        let (_, run) = try await pickedPastFailedZ1(h, z3: false)
+        // Z2 ran once, before the follow-up; never again with the failed step's missing output after the pick.
+        #expect(h.agent.requests.filter { $0.prompt.hasPrefix("Zone2") }.count == 1)
+        #expect(run.nodes[NodeKey(node: "z2")]?.state == .waiting)
+        #expect(run.nodes[NodeKey(node: "z2")]?.log.filter { $0 == "Skipped: the pick was made without this step." }.count == 1)
+        #expect(run.nodes[NodeKey(node: "z1")]?.state.isFailed == true)
+        #expect(run.status == .prOpened("b", url: Self.prURL))
+        #expect(run.nodes[NodeKey(node: "openpr")]?.state == .succeeded)
+    }
+
+    @Test func pickPastAFailedStepSkipsItsDependentSibling() async throws {
+        let h = try Harness()
+        let (_, run) = try await pickedPastFailedZ1(h, z3: true)
+        #expect(h.agent.requests.filter { $0.prompt.hasPrefix("Zone3") }.count == 1, "only the run before the follow-up")
+        #expect(run.nodes[NodeKey(node: "z3")]?.state == .waiting)
+        #expect(run.nodes[NodeKey(node: "z3")]?.log.contains("Skipped: the pick was made without this step.") == true)
+        #expect(run.status == .prOpened("b", url: Self.prURL))
+    }
 }
