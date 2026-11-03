@@ -558,6 +558,8 @@ public actor RunEngine {
         case .failed:
             // A step that failed a follow-up before the pick was made (the pick was offered again) must not stop the
             // pass that carries the pick on to Open PR.
+            // A failed gate always stops the pass: no pull request opens past it.
+            if case .gate? = run.flow.node(nodeID)?.kind { return false }
             guard let current = runs[id], current.pickedLane != nil, !isOpenPR(run.flow, nodeID),
                   let pickNode = pickNodeKey(current), current.nodes[pickNode]?.state == .succeeded else { return false }
             return true
@@ -579,7 +581,12 @@ public actor RunEngine {
     /// succeeded with a chosen lane, and the step is not downstream of the pick but depends on a failed step (it would
     /// run on blank input). A step that merely feeds the pick still runs: a gate's fix may have sent it back to work.
     private func skipsAfterPick(_ id: RunID, _ nodeID: NodeID) -> Bool {
-        guard let run = runs[id], run.pickedLane != nil, let pickKey = pickNodeKey(run),
+        guard let run = runs[id] else { return false }
+        return Self.skipsAfterPick(run, nodeID)
+    }
+
+    static func skipsAfterPick(_ run: Run, _ nodeID: NodeID) -> Bool {
+        guard run.pickedLane != nil, let pickKey = pickNodeKey(in: run),
               run.nodes[pickKey]?.state == .succeeded else { return false }
         var children: [NodeID: [NodeID]] = [:], parents: [NodeID: [NodeID]] = [:]
         for w in run.flow.wires {

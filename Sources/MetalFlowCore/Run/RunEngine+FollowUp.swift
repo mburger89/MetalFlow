@@ -100,9 +100,32 @@ extension RunEngine {
             // Until the pick is made a failed step ahead of the target stops the pass before it gets there; a failed
             // candidate does not.
             case .failed where key.lane == nil && !pickMade: return "Retry \"\(title)\" first, then send this."
+            // After the pick the pass goes past a failed step, but skips the target or a gate that depends on it.
+            case .failed where key.lane == nil && pickMade && Self.failedStepStrands(key.node, target: node.node, in: scratch):
+                return "Retry \"\(title)\" first, then send this."
             default: continue
             }
         }
         return nil
+    }
+
+    /// True when, with the pick made, the pass would skip the follow-up's target or a non-lane gate because `failed`
+    /// has failed.
+    private static func failedStepStrands(_ failed: NodeID, target: NodeID, in run: Run) -> Bool {
+        var parents: [NodeID: [NodeID]] = [:]
+        for w in run.flow.wires { parents[w.to, default: []].append(w.from) }
+        func dependsOnFailed(_ node: NodeID) -> Bool {
+            var seen = Set<NodeID>(), stack = [node]
+            while let n = stack.popLast() {
+                for p in parents[n] ?? [] where seen.insert(p).inserted { stack.append(p) }
+            }
+            return seen.contains(failed)
+        }
+        func isWaiting(_ n: NodeID) -> Bool { run.nodes[NodeKey(node: n)]?.state == .waiting }
+        if isWaiting(target), dependsOnFailed(target), skipsAfterPick(run, target) { return true }
+        return run.flow.nodes.contains { n in
+            guard case .gate = n.kind, isWaiting(n.id), dependsOnFailed(n.id) else { return false }
+            return skipsAfterPick(run, n.id)
+        }
     }
 }

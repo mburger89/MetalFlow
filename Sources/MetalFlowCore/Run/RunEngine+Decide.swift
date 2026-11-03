@@ -121,7 +121,9 @@ extension RunEngine {
         }.value
     }
 
-    func pickNodeKey(_ run: Run) -> NodeKey? {
+    func pickNodeKey(_ run: Run) -> NodeKey? { Self.pickNodeKey(in: run) }
+
+    static func pickNodeKey(in run: Run) -> NodeKey? {
         run.flow.nodes.first { if case .pick = $0.kind { return true } else { return false } }
             .map { NodeKey(node: $0.id) }
     }

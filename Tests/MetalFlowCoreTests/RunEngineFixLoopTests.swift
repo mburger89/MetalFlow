@@ -230,7 +230,7 @@ import os
         #expect(run.nodes[NodeKey(node: "pick")]?.state == .needsYou(.pickWinner(recommended: "b", allGatesFailed: true)))
     }
 
-    @Test func gateWithNoPromptUpstreamFinishesFailedLikeBefore() async throws {
+    @Test func gateWithNoPromptUpstreamFails() async throws {
         let h = try Harness()
         let flow = Flow(name: "plain", nodes: [
             Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 0)),
@@ -238,9 +238,9 @@ import os
         ], wires: [Wire(from: "repo", to: "gate", input: "repo")])
         let id = try await h.engine.launch(flow: flow, location: h.repoLocation, values: ["repo": h.repo.url.path])
         let run = try await finished(h, id)
-        #expect(run.status == .completed)
-        #expect(run.nodes[NodeKey(node: "gate")]?.state == .succeeded)
-        #expect(run.nodes[NodeKey(node: "gate")]?.output?.hasPrefix("exit 3") == true)
+        #expect(run.status == .failed("Gate failed: exit 3"))
+        #expect(run.nodes[NodeKey(node: "gate")]?.state == .failed("Gate failed: exit 3"))
+        #expect(run.nodes[NodeKey(node: "gate")]?.log.contains { $0.contains("exit 3") } == true)
         #expect(run.nodes[NodeKey(node: "gate")]?.fixAttemptsUsed == 0)
         #expect(h.agent.requests.isEmpty)
     }

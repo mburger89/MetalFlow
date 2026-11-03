@@ -1001,4 +1001,231 @@ import os
         #expect(run.nodes[pick]?.state == .needsYou(.pickWinner(recommended: "a", allGatesFailed: false)))
         #expect(run.nodes[judge]?.log.contains { $0.contains("which failed") } != true)
     }
+
+    // MARK: - Fix round 9. A pull request never opens past a failing gate
+
+    private let gateG = NodeKey(node: "g")
+    private let openPR = NodeKey(node: "openpr")
+
+    /// `gateAfterPickFlow` with the gate's command and attempts changed.
+    private func gateFlow(_ h: Harness, command: String, attempts: Int, viaShell: Bool = false) -> Flow {
+        var flow = gateAfterPickFlow(h, viaShell: viaShell)
+        let i = flow.nodes.firstIndex { $0.id == "g" }!
+        flow.nodes[i].kind = .gate(ShellConfig(command: command, fixAttempts: attempts))
+        return flow
+    }
+
+    private func stubPR(_ h: Harness) {
+        h.hooks.stubGit("push")
+        h.gh.stub("gh", ["pr", "create"], result: CommandResult(exitCode: 0, stdout: Self.prURL + "\n", stderr: ""))
+    }
+
+    private func noPullRequest(_ h: Harness) -> Bool {
+        h.hooks.gitCalls("push").isEmpty && h.gh.calls.allSatisfy { !$0.arguments.starts(with: ["pr", "create"]) }
+    }
+
+    @Test func gateOutOfFixesAfterThePickStopsBeforeOpenPR() async throws {
+        let h = try Harness()
+        stubPR(h)
+        h.agent.script({ $0.prompt.hasPrefix("Alpha") }, events: finished("sa", "alpha"))
+        h.agent.script({ $0.prompt.contains("test -f fixed.txt") }, events: finished("sa", "tried"))
+        let id = try await atPick(h, flow: gateFlow(h, command: "echo GATE-OUT; test -f fixed.txt", attempts: 1))
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        #expect(noPullRequest(h))
+        #expect(run.nodes[gateG]?.state == .failed("Gate failed: exit 1"))
+        #expect(run.nodes[gateG]?.fixAttemptsUsed == 1)
+        #expect((run.nodes[openPR]?.state ?? .waiting) == .waiting)
+        #expect(run.status == .failed("Gate failed: exit 1"))
+        #expect(run.nodes[gateG]?.log.contains { $0.contains("GATE-OUT") } == true)
+    }
+
+    @Test func retryOfAFailedGateThatNowPassesOpensThePR() async throws {
+        let h = try Harness()
+        stubPR(h)
+        h.agent.script({ $0.prompt.hasPrefix("Alpha") }, events: finished("sa", "alpha"))
+        h.agent.script({ $0.prompt.contains("test -f fixed.txt") }, events: finished("sa", "tried"))
+        let id = try await atPick(h, flow: gateFlow(h, command: "test -f fixed.txt", attempts: 1))
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let failed = try #require(await h.engine.run(id))
+        #expect(failed.nodes[gateG]?.state.isFailed == true && noPullRequest(h))
+        try "ok".write(to: failed.worktree.appendingPathComponent("fixed.txt"), atomically: true, encoding: .utf8)
+        try await h.engine.retry(id, node: gateG)
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        #expect(run.nodes[gateG]?.state == .succeeded)
+        #expect(run.nodes[openPR]?.state == .succeeded)
+        #expect(run.status == .prOpened("b", url: Self.prURL))
+    }
+
+    @Test func gateWithNothingToFixStopsBeforeOpenPR() async throws {
+        let h = try Harness()
+        stubPR(h)
+        var flow = gateAfterPickFlow(h)
+        // Only the judge feeds this gate, so there is no agent to send back.
+        flow.nodes.append(Node(id: "lone", title: "Lone", kind: .gate(ShellConfig(command: "exit 2", fixAttempts: 3)),
+                               position: Point(x: 0, y: 0)))
+        flow.wires += [Wire(from: "judge", to: "lone", input: "rec"), Wire(from: "lone", to: "openpr", input: "checked2")]
+        h.agent.script({ $0.prompt.hasPrefix("Alpha") }, events: finished("sa", "alpha"))
+        h.agent.script({ $0.prompt.contains("test -f fixed.txt") }, effect: { r in
+            try "ok".write(to: r.workingDirectory.appendingPathComponent("fixed.txt"), atomically: true, encoding: .utf8)
+        }, events: finished("sa", "fixed"))
+        let id = try await atPick(h, flow: flow)
+        if let offered = await h.engine.run(id), pickIsOffered(offered) { _ = try await h.engine.pick(id, lane: "b") }
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        #expect(noPullRequest(h))
+        #expect(run.nodes[NodeKey(node: "lone")]?.state == .failed("Gate failed: exit 2"))
+        #expect((run.nodes[openPR]?.state ?? .waiting) == .waiting)
+        #expect(run.status == .failed("Gate failed: exit 2"))
+    }
+
+    @Test func laneGateFailureStillLeavesTheCandidatePickable() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let run = try #require(await h.engine.run(id))
+        #expect(run.lanes.map(\.gatePassed) == [true, true, false])
+        #expect(pickIsOffered(run))
+        let result = try await h.engine.pick(id, lane: "c")
+        guard case .merged = result else { Issue.record("expected a merge, got \(result)"); return }
+    }
+
+    @Test func gateRunnerErrorAfterThePickStopsBeforeOpenPR() async throws {
+        let h = try Harness()
+        stubPR(h)
+        struct Boom: Error, LocalizedError { var errorDescription: String? { "runner broke" } }
+        h.hooks.override({ $0.executable == "/bin/sh" && $0.arguments.last == "true" }) { _ in throw Boom() }
+        h.agent.script({ $0.prompt.hasPrefix("Alpha") }, events: finished("sa", "alpha"))
+        let id = try await atPick(h, flow: gateFlow(h, command: "true", attempts: 1))
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        #expect(noPullRequest(h))
+        #expect(run.nodes[gateG]?.state == .failed("runner broke"))
+        #expect((run.nodes[openPR]?.state ?? .waiting) == .waiting)
+        #expect(run.status == .failed("runner broke"))
+    }
+
+    /// The gate flow where A, which feeds the pick and the gate, has its follow-up fail, so picking goes past A and the
+    /// gate is skipped.
+    private func pickedPastFailedAWithAGate(_ h: Harness, flow: Flow) async throws -> RunID {
+        stubPR(h)
+        h.agent.script({ $0.prompt.hasPrefix("Alpha") }, events: finished("sa", "alpha"))
+        let id = try await atPick(h, flow: flow)
+        h.agent.script({ $0.prompt == "More" }, events: finished("sa", "limit", isError: true))
+        try await h.engine.followUp(id, node: NodeKey(node: "a"), message: "More")
+        await waitFor(h, id, "the pick offered again") { self.pickIsOffered($0) && $0.nodes[NodeKey(node: "a")]?.state.isFailed == true }
+        await h.engine.waitForPass(id)
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        return id
+    }
+
+    @Test func gateSkippedAfterThePickStopsOpenPR() async throws {
+        let h = try Harness()
+        let id = try await pickedPastFailedAWithAGate(h, flow: gateFlow(h, command: "true", attempts: 1))
+        let run = try #require(await h.engine.run(id))
+        #expect(run.nodes[gateG]?.state == .waiting)
+        #expect(noPullRequest(h))
+        #expect(run.nodes[openPR]?.state == .failed("The gate \"G\" has not passed, so no pull request was opened."))
+        #expect(run.status == .failed("The gate \"G\" has not passed, so no pull request was opened."))
+    }
+
+    @Test func retryAfterAGateWasSkippedReachesThePR() async throws {
+        let h = try Harness()
+        let id = try await pickedPastFailedAWithAGate(h, flow: gateFlow(h, command: "true", attempts: 1))
+        #expect(await h.engine.run(id)?.nodes[openPR]?.state.isFailed == true)
+        h.agent.script({ $0.prompt == "More" }, events: finished("sa", "more"))
+        try await h.engine.retry(id, node: NodeKey(node: "a"))
+        await waitFor(h, id, "the pick offered again") { self.pickIsOffered($0) && $0.nodes[NodeKey(node: "a")]?.state == .succeeded }
+        await h.engine.waitForPass(id)
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        #expect(run.nodes[gateG]?.state == .succeeded)
+        #expect(run.status == .prOpened("b", url: Self.prURL))
+    }
+
+    // MARK: - Fix round 9. The follow-up blocker refuses what the pass would skip
+
+    /// The gate flow with T (fed by A, and by the pick when `afterPick`) feeding Open PR. The gate fails once and A's
+    /// fix turn errors, so after the pick A is failed and the gate waits. Returns the run in that state.
+    private func gateStrandedByFailedA(_ h: Harness, afterPick: Bool) async throws -> RunID {
+        stubPR(h)
+        var flow = gateFlow(h, command: "test -f fixed.txt", attempts: 1)
+        let at = flow.nodes.firstIndex { $0.id == "g" }!
+        flow.nodes.insert(prompt("t", "Tee {a}"), at: at)
+        flow.wires += [Wire(from: "a", to: "t", input: "a"), Wire(from: "t", to: "openpr", input: "t")]
+        if afterPick { flow.wires.append(Wire(from: "pick", to: "t", input: "pick")) }
+        h.agent.script({ $0.prompt.hasPrefix("Alpha") }, events: finished("sa", "alpha"))
+        h.agent.script({ $0.prompt.hasPrefix("Tee") }, events: finished("st", "tee"))
+        h.agent.script({ $0.prompt.contains("test -f fixed.txt") }, events: finished("sa", "limit", isError: true))
+        let id = try await atPick(h, flow: flow)
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        let run = try #require(await h.engine.run(id))
+        #expect(run.nodes[NodeKey(node: "a")]?.state.isFailed == true)
+        #expect(run.nodes[gateG]?.state == .waiting)
+        return id
+    }
+
+    @Test func followUpRefusedWhenItsOwnStepWouldBeSkipped() async throws {
+        let h = try Harness()
+        let id = try await gateStrandedByFailedA(h, afterPick: false)
+        let t = NodeKey(node: "t")
+        let run = try #require(await h.engine.run(id))
+        guard run.canFollowUp(t) else { Issue.record("T should be followable here: \(String(describing: run.nodes[t]))"); return }
+        await #expect(throws: RunEngineError.followUpBlocked("Retry \"A\" first, then send this.")) {
+            try await h.engine.followUp(id, node: t, message: "Again")
+        }
+        let after = try #require(await h.engine.run(id))
+        #expect(snapshot(after) == snapshot(run))
+        #expect(after.revision == run.revision)
+        #expect(h.agent.requests.allSatisfy { $0.prompt != "Again" })
+
+        h.agent.script({ $0.prompt.contains("test -f fixed.txt") }, effect: { r in
+            try "ok".write(to: r.workingDirectory.appendingPathComponent("fixed.txt"), atomically: true, encoding: .utf8)
+        }, events: finished("sa", "fixed"))
+        h.agent.script({ $0.prompt == "Again" }, events: finished("st", "tee two"))
+        try await h.engine.retry(id, node: NodeKey(node: "a"))
+        await waitFor(h, id, "the pick offered again") { self.pickIsOffered($0) && $0.nodes[t]?.state == .succeeded }
+        await h.engine.waitForPass(id)
+        try await h.engine.followUp(id, node: t, message: "Again")
+        await waitFor(h, id, "the follow-up") { self.pickIsOffered($0) && $0.nodes[t]?.output == "tee two" }
+        #expect(h.agent.requests.contains { $0.prompt == "Again" && $0.resumeSessionID == "st" })
+    }
+
+    @Test func followUpRefusedWhenAGateWouldBeSkipped() async throws {
+        let h = try Harness()
+        let id = try await gateStrandedByFailedA(h, afterPick: true)
+        let t = NodeKey(node: "t")
+        let run = try #require(await h.engine.run(id))
+        guard run.canFollowUp(t) else { Issue.record("T should be followable here: \(String(describing: run.nodes[t]))"); return }
+        await #expect(throws: RunEngineError.followUpBlocked("Retry \"A\" first, then send this.")) {
+            try await h.engine.followUp(id, node: t, message: "Again")
+        }
+        let after = try #require(await h.engine.run(id))
+        #expect(snapshot(after) == snapshot(run))
+        #expect(after.revision == run.revision)
+
+        // Retry A, pick again; Open PR's push fails so T is left finished and the run failed, where a follow-up works.
+        h.agent.script({ $0.prompt.contains("test -f fixed.txt") }, effect: { r in
+            try "ok".write(to: r.workingDirectory.appendingPathComponent("fixed.txt"), atomically: true, encoding: .utf8)
+        }, events: finished("sa", "fixed"))
+        h.hooks.stubGit("push", exit: 1, stderr: "remote said no")
+        try await h.engine.retry(id, node: NodeKey(node: "a"))
+        await waitFor(h, id, "the pick offered again") { self.pickIsOffered($0) }
+        await h.engine.waitForPass(id)
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        h.hooks.stubGit("push")
+        h.agent.script({ $0.prompt == "Again" }, events: finished("st", "tee two"))
+        try await h.engine.followUp(id, node: t, message: "Again")
+        await h.engine.waitUntilSettled(id)
+        let done = try #require(await h.engine.run(id))
+        #expect(done.nodes[t]?.output == "tee two")
+        #expect(done.status == .prOpened("b", url: Self.prURL))
+    }
 }

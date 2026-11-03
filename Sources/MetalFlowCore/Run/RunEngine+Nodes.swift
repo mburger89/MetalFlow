@@ -417,6 +417,15 @@ extension RunEngine {
             finish(id, key, .failed("No candidate was picked, so there is no branch to open a pull request for."))
             return
         }
+        // Backstop: a gate outside the candidates that has not passed (say, one skipped after the pick) blocks the PR.
+        if let open = plan.order.first(where: { node in
+            guard case .gate? = run.flow.node(node)?.kind, !plan.laneScoped.contains(node) else { return false }
+            return run.nodes[NodeKey(node: node)]?.state != .succeeded
+        }) {
+            let title = run.flow.node(open)?.title ?? open.rawValue
+            finish(id, key, .failed("The gate \"\(title)\" has not passed, so no pull request was opened."))
+            return
+        }
         func fail(_ error: Error) {
             finish(id, key, .failed(error is CancellationError ? "interrupted" : error.localizedDescription))
         }
@@ -514,6 +523,15 @@ extension RunEngine {
                     run.lanes[index].removed = stat.removed
                 }
             }
+        }
+        if isGate, lane == nil, !result.succeeded {
+            // A gate outside the candidates that no fix can help has not passed: the run stops here, and Retry reruns it.
+            updateNode(id, key) { node in
+                if !tail.isEmpty { node.appendLog(tail) }
+                node.appendLog("exit \(result.exitCode)")
+            }
+            finish(id, key, .failed("Gate failed: exit \(result.exitCode)"), output: "exit \(result.exitCode)\n" + tail)
+            return
         }
         finish(id, key, .succeeded, output: "exit \(result.exitCode)\n" + tail)
     }
