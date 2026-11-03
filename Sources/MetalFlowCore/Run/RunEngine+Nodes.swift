@@ -187,11 +187,18 @@ extension RunEngine {
         if let reply = current.pendingReply, let session = current.sessionID {
             request.prompt = reply
             request.resumeSessionID = session
-        } else if let source = config.continuesSessionOf, !isReview {
-            if let session = runs[id]?.nodes[NodeKey(node: source, lane: key.lane)]?.sessionID {
-                request.resumeSessionID = session
-            } else {
-                updateNode(id, key) { $0.appendLog("⚠ no session to continue; starting fresh") }
+        } else {
+            // A message with no session to resume goes along with the full prompt. The nudge that resumes an interrupted
+            // node is not one: a fresh start needs no telling to continue.
+            if let reply = current.pendingReply, reply != Self.continueNudge {
+                request.prompt += "\n\nThe user's message about this step:\n" + reply
+            }
+            if let source = config.continuesSessionOf, !isReview {
+                if let session = runs[id]?.nodes[NodeKey(node: source, lane: key.lane)]?.sessionID {
+                    request.resumeSessionID = session
+                } else {
+                    updateNode(id, key) { $0.appendLog("⚠ no session to continue; starting fresh") }
+                }
             }
         }
         let agent = self.agent
@@ -235,6 +242,16 @@ extension RunEngine {
             return
         }
         updateNode(id, key) { $0.costUSD += result.costUSD }
+        if result.sessionLost, let lost = finalRequest.resumeSessionID {
+            // A continuer shares its source's session, so every node holding it forgets it, or Retry would loop.
+            mutate(id) { run in
+                for k in run.nodes.keys where run.nodes[k]?.sessionID == lost { run.nodes[k]?.sessionID = nil }
+            }
+            keepReply(id, key)
+            let withMessage = runs[id]?.nodes[key]?.pendingReply != nil ? " and your message" : ""
+            finish(id, key, .failed("The agent's conversation can no longer be found. Retry starts this step again from its original prompt\(withMessage)."))
+            return
+        }
         if result.isError {
             keepReply(id, key)
             finish(id, key, .failed(result.text))

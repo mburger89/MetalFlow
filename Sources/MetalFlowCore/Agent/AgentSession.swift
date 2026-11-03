@@ -40,9 +40,14 @@ public struct AgentResult: Sendable, Equatable, Codable {
     public var costUSD: Double
     /// Number of turns in this invocation.
     public var turns: Int
+    /// True when the agent could not find the conversation it was asked to resume. It ran no turns and nothing of the
+    /// session is left to resume.
+    public var sessionLost: Bool
 
     /// Creates a result.
-    public init(sessionID: String, text: String, isError: Bool, deniedTools: [String], costUSD: Double, turns: Int) {
+    public init(sessionID: String, text: String, isError: Bool, deniedTools: [String], costUSD: Double, turns: Int,
+                sessionLost: Bool = false) {
+        self.sessionLost = sessionLost
         self.sessionID = sessionID
         self.text = text
         self.isError = isError
@@ -52,7 +57,19 @@ public struct AgentResult: Sendable, Equatable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sessionID, text, isError, deniedTools, costUSD, turns
+        case sessionID, text, isError, deniedTools, costUSD, turns, sessionLost
+    }
+
+    /// Decodes a result; one saved before `sessionLost` existed has no such key and means false.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sessionID = try c.decode(String.self, forKey: .sessionID)
+        text = try c.decode(String.self, forKey: .text)
+        isError = try c.decode(Bool.self, forKey: .isError)
+        deniedTools = try c.decode([String].self, forKey: .deniedTools)
+        costUSD = try c.decode(Double.self, forKey: .costUSD)
+        turns = try c.decode(Int.self, forKey: .turns)
+        sessionLost = try c.decodeIfPresent(Bool.self, forKey: .sessionLost) ?? false
     }
 
     /// The text after the last line starting with `QUESTION:` (trimmed), or nil when there is none.

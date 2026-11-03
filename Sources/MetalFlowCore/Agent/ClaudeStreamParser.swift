@@ -26,13 +26,20 @@ public struct ClaudeStreamParser {
             return content.compactMap(Self.event(forContent:))
         case "result":
             let denials = (object["permission_denials"] as? [[String: Any]] ?? []).compactMap { $0["tool_name"] as? String }
+            // A session that cannot be resumed prints a result with no `result` key, only `errors`.
+            let errors = (object["errors"] as? [Any] ?? []).compactMap { $0 as? String }
+            var text = object["result"] as? String ?? ""
+            if text.isEmpty, !errors.isEmpty { text = errors.joined(separator: "\n") }
+            let isError = object["is_error"] as? Bool ?? false
+            let turns = (object["num_turns"] as? NSNumber)?.intValue ?? 0
             let result = AgentResult(
                 sessionID: object["session_id"] as? String ?? "",
-                text: object["result"] as? String ?? "",
-                isError: object["is_error"] as? Bool ?? false,
+                text: text,
+                isError: isError,
                 deniedTools: denials,
                 costUSD: (object["total_cost_usd"] as? NSNumber)?.doubleValue ?? 0,
-                turns: (object["num_turns"] as? NSNumber)?.intValue ?? 0)
+                turns: turns,
+                sessionLost: isError && turns == 0 && errors.contains { $0.hasPrefix("No conversation found") })
             return [.finished(result)]
         default:
             return []

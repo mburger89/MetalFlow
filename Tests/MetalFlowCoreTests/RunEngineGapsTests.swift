@@ -150,4 +150,106 @@ import os
         await h.engine.waitForPass(id)
         #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
     }
+
+    // MARK: - 3. A lost session
+
+    /// repo -> first -> second, where second continues first.
+    private func chainFlow() -> Flow {
+        Flow(name: "chain", nodes: [
+            Node(id: "repo", title: "Repo", kind: .repo(RepoConfig(mode: .thisRepo)), position: Point(x: 0, y: 0)),
+            Node(id: "first", title: "First", kind: .prompt(PromptConfig(
+                model: "sonnet", prompt: "Write in {repo}", candidates: [], allowedTools: [], maxTurns: nil)),
+                 position: Point(x: 1, y: 0)),
+            Node(id: "second", title: "Second", kind: .prompt(PromptConfig(
+                model: "opus", prompt: "Polish {code}", candidates: [], allowedTools: [], maxTurns: nil,
+                continuesSessionOf: "first")), position: Point(x: 2, y: 0)),
+        ], wires: [Wire(from: "repo", to: "first", input: "repo"), Wire(from: "first", to: "second", input: "code")])
+    }
+
+    private static let lostText = "No conversation found with session ID: 00000000-0000-4000-8000-000000000000"
+    private func lostSession() -> [AgentEvent] {
+        // The real CLI prints no init event, so the turn never reports a session.
+        [.finished(AgentResult(sessionID: "00000000-0000-4000-8000-000000000000", text: Self.lostText, isError: true,
+                               deniedTools: [], costUSD: 0, turns: 0, sessionLost: true))]
+    }
+
+    private static let lostMessage = "The agent's conversation can no longer be found. Retry starts this step again from its original prompt"
+
+    @Test func lostSessionFailsReadablyThenRetriesFreshWithTheMessage() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let session = try #require(await h.engine.run(id)?.nodes[implementA]?.sessionID)
+        h.agent.script({ $0.prompt == "Tweak" }, events: lostSession())
+        try await h.engine.followUp(id, node: implementA, message: "Tweak")
+        let failed = await waitFor(h, id, "the turn to fail") { $0.nodes[self.implementA]?.state.isFailed == true
+            && $0.nodes[self.pick]?.state != .running }
+        await h.engine.waitForPass(id)
+        #expect(failed.nodes[implementA]?.state == .failed(Self.lostMessage + " and your message."))
+        #expect(failed.nodes[implementA]?.sessionID == nil)
+        #expect(failed.nodes[implementA]?.pendingReply == "Tweak")
+        #expect(!failed.canFollowUp(implementA))
+        #expect(session == "s")
+
+        h.agent.script({ $0.prompt.hasSuffix("\n\nThe user's message about this step:\nTweak") },
+                       events: finished("fresh", "tweaked"))
+        let before = h.agent.requests.count
+        try await h.engine.retry(id, node: implementA)
+        let run = await waitFor(h, id, "the retry to finish") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.state == .succeeded }
+        let sent = h.agent.requests.dropFirst(before).filter { $0.workingDirectory.lastPathComponent == "a" }
+        #expect(sent.count == 1)
+        #expect(sent.first?.resumeSessionID == nil)
+        #expect(sent.first?.prompt.contains("Fix this GitHub issue") == true)
+        #expect(sent.first?.prompt.hasSuffix("\n\nThe user's message about this step:\nTweak") == true)
+        #expect(run.nodes[implementA]?.sessionID == "fresh")
+        #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
+    }
+
+    @Test func lostSessionWithoutAMessageSaysNothingAboutOne() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.hasPrefix("Write in") }, events: finished("s1", "draft"))
+        h.agent.script({ $0.prompt.hasPrefix("Polish") }, events: lostSession())
+        let id = try await h.engine.launch(flow: chainFlow(), location: h.repoLocation, values: ["repo": h.repo.url.path])
+        let run = await h.settled(id)
+        #expect(run.nodes[NodeKey(node: "second")]?.state == .failed(Self.lostMessage + "."))
+        #expect(run.nodes[NodeKey(node: "first")]?.sessionID == nil && run.nodes[NodeKey(node: "second")]?.sessionID == nil)
+    }
+
+    @Test func otherErrorsKeepTheSession() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        h.agent.script({ $0.prompt == "Tweak" }, events: finished("s", "usage limit", isError: true))
+        try await h.engine.followUp(id, node: implementA, message: "Tweak")
+        let failed = await waitFor(h, id, "the turn to fail") { $0.nodes[self.implementA]?.state.isFailed == true
+            && $0.nodes[self.pick]?.state != .running }
+        await h.engine.waitForPass(id)
+        #expect(failed.nodes[implementA]?.state == .failed("usage limit"))
+        #expect(failed.nodes[implementA]?.sessionID == "s")
+        #expect(failed.nodes[implementA]?.pendingReply == "Tweak")
+    }
+
+    @Test func lostSessionOnAContinuerClearsBothAndRetryStartsFresh() async throws {
+        let h = try Harness()
+        let flow = chainFlow()
+        h.agent.script({ $0.prompt.hasPrefix("Write in") }, events: finished("s1", "draft"))
+        h.agent.script({ $0.prompt.hasPrefix("Polish") }, events: finished("s1", "polished"))
+        let id = try await h.engine.launch(flow: flow, location: h.repoLocation, values: ["repo": h.repo.url.path])
+        let done = await h.settled(id)
+        let first = NodeKey(node: "first"), second = NodeKey(node: "second")
+        #expect(done.nodes[first]?.sessionID == "s1" && done.nodes[second]?.sessionID == "s1")
+
+        h.agent.script({ $0.prompt == "Again" }, events: lostSession())
+        try await h.engine.followUp(id, node: second, message: "Again")
+        let failed = await waitFor(h, id, "the turn to fail") { $0.nodes[second]?.state.isFailed == true && $0.status != .running }
+        #expect(failed.nodes[second]?.state == .failed(Self.lostMessage + " and your message."))
+        #expect(failed.nodes[first]?.sessionID == nil && failed.nodes[second]?.sessionID == nil)
+
+        h.agent.script({ $0.prompt.hasPrefix("Polish") }, events: finished("fresh", "polished again"))
+        let before = h.agent.requests.count
+        try await h.engine.retry(id, node: second)
+        let run = await waitFor(h, id, "the retry to finish") { $0.nodes[second]?.state == .succeeded && $0.status != .running }
+        let sent = try #require(h.agent.requests.dropFirst(before).first)
+        #expect(sent.resumeSessionID == nil)
+        #expect(sent.prompt == "Polish draft\n\nThe user's message about this step:\nAgain")
+        #expect(run.nodes[second]?.sessionID == "fresh")
+    }
 }

@@ -39,6 +39,38 @@ func parseFixture(_ name: String) throws -> [AgentEvent] {
         #expect(r.sessionID == id)
     }
 
+    /// Measured with real `claude` on 2026-11-02: resuming an unknown session prints this one line and no `init` event.
+    @Test func lostSessionLineReadsAsALostSession() throws {
+        let line = #"{"type":"result","subtype":"error_during_execution","duration_ms":0,"duration_api_ms":0,"is_error":true,"num_turns":0,"stop_reason":null,"session_id":"00000000-0000-4000-8000-000000000000","total_cost_usd":0,"errors":["No conversation found with session ID: 00000000-0000-4000-8000-000000000000"],"result_index":0}"#
+        var parser = ClaudeStreamParser()
+        let events = try parser.parse(line: line)
+        guard events.count == 1, case .finished(let r) = events[0] else { Issue.record("expected one finished event"); return }
+        #expect(r.text == "No conversation found with session ID: 00000000-0000-4000-8000-000000000000")
+        #expect(r.isError)
+        #expect(r.sessionLost)
+    }
+
+    @Test func otherErrorsAreNotALostSession() throws {
+        var parser = ClaudeStreamParser()
+        let plain = try parser.parse(line: #"{"type":"result","is_error":true,"num_turns":0,"result":"boom","errors":["No conversation found"]}"#)
+        guard case .finished(let a)? = plain.first else { Issue.record("no result"); return }
+        #expect(a.text == "boom", "a result text wins over errors")
+        let turns = try parser.parse(line: #"{"type":"result","is_error":true,"num_turns":3,"errors":["No conversation found with session ID: x"]}"#)
+        guard case .finished(let b)? = turns.first else { Issue.record("no result"); return }
+        #expect(b.text == "No conversation found with session ID: x" && !b.sessionLost)
+        let other = try parser.parse(line: #"{"type":"result","is_error":true,"num_turns":0,"result":"","errors":["usage limit","second"]}"#)
+        guard case .finished(let c)? = other.first else { Issue.record("no result"); return }
+        #expect(c.text == "usage limit\nsecond" && !c.sessionLost)
+    }
+
+    @Test func resultsSavedWithoutSessionLostDecodeAsFalse() throws {
+        let old = #"{"sessionID":"s","text":"hi","isError":false,"deniedTools":[],"costUSD":0,"turns":1}"#
+        let r = try JSONDecoder().decode(AgentResult.self, from: Data(old.utf8))
+        #expect(!r.sessionLost)
+        let lost = AgentResult(sessionID: "s", text: "t", isError: true, deniedTools: [], costUSD: 0, turns: 0, sessionLost: true)
+        #expect(try JSONDecoder().decode(AgentResult.self, from: JSONEncoder().encode(lost)) == lost)
+    }
+
     @Test func questionLineIsExtracted() {
         func result(_ text: String) -> AgentResult {
             AgentResult(sessionID: "s", text: text, isError: false, deniedTools: [], costUSD: 0, turns: 1)

@@ -34,6 +34,9 @@ extension RunEngine {
         requestPass(id)
     }
 
+    /// What an interrupted node is told when it has no reply of its own to receive. It is not the user's words.
+    static let continueNudge = "Continue where you left off."
+
     /// Resumes every interrupted node with "Continue where you left off." (or the reply it was still to receive). A run that stopped between nodes (nothing
     /// interrupted, nothing waiting on you) simply continues. Throws `nothingToResume` when there is nothing to do.
     public func resumeInterrupted(_ id: RunID) throws {
@@ -55,7 +58,7 @@ extension RunEngine {
         }
         for key in keys {
             // A reply that never reached the agent (a fix turn cut short before it started) must not be lost.
-            let reply = run.nodes[key]?.pendingReply ?? "Continue where you left off."
+            let reply = run.nodes[key]?.pendingReply ?? Self.continueNudge
             try answer(id, node: key, reply: reply)
         }
     }
