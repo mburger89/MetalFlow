@@ -87,13 +87,18 @@ public struct PromptConfig: Codable, Hashable, Sendable {
     public var candidates: [String]
     public var allowedTools: [String]
     public var maxTurns: Int?
+    /// An earlier Prompt whose Claude session this step continues instead of starting its own; nil starts fresh.
+    /// A fan-out candidate continues the same candidate's session of the step it names.
+    public var continuesSessionOf: NodeID?
     /// Creates a prompt configuration.
-    public init(model: String, prompt: String, candidates: [String], allowedTools: [String], maxTurns: Int?) {
+    public init(model: String, prompt: String, candidates: [String], allowedTools: [String], maxTurns: Int?,
+                continuesSessionOf: NodeID? = nil) {
         self.model = model
         self.prompt = prompt
         self.candidates = candidates
         self.allowedTools = allowedTools
         self.maxTurns = maxTurns
+        self.continuesSessionOf = continuesSessionOf
     }
 }
 

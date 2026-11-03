@@ -34,6 +34,12 @@ public enum FlowError: Error, Equatable, Sendable {
     case reviewBeforeGate(NodeID)
     /// An agent step (a prompt) comes after the Review, so it would change code that was already approved.
     case agentAfterReview(NodeID)
+    /// A step continues the session of something that is not a Prompt upstream of it, or a Review continues one.
+    case badSessionSource(NodeID)
+    /// A step and the step it continues run in different worktrees (one in the candidates, one not).
+    case sessionScopeMismatch(NodeID)
+    /// A second step continues a session that another step already continues; this is the second.
+    case sessionContinuedTwice(NodeID)
 }
 
 extension FlowError: LocalizedError {
@@ -56,11 +62,20 @@ extension FlowError: LocalizedError {
         case .multipleReviews: return "A flow can have only one Review."
         case .reviewBeforeGate: return "A Review has to come after every gate, with no agent step between them."
         case .agentAfterReview: return "No agent step can come after a Review."
+        case .badSessionSource(let id): return FlowError.badSourceMessage(title: id.rawValue)
+        case .sessionScopeMismatch(let id): return FlowError.scopeMessage(title: id.rawValue)
+        case .sessionContinuedTwice: return "Only one step can continue a given session."
         }
     }
 }
 
 extension FlowError {
+    fileprivate static func badSourceMessage(title: String) -> String {
+        "\(title) can only continue the session of a Prompt that runs before it."
+    }
+    fileprivate static func scopeMessage(title: String) -> String {
+        "\(title) and the step it continues have to run in the same worktree: both candidates, or neither."
+    }
     fileprivate static func unboundMessage(title: String, name: String) -> String {
         "\(title): input {\(name)} has no value — wire it, give it a value, or expose it"
     }
@@ -74,6 +89,10 @@ extension Flow {
             return FlowError.unboundMessage(title: node(id)?.title ?? id.rawValue, name: name)
         case .inputBoundTwice(let id, let name):
             return "\(node(id)?.title ?? id.rawValue): input {\(name)} is both wired and set — choose one"
+        case .badSessionSource(let id):
+            return FlowError.badSourceMessage(title: node(id)?.title ?? id.rawValue)
+        case .sessionScopeMismatch(let id):
+            return FlowError.scopeMessage(title: node(id)?.title ?? id.rawValue)
         default:
             return error.errorDescription ?? "\(error)"
         }
@@ -91,6 +110,13 @@ public struct FlowPlan: Hashable, Sendable {
 }
 
 extension Node {
+    /// The step whose session this Prompt or Judge continues, if any.
+    fileprivate var continuesSessionOf: NodeID? {
+        switch kind {
+        case .prompt(let c), .judge(let c): return c.continuesSessionOf
+        default: return nil
+        }
+    }
     fileprivate var isFanOut: Bool {
         if case .prompt(let c) = kind { return c.candidates.count > 1 }
         return false
@@ -204,7 +230,45 @@ extension Flow {
                 descendants(of: review).contains(id) && { if case .prompt? = node(id)?.kind { true } else { false } }()
             }) { throw .agentAfterReview(agent) }
         }
+        var continued = Set<NodeID>()
+        for id in order {
+            guard let n = node(id) else { continue }
+            if case .review(let review) = n.kind, review.agent.continuesSessionOf != nil { throw .badSessionSource(id) }
+            guard let source = n.continuesSessionOf else { continue }
+            if let problem = sessionSourceProblem(source, for: id, scoped: scoped) { throw problem }
+            if !continued.insert(source).inserted { throw .sessionContinuedTwice(id) }
+        }
         return FlowPlan(order: order, fanOut: fanOut, laneScoped: scoped)
+    }
+
+    /// The Prompts whose session `id` could continue: upstream of it by wires, in the same worktree scope, and not
+    /// continued by any other step (the one `id` continues now stays listed). In plan order; empty for anything but
+    /// a Prompt or Judge. For a flow that does not validate every step counts as outside the candidates.
+    public func sessionSources(for id: NodeID) -> [NodeID] {
+        guard let n = node(id) else { return [] }
+        switch n.kind {
+        case .prompt, .judge: break
+        default: return []
+        }
+        let plan = try? validate()
+        let scoped = plan?.laneScoped ?? []
+        let order = plan?.order ?? nodes.map(\.id)
+        return order.filter { source in
+            sessionSourceProblem(source, for: id, scoped: scoped) == nil
+                && !nodes.contains { $0.id != id && $0.continuesSessionOf == source }
+        }
+    }
+
+    /// The one rule for an eligible session source, shared by `validate` and `sessionSources`: a Prompt strictly
+    /// upstream of `id` that runs in the same worktree scope (`scoped` is the set of nodes that run once per candidate).
+    private func sessionSourceProblem(_ source: NodeID, for id: NodeID, scoped: Set<NodeID>) -> FlowError? {
+        guard case .prompt? = node(source)?.kind else { return .badSessionSource(id) }
+        var parents: [NodeID: [NodeID]] = [:]
+        for w in wires { parents[w.to, default: []].append(w.from) }
+        var upstream = Set<NodeID>(), stack = parents[id] ?? []
+        while let n = stack.popLast() { if upstream.insert(n).inserted { stack += parents[n] ?? [] } }
+        guard upstream.contains(source) else { return .badSessionSource(id) }
+        return scoped.contains(source) == scoped.contains(id) ? nil : .sessionScopeMismatch(id)
     }
 
     private func topologicalOrder() throws(FlowError) -> [NodeID] {

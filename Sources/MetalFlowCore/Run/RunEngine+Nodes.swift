@@ -171,6 +171,8 @@ extension RunEngine {
             values["diff"] = diff
         }
         let current = runs[id]?.nodes[key] ?? NodeRun()
+        // A Review stays a fresh reader; validation refuses a flow that says otherwise.
+        let isReview = review != nil
 
         var request = AgentRequest(
             prompt: Template.fill(config.prompt, with: values) + instruction,
@@ -182,6 +184,12 @@ extension RunEngine {
         if let reply = current.pendingReply, let session = current.sessionID {
             request.prompt = reply
             request.resumeSessionID = session
+        } else if let source = config.continuesSessionOf, !isReview {
+            if let session = runs[id]?.nodes[NodeKey(node: source, lane: key.lane)]?.sessionID {
+                request.resumeSessionID = session
+            } else {
+                updateNode(id, key) { $0.appendLog("⚠ no session to continue; starting fresh") }
+            }
         }
         let agent = self.agent
         let finalRequest = request
