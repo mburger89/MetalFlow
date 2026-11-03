@@ -29,10 +29,12 @@ public enum RunEngineError: Error, Equatable {
     case invalidBranchName(String)
     /// The node has not failed, or the run is not in a state that can be retried.
     case notRetryable(NodeKey)
-    /// The node is not a finished Prompt or Judge step of an open run, or the message is empty.
+    /// The node is not a finished Prompt or Judge step of an open run.
     case notFollowable(NodeKey)
     /// The follow-up could not run yet: an earlier step is waiting on a question or was interrupted. The message says which.
     case followUpBlocked(String)
+    /// The follow-up message is empty once trimmed.
+    case emptyFollowUp
     /// The run was saved again since the caller last looked at it, so a choice made on what it showed may be wrong.
     case runChanged
     /// A launch field has no value and no default.
@@ -62,6 +64,7 @@ extension RunEngineError: LocalizedError {
         case .notRetryable(let key): return "\(key) cannot be retried: it has not failed, or the run is busy or over"
         case .notFollowable: return "Only a finished Prompt or Judge step of an open run can take a follow-up, and not a step before the candidates split."
         case .followUpBlocked(let message): return message
+        case .emptyFollowUp: return "Type a message to send."
         case .runChanged: return "This run changed since you last saw it. Look again before picking."
         case .missingInput(let name): return "'\(name)' needs a value"
         case .repoMismatch(let expected): return "this flow always runs on \(expected.path)"

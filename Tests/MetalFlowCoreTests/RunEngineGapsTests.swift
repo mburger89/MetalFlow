@@ -459,4 +459,27 @@ import os
             && $0.nodes[self.implementA]?.state == .succeeded }
         #expect(run.nodes[NodeKey(node: "implement", lane: "b")]?.state == .needsYou(.question("Keep?")))
     }
+
+    // MARK: - 7. An empty follow-up gets the right message
+
+    @Test func emptyFollowUpSaysSo() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let run = try #require(await h.engine.run(id))
+        await #expect(throws: RunEngineError.emptyFollowUp) {
+            try await h.engine.followUp(id, node: implementA, message: "  \n ")
+        }
+        // Ahead of the other refusals: a step that cannot take a follow-up still gets the empty-message answer.
+        await #expect(throws: RunEngineError.emptyFollowUp) {
+            try await h.engine.followUp(id, node: NodeKey(node: "plan"), message: "")
+        }
+        // But not ahead of the unknown-run check.
+        let missing = RunID()
+        await #expect(throws: RunEngineError.unknownRun(missing)) {
+            try await h.engine.followUp(missing, node: implementA, message: "")
+        }
+        #expect(RunEngineError.emptyFollowUp.errorDescription == "Type a message to send.")
+        let after = try #require(await h.engine.run(id))
+        #expect(snapshot(after) == snapshot(run))
+    }
 }

@@ -171,7 +171,7 @@ import Testing
         let h = try Harness()
         let id = try await atPick(h)
         let run = try #require(await h.engine.run(id))
-        await #expect(throws: RunEngineError.notFollowable(implementA)) {
+        await #expect(throws: RunEngineError.emptyFollowUp) {
             try await h.engine.followUp(id, node: implementA, message: " \n\t ")
         }
         let after = try #require(await h.engine.run(id))

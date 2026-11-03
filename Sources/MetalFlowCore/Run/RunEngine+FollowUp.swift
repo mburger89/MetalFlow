@@ -35,16 +35,16 @@ extension Run {
 extension RunEngine {
     /// Sends `message` to a finished Prompt or Judge step's agent session and re-runs everything downstream of it.
     ///
-    /// Allowed when `Run.canFollowUp(node)` and the message is not empty after trimming; otherwise throws
-    /// `notFollowable`. The step resumes its own session with the trimmed message as the prompt; its output, and
+    /// Throws `emptyFollowUp` when the message is empty after trimming, and `notFollowable` unless `Run.canFollowUp(node)`. The step resumes its own session with the trimmed message as the prompt; its output, and
     /// that of every later step (and the recommendation), is cleared the way `retry` clears them. This never picks
     /// or merges anything: the run stops at the pick again.
     public func followUp(_ id: RunID, node: NodeKey, message: String) throws {
         guard runs[id] != nil else { throw RunEngineError.unknownRun(id) }
+        let reply = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { throw RunEngineError.emptyFollowUp }
         try ensureLock(id)
         defer { releaseLockIfIdle(id) }
-        let reply = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let run = runs[id], !picking.contains(id), !deciding.contains(id), !reply.isEmpty,
+        guard let run = runs[id], !picking.contains(id), !deciding.contains(id),
               run.canFollowUp(node) else { throw RunEngineError.notFollowable(node) }
         guard let plan = try? run.flow.validate() else { throw RunEngineError.notFollowable(node) }
         if let blocked = followUpBlocker(node, in: run, plan: plan) { throw RunEngineError.followUpBlocked(blocked) }

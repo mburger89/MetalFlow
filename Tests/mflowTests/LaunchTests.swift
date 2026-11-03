@@ -231,6 +231,7 @@ private final class Scratch: Sendable {
         #expect(failureReport(CommandFailure(message: "bad")) == (1, "mflow: bad"))
         #expect(failureReport(RunEngineError.followUpBlocked("Resume \"Judge\" first, then send this."))
             == (1, "mflow: Resume \"Judge\" first, then send this."))
+        #expect(failureReport(RunEngineError.emptyFollowUp) == (1, "mflow: Type a message to send."))
         #expect(failureReport(Boom()) == (1, "mflow: not a repo"))
     }
 }
