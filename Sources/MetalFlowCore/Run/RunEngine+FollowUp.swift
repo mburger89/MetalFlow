@@ -95,6 +95,8 @@ extension RunEngine {
             switch state {
             case .needsYou(.question): return "Answer the question on \"\(title)\" first, then send this."
             case .interrupted: return "Resume \"\(title)\" first, then send this."
+            // A failed step ahead of the target stops the pass before it gets there; a failed candidate does not.
+            case .failed where key.lane == nil: return "Retry \"\(title)\" first, then send this."
             default: continue
             }
         }

@@ -486,6 +486,40 @@ import os
         #expect(snapshot(after) == snapshot(run))
     }
 
+    @Test func followUpRefusedBehindAnEarlierFailedStep() async throws {
+        let h = try Harness()
+        var flow = h.flow()
+        // A side step ahead of the candidates in plan order, fed by the plan; the judge comes after it.
+        flow.nodes.insert(Node(id: "side", title: "Side", kind: .prompt(PromptConfig(
+            model: "sonnet", prompt: "Side {plan}", candidates: [], allowedTools: [], maxTurns: nil)),
+                               position: Point(x: 0, y: 0)), at: flow.nodes.firstIndex { $0.id == "implement" }!)
+        flow.wires.append(Wire(from: "plan", to: "side", input: "plan"))
+        h.agent.script({ $0.prompt.hasPrefix("Side") }, events: finished("ss", "side done"))
+        let id = try await atPick(h, flow: flow)
+        let side = NodeKey(node: "side")
+        h.agent.script({ $0.prompt == "More" }, events: finished("ss", "limit", isError: true))
+        try await h.engine.followUp(id, node: side, message: "More")
+        await waitFor(h, id, "the failure") { self.pickIsOffered($0) && $0.nodes[side]?.state.isFailed == true }
+        await h.engine.waitForPass(id)
+        let run = try #require(await h.engine.run(id))
+
+        await #expect(throws: RunEngineError.followUpBlocked("Retry \"Side\" first, then send this.")) {
+            try await h.engine.followUp(id, node: judge, message: "Explain")
+        }
+        let after = try #require(await h.engine.run(id))
+        #expect(snapshot(after) == snapshot(run))
+        #expect(after.revision == run.revision)
+
+        h.agent.script({ $0.prompt == "More" }, events: finished("ss", "more"))
+        try await h.engine.retry(id, node: side)
+        await waitFor(h, id, "the retry") { self.pickIsOffered($0) && $0.nodes[side]?.state == .succeeded }
+        await h.engine.waitForPass(id)
+        h.agent.script({ $0.prompt == "Explain" }, events: finished("sj", "Because.\nRECOMMEND: b"))
+        try await h.engine.followUp(id, node: judge, message: "Explain")
+        let done = await waitFor(h, id, "the follow-up") { self.pickIsOffered($0) && $0.nodes[self.judge]?.output?.contains("Because.") == true }
+        #expect(done.nodes[judge]?.state == .succeeded)
+    }
+
     @Test func followUpAllowedWhenTheQuestionIsDownstream() async throws {
         let h = try Harness()
         h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "summary"))
