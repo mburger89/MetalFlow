@@ -183,12 +183,14 @@ extension FlowDraft {
     }
 
     /// Return in the Find field: adds the first match at the canvas centre, selects it and clears the filter. With nothing
-    /// typed, or no match, nothing happens.
-    func addFirstPaletteMatch() {
+    /// typed, or no match, nothing happens. Returns whether a node was added.
+    @discardableResult
+    func addFirstPaletteMatch() -> Bool {
         guard !paletteFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let first = visiblePaletteGroups.first?.items.first else { return }
+              let first = visiblePaletteGroups.first?.items.first else { return false }
         add(first)
         paletteFilter = ""
+        return true
     }
 
     /// Scales the view by `factor` about the canvas centre; nothing until the canvas is measured.

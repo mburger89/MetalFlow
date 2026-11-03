@@ -89,6 +89,31 @@ import Testing
         #expect(abs(r.x + r.w / 2 - want.x) <= 0.5 && abs(r.y + r.h / 2 - want.y) <= 0.5, "\(r) vs \(want)")
     }
 
+    @Test func returnInFindReleasesFocus() async throws {
+        let (_, draft, window) = try await fixture()
+        try await focusFind(window)
+        #expect(try window.focusedElement?.identifier == "palette.find")
+        window.typeText("jud")
+        try await window.runUntilIdle()
+        let before = draft.flow.nodes.count
+        window.typeKey(.return)
+        try await window.runUntilIdle()
+        #expect(draft.flow.nodes.count == before + 1)
+        #expect(try window.focusedElement?.identifier != "palette.find", "the canvas takes keys again")
+    }
+
+    @Test func returnWithNoMatchKeepsFocus() async throws {
+        let (_, draft, window) = try await fixture()
+        try await focusFind(window)
+        window.typeText("zzz")
+        try await window.runUntilIdle()
+        let before = draft.flow
+        window.typeKey(.return)
+        try await window.runUntilIdle()
+        #expect(draft.flow == before)
+        #expect(try window.focusedElement?.identifier == "palette.find")
+    }
+
     @Test func returnWithNoMatchAddsNothing() async throws {
         let (_, draft, window) = try await fixture()
         try await focusFind(window)

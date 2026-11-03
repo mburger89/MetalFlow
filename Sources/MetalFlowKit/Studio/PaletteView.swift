@@ -5,6 +5,7 @@ import MetalUI
 /// centred on the drop.
 struct PaletteView: Component {
     let draft: FlowDraft
+    @FocusState var focused: Bool
 
     var content: some ElementGroup {
         let draft = draft
@@ -12,7 +13,9 @@ struct PaletteView: Component {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             // Keys typed here stay in the field: it is focused, so the canvas's hover key region never sees them.
             TextField("Find a node", text: draft.paletteFilter, onChange: { draft.paletteFilter = $0 })
-                .onSubmit { draft.addFirstPaletteMatch() }
+                .focused($focused)
+                // Once a node is added the canvas takes keys again; with no match the field keeps them.
+                .onSubmit { if draft.addFirstPaletteMatch() { focused = false } }
                 .onKeyPress(.escape) {
                     draft.paletteFilter = ""
                     return .handled
