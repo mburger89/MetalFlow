@@ -91,9 +91,22 @@ import MetalFlowCore
     }
 
     @Test func usageTextListsEveryCommand() {
-        for c in ["init-flow", "launch", "list", "show", "answer", "resume", "pick", "discard", "branch"] {
+        for c in ["init-flow", "launch", "list", "show", "answer", "follow-up", "resume", "pick", "discard", "branch"] {
             #expect(usageText.contains("  \(c) "))
         }
+    }
+
+    @Test func followUpIsKnownAndNeedsAMessage() throws {
+        #expect(knownCommands.contains("follow-up"))
+        #expect(commandLineProblem(["follow-up"]) == nil)
+        #expect(usageText.contains("  follow-up <id> <nodeKey> [--] <message...>"))
+        // Too few words is a usage error (exit 64); everything after `--` is the message, flags included.
+        let few = try parseArguments(["id", "implement@a"])
+        let error = #expect(throws: UsageError.self) { try requirePositionals(few, min: 3, name: "follow-up") }
+        #expect(error.map { failureReport($0).code } == 64)
+        let full = try parseArguments(["id", "implement@a", "--", "--allow", "more", "tests"])
+        try requirePositionals(full, min: 3, name: "follow-up")
+        #expect(full.positionals.dropFirst(2).joined(separator: " ") == "--allow more tests")
     }
 
     @Test func parsesForceFlag() throws {

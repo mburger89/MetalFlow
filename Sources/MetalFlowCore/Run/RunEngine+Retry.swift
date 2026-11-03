@@ -21,6 +21,16 @@ extension RunEngine {
         guard let plan = try? run.flow.validate() else { throw RunEngineError.notRetryable(node) }
         try clearSuspension(id)
 
+        mutate(id) { run in
+            resetForRerun(node, plan: plan, in: &run)
+            run.status = .running
+        }
+        requestPass(id)
+    }
+
+    /// Sends `node` and everything downstream of it back to `.waiting` with outputs cleared (see `retry`). The node keeps its
+    /// `sessionID` and `pendingReply`; the run's status is left to the caller.
+    func resetForRerun(_ node: NodeKey, plan: FlowPlan, in run: inout Run) {
         var children: [NodeID: [NodeID]] = [:]
         for w in run.flow.wires { children[w.from, default: []].append(w.to) }
         var downstream = Set<NodeID>()
@@ -49,41 +59,37 @@ extension RunEngine {
         }
         keys.remove(node)
 
-        mutate(id) { run in
-            if var retried = run.nodes[node] {
-                retried.state = .waiting
-                retried.output = nil
-                retried.startedAt = nil
-                retried.endedAt = nil
-                retried.fixAttemptsUsed = 0
-                run.nodes[node] = retried
-            }
-            for key in keys where run.nodes[key] != nil {
-                let old = run.nodes[key]
-                run.nodes[key] = NodeRun(extraAllowedTools: old?.extraAllowedTools ?? [], costUSD: old?.costUSD ?? 0)
-            }
-            let resetLanes = Set(keys.compactMap(\.lane) + (node.lane.map { [$0] } ?? []))
-            for index in run.lanes.indices where resetLanes.contains(run.lanes[index].id) {
-                // A reset gate re-measures the lane and a reset review has no verdict; ones that did not reset keep theirs.
-                func reset(_ isKind: (NodeKind) -> Bool) -> Bool {
-                    (Array(keys) + [node]).contains { key in
-                        guard key.lane == run.lanes[index].id, let kind = run.flow.node(key.node)?.kind else { return false }
-                        return isKind(kind)
-                    }
-                }
-                if reset({ if case .gate = $0 { true } else { false } }) {
-                    run.lanes[index].gatePassed = nil
-                    run.lanes[index].added = 0
-                    run.lanes[index].removed = 0
-                }
-                if reset({ if case .review = $0 { true } else { false } }) { run.lanes[index].reviewPassed = nil }
-            }
-            run.recommendation = nil
-            // A pick that is reset must be made again.
-            if let pickNode = pickNodeKey(run), keys.contains(pickNode) { run.pickedLane = nil }
-            run.status = .running
+        if var retried = run.nodes[node] {
+            retried.state = .waiting
+            retried.output = nil
+            retried.startedAt = nil
+            retried.endedAt = nil
+            retried.fixAttemptsUsed = 0
+            run.nodes[node] = retried
         }
-        requestPass(id)
+        for key in keys where run.nodes[key] != nil {
+            let old = run.nodes[key]
+            run.nodes[key] = NodeRun(extraAllowedTools: old?.extraAllowedTools ?? [], costUSD: old?.costUSD ?? 0)
+        }
+        let resetLanes = Set(keys.compactMap(\.lane) + (node.lane.map { [$0] } ?? []))
+        for index in run.lanes.indices where resetLanes.contains(run.lanes[index].id) {
+            // A reset gate re-measures the lane and a reset review has no verdict; ones that did not reset keep theirs.
+            func reset(_ isKind: (NodeKind) -> Bool) -> Bool {
+                (Array(keys) + [node]).contains { key in
+                    guard key.lane == run.lanes[index].id, let kind = run.flow.node(key.node)?.kind else { return false }
+                    return isKind(kind)
+                }
+            }
+            if reset({ if case .gate = $0 { true } else { false } }) {
+                run.lanes[index].gatePassed = nil
+                run.lanes[index].added = 0
+                run.lanes[index].removed = 0
+            }
+            if reset({ if case .review = $0 { true } else { false } }) { run.lanes[index].reviewPassed = nil }
+        }
+        run.recommendation = nil
+        // A pick that is reset must be made again.
+        if let pickNode = pickNodeKey(run), keys.contains(pickNode) { run.pickedLane = nil }
     }
 
     /// The `.flow` files in `<repo>/.flows`, sorted by file name; empty when the folder is missing.

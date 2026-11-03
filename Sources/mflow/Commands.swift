@@ -13,6 +13,7 @@ commands:
   show <id>                                       nodes, needs-you items, lanes, recommendation
   answer <id> <nodeKey> [--] <reply...> [--allow Tool]
                                                   answer a paused node (-- ends options) and follow the run
+  follow-up <id> <nodeKey> [--] <message...>      send a message to a finished Prompt or Judge step and follow the run
   resume <id>                                     resume interrupted nodes and follow the run
   pick <id> <lane>                                merge a candidate into the base branch; when the flow has an Open PR
                                                   node, push it and open a pull request instead, follow the run and
@@ -20,7 +21,7 @@ commands:
   discard <id>                                    throw the run away
   branch <id> <lane> <name>                       keep a candidate as a local branch
 
-Runs execute only while an mflow command is running: launch, answer and resume
+Runs execute only while an mflow command is running: launch, answer, follow-up and resume
 stay alive until the run settles (needs you, completed, failed or cancelled).
 Press Ctrl-C (or send SIGTERM/SIGHUP) to cancel a running run (exit 130). pick, discard and branch
 ignore these signals until they finish.
@@ -97,7 +98,7 @@ func requirePositionals(_ a: Arguments, min: Int, max: Int? = nil, name: String)
 }
 
 /// The commands `run()` dispatches.
-let knownCommands: Set<String> = ["init-flow", "launch", "list", "show", "answer", "resume", "pick", "discard", "branch"]
+let knownCommands: Set<String> = ["init-flow", "launch", "list", "show", "answer", "follow-up", "resume", "pick", "discard", "branch"]
 
 /// The stderr text for a missing or unknown command (exit 64), or nil when `argv` names a known one.
 func commandLineProblem(_ argv: [String]) -> String? {

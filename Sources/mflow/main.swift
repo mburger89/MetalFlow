@@ -84,6 +84,16 @@ func run() async -> Int32 {
                                     allowTools: args.allow)
             return await follow(engine: engine, id: id, seed: seed)
 
+        case "follow-up":
+            try requirePositionals(args, min: 3, name: command)
+            let id = try parseRunID(args.positionals[0])
+            guard let key = NodeKey(description: args.positionals[1]) else {
+                throw CommandFailure(message: "'\(args.positionals[1])' is not a node key (use node or node@lane)")
+            }
+            let seed = await engine.run(id)
+            try await engine.followUp(id, node: key, message: args.positionals.dropFirst(2).joined(separator: " "))
+            return await follow(engine: engine, id: id, seed: seed)
+
         case "resume":
             try requirePositionals(args, min: 1, max: 1, name: command)
             let id = try parseRunID(args.positionals[0])
