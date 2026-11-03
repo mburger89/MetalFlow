@@ -855,4 +855,62 @@ import os
         #expect(openPRMessage != "limit")
         #expect(run.status == .failed(openPRMessage), "the banner names Open PR, the last failed step")
     }
+
+    // MARK: - Fix round 8. A gate's fix after the pick
+
+    /// The harness flow with A (fed by the plan) feeding the pick and a gate G that passes once fixed.txt exists, then
+    /// Open PR. With `viaShell`, A feeds the pick and G through a shell step F instead of directly.
+    private func gateAfterPickFlow(_ h: Harness, viaShell: Bool = false) -> Flow {
+        var flow = h.flow()
+        let at = flow.nodes.firstIndex { $0.id == "implement" }!
+        flow.nodes.insert(prompt("a", "Alpha {plan}"), at: at)
+        flow.wires.append(Wire(from: "plan", to: "a", input: "plan"))
+        if viaShell {
+            flow.nodes.insert(Node(id: "f", title: "F", kind: .shell(ShellConfig(command: "echo FED {a}")),
+                                   position: Point(x: 0, y: 0)), at: at + 1)
+            flow.wires += [Wire(from: "a", to: "f", input: "a"), Wire(from: "f", to: "pick", input: "f")]
+        } else {
+            flow.wires.append(Wire(from: "a", to: "pick", input: "a"))
+        }
+        flow.nodes.append(Node(id: "g", title: "G", kind: .gate(ShellConfig(command: "test -f fixed.txt", fixAttempts: 2)),
+                               position: Point(x: 0, y: 0)))
+        flow.wires += [Wire(from: viaShell ? "f" : "a", to: "g", input: "code"), Wire(from: "judge", to: "g", input: "rec")]
+        flow.nodes.append(Node(id: "openpr", title: "Open PR", kind: .openPR(OpenPRConfig(draft: true)),
+                               position: Point(x: 0, y: 0)))
+        flow.wires.append(Wire(from: "pick", to: "openpr", input: "approval"))
+        flow.wires.append(Wire(from: "g", to: "openpr", input: "checked"))
+        return flow
+    }
+
+    private func gateFixThroughThePick(_ h: Harness, viaShell: Bool) async throws -> Run {
+        h.hooks.stubGit("push")
+        h.gh.stub("gh", ["pr", "create"], result: CommandResult(exitCode: 0, stdout: Self.prURL + "\n", stderr: ""))
+        h.agent.script({ $0.prompt.hasPrefix("Alpha") }, events: finished("sa", "alpha"))
+        h.agent.script({ $0.prompt.contains("test -f fixed.txt") }, effect: { r in
+            try "ok".write(to: r.workingDirectory.appendingPathComponent("fixed.txt"), atomically: true, encoding: .utf8)
+        }, events: finished("sa", "alpha fixed"))
+        let id = try await atPick(h, flow: gateAfterPickFlow(h, viaShell: viaShell))
+        _ = try await h.engine.pick(id, lane: "b")
+        await h.engine.waitUntilSettled(id)
+        return try #require(await h.engine.run(id))
+    }
+
+    @Test func gateFixAfterThePickStillRunsItsAgent() async throws {
+        let h = try Harness()
+        let run = try await gateFixThroughThePick(h, viaShell: false)
+        #expect(h.agent.requests.filter { $0.prompt.contains("test -f fixed.txt") }.count == 1, "the agent got the fix message")
+        #expect(run.nodes[NodeKey(node: "g")]?.state == .succeeded)
+        #expect(run.nodes[NodeKey(node: "g")]?.fixAttemptsUsed == 1, "the gate passed on its second run")
+        #expect(run.status == .prOpened("b", url: Self.prURL))
+        #expect(run.nodes[NodeKey(node: "openpr")]?.state == .succeeded)
+    }
+
+    @Test func stepThatFedThePickWithNoFailedAncestorStillRuns() async throws {
+        let h = try Harness()
+        let run = try await gateFixThroughThePick(h, viaShell: true)
+        #expect(run.nodes[NodeKey(node: "f")]?.output?.contains("FED alpha fixed") == true, "F reran on the fixed output")
+        #expect(run.nodes[NodeKey(node: "f")]?.log.contains("Skipped: the pick was made without this step.") != true)
+        #expect(run.nodes[NodeKey(node: "g")]?.state == .succeeded)
+        #expect(run.status == .prOpened("b", url: Self.prURL))
+    }
 }

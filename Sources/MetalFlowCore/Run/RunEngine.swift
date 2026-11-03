@@ -576,8 +576,8 @@ public actor RunEngine {
     }
 
     /// True for a waiting step the pass leaves alone because the pick was made past a failed step: the pick has
-    /// succeeded with a chosen lane, and the step is not downstream of the pick but either feeds it or depends on a failed
-    /// step (it would run on blank input).
+    /// succeeded with a chosen lane, and the step is not downstream of the pick but depends on a failed step (it would
+    /// run on blank input). A step that merely feeds the pick still runs: a gate's fix may have sent it back to work.
     private func skipsAfterPick(_ id: RunID, _ nodeID: NodeID) -> Bool {
         guard let run = runs[id], run.pickedLane != nil, let pickKey = pickNodeKey(run),
               run.nodes[pickKey]?.state == .succeeded else { return false }
@@ -592,7 +592,6 @@ public actor RunEngine {
             return seen
         }
         if reach(pickKey.node, children).contains(nodeID) { return false }
-        if reach(nodeID, children).contains(pickKey.node) { return true }
         return reach(nodeID, parents).contains { run.nodes[NodeKey(node: $0)]?.state.isFailed == true }
     }
 
