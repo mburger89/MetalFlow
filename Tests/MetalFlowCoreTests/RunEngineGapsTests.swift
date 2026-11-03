@@ -318,4 +318,83 @@ import os
         node.rerunsInSession = true
         #expect(try JSONDecoder().decode(NodeRun.self, from: JSONEncoder().encode(node)).rerunsInSession)
     }
+
+    // MARK: - 5. A follow-up's commit says so
+
+    private func writes(_ name: String) -> @Sendable (AgentRequest) throws -> Void {
+        { r in try name.write(to: r.workingDirectory.appendingPathComponent(name), atomically: true, encoding: .utf8) }
+    }
+
+    @Test func followUpCommitIsLabelled() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let laneA = try #require(await h.engine.run(id)?.lanes.first { $0.id == "a" })
+        let long = String(repeating: "x", count: 250)
+        h.agent.script({ $0.prompt.hasPrefix("Add a file") }, effect: writes("one.txt"), events: finished("s", "added"))
+        try await h.engine.followUp(id, node: implementA, message: "Add a file " + long)
+        let run = await waitFor(h, id, "the pick") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.output == "added" }
+        await h.engine.waitForPass(id)
+        let message = try h.repo.git(["log", "-1", "--format=%B", laneA.branch]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = RunEngine.commitName(runTitle: run.title, flowName: run.flow.name)
+        let sent = String(("Add a file " + long).prefix(200))
+        #expect(message == "Follow-up: \(name) (a)\n\nNode: \(run.flow.node("implement")!.title)\nMessage: \(sent)")
+        #expect(run.nodes[implementA]?.followUpMessage == nil)
+    }
+
+    @Test func answerCommitIsNotLabelled() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let laneA = try #require(await h.engine.run(id)?.lanes.first { $0.id == "a" })
+        h.agent.script({ $0.prompt == "Tweak" }, effect: writes("one.txt"), events: finished("s", "hmm\nQUESTION: Which?"))
+        try await h.engine.followUp(id, node: implementA, message: "Tweak")
+        let asked = await waitFor(h, id, "the question") { $0.nodes[self.implementA]?.state == .needsYou(.question("Which?")) }
+        await h.engine.waitForPass(id)
+        let labelled = try h.repo.git(["log", "-1", "--format=%B", laneA.branch])
+        #expect(labelled.hasPrefix("Follow-up: "))
+        #expect(asked.nodes[implementA]?.followUpMessage == nil, "cleared once the turn's commit succeeded")
+
+        h.agent.script({ $0.prompt == "The first" }, effect: writes("two.txt"), events: finished("s", "done"))
+        try await h.engine.answer(id, node: implementA, reply: "The first")
+        await waitFor(h, id, "the answer to finish") { $0.nodes[self.implementA]?.output == "done" }
+        await h.engine.waitForPass(id)
+        let answered = try h.repo.git(["log", "-1", "--format=%B", laneA.branch])
+        #expect(!answered.contains("Follow-up"))
+        #expect(answered.hasPrefix(RunEngine.commitName(runTitle: asked.title, flowName: asked.flow.name) + " (a)"))
+    }
+
+    @Test func followUpMessageSurvivesAFailedCommitAndRetry() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let laneA = try #require(await h.engine.run(id)?.lanes.first { $0.id == "a" })
+        let failing = OSAllocatedUnfairLock(initialState: true)
+        let real = ProcessRunner(resolver: ExecutableResolver(searchPath: ["/usr/bin", "/bin", "/opt/homebrew/bin", "/usr/local/bin"]))
+        h.hooks.override({ $0.executable == "git" && CommandHooks.gitArguments($0).first == "commit"
+            && $0.arguments.contains { $0.hasSuffix("/a") } }) { c in
+            if failing.withLock({ $0 }) { return CommandResult(exitCode: 1, stdout: "", stderr: "no") }
+            return try await real.run(c)
+        }
+        h.agent.script({ $0.prompt == "Tweak" }, effect: writes("one.txt"), events: finished("s", "tweaked"))
+        try await h.engine.followUp(id, node: implementA, message: "Tweak")
+        let failed = await waitFor(h, id, "the commit to fail") { $0.nodes[self.implementA]?.state.isFailed == true
+            && $0.nodes[self.pick]?.state != .running }
+        await h.engine.waitForPass(id)
+        #expect(failed.nodes[implementA]?.followUpMessage == "Tweak")
+        failing.withLock { $0 = false }
+        try await h.engine.retry(id, node: implementA)
+        await waitFor(h, id, "the retry to finish") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.state == .succeeded }
+        await h.engine.waitForPass(id)
+        let message = try h.repo.git(["log", "-1", "--format=%B", laneA.branch])
+        #expect(message.contains("Message: Tweak"))
+        #expect(await h.engine.run(id)?.nodes[implementA]?.followUpMessage == nil)
+    }
+
+    @Test func nonLaneFollowUpMessageClearsOnACleanFinish() async throws {
+        let h = try Harness()
+        h.agent.script({ $0.prompt.hasPrefix("Summarize") }, events: finished("sn", "summary"))
+        let id = try await atPick(h, flow: notesFlow(h))
+        h.agent.script({ $0.prompt == "Shorter" }, events: finished("sn", "short"))
+        try await h.engine.followUp(id, node: notes, message: "Shorter")
+        let run = await waitFor(h, id, "notes done") { self.pickIsOffered($0) && $0.nodes[self.notes]?.output == "short" }
+        #expect(run.nodes[notes]?.followUpMessage == nil)
+    }
 }

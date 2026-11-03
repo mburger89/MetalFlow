@@ -119,6 +119,9 @@ public struct NodeRun: Codable, Hashable, Sendable {
     /// Set when a step that continues an earlier step's session is reset to run again: its work is built on a conversation
     /// that already had it. The next turn through the session says so; a clean finish clears it. Not written when false.
     public var rerunsInSession: Bool = false
+    /// The message of a follow-up whose work is not committed yet. It labels that commit; it survives a failed turn and
+    /// Retry, and is cleared once the commit has succeeded (a step outside the candidates: when the turn finishes).
+    public var followUpMessage: String?
     /// Creates a node run with defaults (waiting, empty log).
     public init(
         state: NodeState = .waiting, output: String? = nil, sessionID: String? = nil,
@@ -141,7 +144,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed, pendingFix
-        case replyInFlight, followUpBase, rerunsInSession
+        case replyInFlight, followUpBase, rerunsInSession, followUpMessage
     }
 
     /// Encodes a node run; `rerunsInSession` is left out while false.
@@ -161,6 +164,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
         try c.encodeIfPresent(replyInFlight, forKey: .replyInFlight)
         try c.encodeIfPresent(followUpBase, forKey: .followUpBase)
         if rerunsInSession { try c.encode(true, forKey: .rerunsInSession) }
+        try c.encodeIfPresent(followUpMessage, forKey: .followUpMessage)
     }
 
     /// Decodes a node run; runs saved before fix attempts existed have no `fixAttemptsUsed` and mean 0.
@@ -180,6 +184,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
         replyInFlight = try c.decodeIfPresent(String.self, forKey: .replyInFlight)
         followUpBase = try c.decodeIfPresent(FollowUpBase.self, forKey: .followUpBase)
         rerunsInSession = try c.decodeIfPresent(Bool.self, forKey: .rerunsInSession) ?? false
+        followUpMessage = try c.decodeIfPresent(String.self, forKey: .followUpMessage)
     }
 
     /// Appends a log line, keeping only the last 50.

@@ -264,7 +264,8 @@ extension RunEngine {
         // A reviewer never edits, so there is nothing of its to commit.
         if let lane, review == nil {
             let message = Self.laneCommitMessage(
-                runTitle: run.title, flowName: run.flow.name, lane: lane.id, nodeTitle: node.title, fix: current.pendingFix)
+                runTitle: run.title, flowName: run.flow.name, lane: lane.id, nodeTitle: node.title, fix: current.pendingFix,
+                followUp: current.followUpMessage)
             do {
                 _ = try await git.commitAll(worktree: lane.worktree, message: message)
             } catch {
@@ -274,7 +275,8 @@ extension RunEngine {
                 return
             }
         }
-        updateNode(id, key) { $0.replyInFlight = nil; $0.rerunsInSession = false }
+        // The turn's work is committed (or there is none to commit): the message no longer labels anything.
+        updateNode(id, key) { $0.replyInFlight = nil; $0.rerunsInSession = false; $0.followUpMessage = nil }
         // The turn is over: a later one (an answer to a question) is ordinary work.
         if current.pendingFix != nil { updateNode(id, key) { $0.pendingFix = nil } }
         if !result.deniedTools.isEmpty {

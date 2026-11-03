@@ -57,6 +57,7 @@ extension RunEngine {
             } ?? false
             resetForRerun(node, plan: plan, in: &run)
             run.nodes[node]?.pendingReply = reply
+            run.nodes[node]?.followUpMessage = reply
             run.nodes[node]?.appendLog("↩ follow-up: " + reply.prefix(200))
             if case .judge? = run.flow.node(node.node)?.kind {
                 // A question put to the judge does not withdraw its verdict.

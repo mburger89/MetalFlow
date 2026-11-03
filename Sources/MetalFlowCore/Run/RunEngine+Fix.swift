@@ -15,10 +15,14 @@ extension RunEngine {
     }
 
     /// The commit message for a lane agent's turn: the issue's title (the flow's name when there is none) and the lane,
-    /// labelled as a fix attempt when a failing gate started the turn.
+    /// labelled as a fix attempt when a failing gate started the turn, or as a follow-up (with the first 200 characters
+    /// of the message) when the user's message did and no fix did.
     static func laneCommitMessage(runTitle: String, flowName: String, lane: LaneID, nodeTitle: String,
-                                  fix: PendingFix?) -> String {
+                                  fix: PendingFix?, followUp: String? = nil) -> String {
         let name = commitName(runTitle: runTitle, flowName: flowName)
+        if fix == nil, let followUp {
+            return "Follow-up: \(name) (\(lane))\n\nNode: \(nodeTitle)\nMessage: \(followUp.prefix(200))"
+        }
         guard let fix else { return "\(name) (\(lane))\n\nNode: \(nodeTitle)" }
         return "Fix attempt \(fix.attempt) of \(fix.total): \(name) (\(lane))\n\nNode: \(nodeTitle)\n\(fix.label): \(fix.command)"
     }
