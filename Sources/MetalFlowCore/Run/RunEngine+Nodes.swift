@@ -218,8 +218,11 @@ extension RunEngine {
                         await self.updateNode(id, key) {
                             $0.sessionID = session
                             // A second `.started` in one turn must not wipe the message.
-                            // The resume nudge is not a message: an interrupted follow-up keeps the one it is carrying.
-                            if let reply = $0.pendingReply, reply != Self.continueNudge { $0.replyInFlight = reply }
+                            // The resume nudge does not replace a message the interrupted turn is carrying; with none, it
+                            // goes in flight too, so a failed turn keeps it and Retry resumes the same session.
+                            if let reply = $0.pendingReply, reply != Self.continueNudge || $0.replyInFlight == nil {
+                                $0.replyInFlight = reply
+                            }
                             $0.pendingReply = nil
                         }
                     case .text(let text):

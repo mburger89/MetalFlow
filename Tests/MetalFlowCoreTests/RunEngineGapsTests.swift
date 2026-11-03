@@ -948,4 +948,26 @@ import os
         #expect(run.nodes[openPR]?.state == .succeeded)
         #expect(run.status == .prOpened("b", url: Self.prURL))
     }
+
+    // MARK: - Fix round 8. A resumed plain step keeps its session on Retry
+
+    @Test func resumedPlainStepThatFailsRetriesInTheSameSession() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let session = try #require(await h.engine.run(id)?.nodes[implementA]?.sessionID)
+        await h.engine.setDirect(id) { $0.nodes[self.implementA]?.state = .interrupted }
+        h.agent.script({ $0.prompt == "Continue where you left off." }, events: finished(session, "limit", isError: true))
+        try await h.engine.resumeInterrupted(id)
+        let failed = await waitFor(h, id, "the failure") { $0.nodes[self.implementA]?.state.isFailed == true
+            && $0.nodes[self.pick]?.state != .running && $0.status != .running }
+        await h.engine.waitForPass(id)
+        #expect(failed.nodes[implementA]?.pendingReply == "Continue where you left off.", "the retry resumes the session")
+        h.agent.script({ $0.prompt == "Continue where you left off." }, events: finished(session, "carried on"))
+        let before = h.agent.requests.count
+        try await h.engine.retry(id, node: implementA)
+        let run = await waitFor(h, id, "the retry") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.state == .succeeded }
+        let sent = try #require(h.agent.requests.dropFirst(before).first { $0.workingDirectory.lastPathComponent == "a" })
+        #expect(sent.prompt == "Continue where you left off." && sent.resumeSessionID == session)
+        #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
+    }
 }
