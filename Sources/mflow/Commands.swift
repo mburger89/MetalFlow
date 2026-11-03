@@ -381,7 +381,7 @@ private func finish(_ engine: RunEngine, _ id: RunID, _ run: Run, _ interrupted:
         return 130
     }
     // A run that has had a follow-up is suspended, not cancelled: it stays resumable.
-    if interrupted.withLock({ $0 }), run.followedUp, run.status == .needsYou, run.nodes.values.contains(where: { $0.state == .interrupted }) {
+    if interrupted.withLock({ $0 }), run.followedUp, run.status == .needsYou {
         await engine.waitUntilSettled(id)
         print("stopped; `mflow resume \(id.rawValue)` continues it")
         return 130

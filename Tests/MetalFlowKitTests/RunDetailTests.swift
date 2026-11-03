@@ -39,6 +39,16 @@ import Testing
         try await window.runUntilIdle()
     }
 
+    @Test func judgeVerdictStaysVisibleWhileAFollowUpTurnRuns() async throws {
+        var run = pickRun()
+        run.status = .running
+        var judge = NodeRun(state: .running, output: nil, pendingReply: "Why?")
+        judge.followUpBase = FollowUpBase(previousOutput: "B is the most complete.", message: "Why?")
+        run.nodes[NodeKey(node: "judge")] = judge
+        let (_, _, window) = try await fixture(run)
+        #expect(try window.element(identifier: "detail.judge").value == "B is the most complete.")
+    }
+
     @Test func candidatesShowRecommendation() async throws {
         let (_, _, window) = try await fixture(pickRun())
         _ = try window.element(identifier: "detail")

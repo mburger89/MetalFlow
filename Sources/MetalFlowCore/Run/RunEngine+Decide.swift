@@ -25,6 +25,7 @@ extension RunEngine {
         mutate(id) { run in
             var n = run.nodes[node] ?? NodeRun()
             n.pendingReply = reply
+            n.replyInFlight = nil
             for tool in allowTools where !n.extraAllowedTools.contains(tool) { n.extraAllowedTools.append(tool) }
             n.state = .waiting
             run.nodes[node] = n
@@ -131,7 +132,7 @@ extension RunEngine {
             releaseLockIfIdle(id)
         }
         // Let a cancelled pass finish first, so it cannot write after the discard.
-        if runs[id]?.status == .cancelled { await waitForPass(id) }
+        if runs[id]?.status == .cancelled || suspended.contains(id) { await waitForPass(id) }
         guard let run = runs[id] else { throw RunEngineError.unknownRun(id) }
         switch run.status {
         case .needsYou, .failed, .completed, .cancelled: break

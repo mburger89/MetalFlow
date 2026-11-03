@@ -95,7 +95,9 @@ actor FakeEngineClient: EngineClient {
     /// The runs the fake reports as driven by another process.
     var elsewhere: Set<RunID> = []
     func setElsewhere(_ ids: Set<RunID>) { elsewhere = ids }
-    func isRunningElsewhere(_ id: RunID) async -> Bool { elsewhere.contains(id) }
+    /// Every run asked about, in order.
+    private(set) var probed: [RunID] = []
+    func isRunningElsewhere(_ id: RunID) async -> Bool { probed.append(id); return elsewhere.contains(id) }
     /// What `reload` returns per run (nil: no newer state known).
     var reloads: [RunID: Run] = [:]
     func setReload(_ run: Run) { reloads[run.id] = run }

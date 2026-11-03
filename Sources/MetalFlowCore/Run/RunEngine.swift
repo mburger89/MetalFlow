@@ -335,8 +335,10 @@ public actor RunEngine {
         if locks[id] != nil { return runs[id] }
         guard let saved = store.load(id) else { return runs[id] }
         if let cached = runs[id], saved.revision <= cached.revision { return cached }
-        runs[id] = saved
-        return saved
+        // Saved as running with nobody holding the lock: the process that drove it died.
+        let shown = store.isLocked(id) ? saved : saved.markingCutShort()
+        runs[id] = shown
+        return shown
     }
 
     /// What one `discover()` pass learned about the store.
@@ -530,13 +532,22 @@ public actor RunEngine {
         let isPick = { if case .pick = run.flow.node(nodeID)?.kind { return true } else { return false } }()
         switch nodeState(id, key) {
         case .succeeded: return true
-        case .failed: return false
+        case .failed:
+            // A step that failed a follow-up before the pick was made (the pick was offered again) must not stop the
+            // pass that carries the pick on to Open PR.
+            guard let current = runs[id], current.pickedLane != nil, !isOpenPR(run.flow, nodeID),
+                  let pickNode = pickNodeKey(current), current.nodes[pickNode]?.state == .succeeded else { return false }
+            return true
         case .needsYou where !isPick: return false
         case .interrupted: return false
         default: break
         }
         await runNode(id, key, plan: plan)
         return nodeState(id, key) == .succeeded
+    }
+
+    private func isOpenPR(_ flow: Flow, _ id: NodeID) -> Bool {
+        if case .openPR? = flow.node(id)?.kind { return true } else { return false }
     }
 
     /// True when a lane is about to run again: its first node (in plan order) that has not succeeded is waiting.

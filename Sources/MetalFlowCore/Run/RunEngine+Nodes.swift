@@ -206,7 +206,8 @@ extension RunEngine {
                         // The message is on its way: if the turn fails it goes back to `pendingReply`.
                         await self.updateNode(id, key) {
                             $0.sessionID = session
-                            $0.replyInFlight = $0.pendingReply
+                            // A second `.started` in one turn must not wipe the message.
+                            if let reply = $0.pendingReply { $0.replyInFlight = reply }
                             $0.pendingReply = nil
                         }
                     case .text(let text):
@@ -283,7 +284,8 @@ extension RunEngine {
     /// Puts the message of a turn that failed back to be sent again, so a retry resumes the session with it.
     private func keepReply(_ id: RunID, _ key: NodeKey) {
         updateNode(id, key) { n in
-            if let reply = n.replyInFlight { n.pendingReply = reply }
+            // A newer message (an answer typed meanwhile) is not overwritten by the one that failed.
+            if n.pendingReply == nil, let reply = n.replyInFlight { n.pendingReply = reply }
             n.replyInFlight = nil
         }
     }

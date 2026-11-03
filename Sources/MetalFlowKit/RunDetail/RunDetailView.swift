@@ -106,7 +106,10 @@ struct DetailBody: Component {
     private var judgeOutput: String? {
         for node in run.flow.nodes {
             guard case .judge = node.kind else { continue }
-            if let output = run.nodes[NodeKey(node: node.id)]?.output, !output.isEmpty { return output }
+            let record = run.nodes[NodeKey(node: node.id)]
+            if let output = record?.output, !output.isEmpty { return output }
+            // While a follow-up is answered, or after its turn failed, the earlier verdict stays on show.
+            if let earlier = record?.followUpBase?.previousOutput, !earlier.isEmpty { return earlier }
         }
         return nil
     }

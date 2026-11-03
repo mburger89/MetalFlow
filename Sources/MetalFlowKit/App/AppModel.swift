@@ -226,15 +226,18 @@ public final class AppModel {
     /// process saved since, and keeps `runningElsewhere` to the runs whose lock another process holds. A run another
     /// process left running after releasing its lock was cut short; its saved state stands.
     public func refreshElsewhere() async {
+        // Idle runs are not lock-probed. A cancelled run is read only while its detail is open; completed and failed runs
+        // stay polled because a follow-up from `mflow` can restart them.
         let open = runs.values.filter { run in
             switch run.status {
             case .merged, .discarded, .prOpened: false
+            case .cancelled: selectedRun == run.id
             default: true
             }
         }.map(\.id).sorted { $0.rawValue < $1.rawValue }
         for id in open {
             if let run = await client.reload(id) { apply(run, restoring: false, fromElsewhere: true) }
-            if await client.isRunningElsewhere(id), runs[id]?.status == .running {
+            if runs[id]?.status == .running, await client.isRunningElsewhere(id) {
                 runningElsewhere.insert(id)
             } else {
                 runningElsewhere.remove(id)
@@ -343,8 +346,11 @@ public final class AppModel {
         }
         // What a pick said is about the cards as they were: once the pick has been withdrawn, or is offered again after
         // a follow-up, it no longer applies. A pick in flight writes its own outcome.
-        if pickingRun != run.id, pickOutcomes[run.id] != nil, !canPick(run) || old.map(canPick) == false {
-            pickOutcomes[run.id] = nil
+        if pickingRun != run.id, let outcomes = pickOutcomes[run.id], !canPick(run) || old.map(canPick) == false {
+            // "Opening pull request" stays while the run is still pushing and opening it; the PR, or a failure, replaces it.
+            let keep = run.status == .running && run.pickedLane != nil
+            let rest = keep ? outcomes.filter { $0.value == .openingPullRequest } : [:]
+            pickOutcomes[run.id] = rest.isEmpty ? nil : rest
         }
         // An update means this app's engine is driving the run now.
         if !restoring && !fromElsewhere { runningElsewhere.remove(run.id) }

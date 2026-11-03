@@ -165,4 +165,58 @@ import Testing
         #expect(m.followUpDrafts[gone] == nil && m.answerDrafts[gone] == nil && !m.followingUp.contains(gone))
         #expect(m.followUpDrafts[kept] == "more" && m.answerDrafts[kept] == "yes" && m.followingUp.contains(kept))
     }
+
+    // MARK: Second round
+
+    @Test func openingPullRequestLineStaysWhileTheRunPushes() async {
+        let client = FakeEngineClient()
+        await client.setPick(.handedToPullRequest)
+        let m = model(client)
+        var run = atPick()
+        run.flow = BuiltinFlows.fixGitHubIssue
+        m.apply(run)
+        await m.pick(run.id, lane: "a")
+        #expect(m.pickOutcomes[run.id]?["a"] == .openingPullRequest)
+        var pushing = run
+        pushing.revision = 2
+        pushing.status = .running
+        pushing.pickedLane = "a"
+        pushing.nodes[pick]?.state = .succeeded
+        m.apply(pushing)
+        #expect(m.pickOutcomes[run.id]?["a"] == .openingPullRequest)
+        var opened = pushing
+        opened.revision = 3
+        opened.status = .prOpened("a", url: "https://x/pull/1")
+        m.apply(opened)
+        #expect(m.pickOutcomes[run.id] == nil)
+    }
+
+    @Test func aFailedPushReplacesTheOpeningLine() async {
+        let client = FakeEngineClient()
+        await client.setPick(.handedToPullRequest)
+        let m = model(client)
+        let run = atPick()
+        m.apply(run)
+        await m.pick(run.id, lane: "a")
+        var failed = run
+        failed.revision = 2
+        failed.status = .failed("push refused")
+        failed.pickedLane = "a"
+        failed.nodes[pick]?.state = .succeeded
+        m.apply(failed)
+        #expect(m.pickOutcomes[run.id] == nil)
+    }
+
+    @Test func idleRunsAreNotLockProbed() async {
+        let client = FakeEngineClient()
+        let m = model(client)
+        let waiting = atPick(), running = makeRun("r", status: .running), cancelled = makeRun("c", status: .cancelled)
+        for r in [waiting, running, cancelled] { m.apply(r) }
+        await m.refreshElsewhere()
+        #expect(await client.probed == [running.id])
+        #expect(await client.calls.filter { $0 == "reload" }.count == 2, "the cancelled run is not read")
+        m.open(run: cancelled.id)
+        await m.refreshElsewhere()
+        #expect(await client.calls.filter { $0 == "reload" }.count == 5, "open in the detail, it is read")
+    }
 }
