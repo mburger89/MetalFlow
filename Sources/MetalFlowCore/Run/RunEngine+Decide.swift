@@ -59,7 +59,10 @@ extension RunEngine {
         for key in keys {
             // A reply that never reached the agent (a fix turn cut short before it started) must not be lost.
             let reply = run.nodes[key]?.pendingReply ?? Self.continueNudge
+            let carrying = run.nodes[key]?.replyInFlight
             try answer(id, node: key, reply: reply)
+            // The turn being resumed was carrying a message: it stays in flight until the turn finishes cleanly.
+            if carrying != nil { updateNode(id, key) { $0.replyInFlight = carrying } }
         }
     }
 

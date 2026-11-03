@@ -218,7 +218,8 @@ extension RunEngine {
                         await self.updateNode(id, key) {
                             $0.sessionID = session
                             // A second `.started` in one turn must not wipe the message.
-                            if let reply = $0.pendingReply { $0.replyInFlight = reply }
+                            // The resume nudge is not a message: an interrupted follow-up keeps the one it is carrying.
+                            if let reply = $0.pendingReply, reply != Self.continueNudge { $0.replyInFlight = reply }
                             $0.pendingReply = nil
                         }
                     case .text(let text):
@@ -310,7 +311,8 @@ extension RunEngine {
     private func keepReply(_ id: RunID, _ key: NodeKey) {
         updateNode(id, key) { n in
             // A newer message (an answer typed meanwhile) is not overwritten by the one that failed.
-            if n.pendingReply == nil, let reply = n.replyInFlight { n.pendingReply = reply }
+            // The nudge that resumed an interrupted turn gives way to the message that turn was carrying.
+            if n.pendingReply == nil || n.pendingReply == Self.continueNudge, let reply = n.replyInFlight { n.pendingReply = reply }
             n.replyInFlight = nil
         }
     }

@@ -698,4 +698,76 @@ import os
         #expect(run.nodes[NodeKey(node: "z3")]?.log.contains("Skipped: the pick was made without this step.") == true)
         #expect(run.status == .prOpened("b", url: Self.prURL))
     }
+
+    // MARK: - Fix round 4. Resuming an interrupted follow-up
+
+    /// A follow-up whose turn was cut short by Cancel (which suspends), resumed with the nudge.
+    private func interruptedFollowUp(_ h: Harness) async throws -> (RunID, String) {
+        let id = try await atPick(h)
+        let session = try #require(await h.engine.run(id)?.nodes[implementA]?.sessionID)
+        let (hold, release) = AsyncStream<Void>.makeStream()
+        defer { release.finish() }
+        h.agent.script({ $0.prompt == "Tweak" }, hold: hold, events: finished(session, "tweaked"))
+        try await h.engine.followUp(id, node: implementA, message: "Tweak")
+        await waitFor(h, id, "the turn to start") { $0.nodes[self.implementA]?.replyInFlight == "Tweak" }
+        await h.engine.cancel(id)
+        await h.engine.waitForPass(id)
+        let stopped = try #require(await h.engine.run(id))
+        #expect(stopped.nodes[implementA]?.state == .interrupted)
+        #expect(stopped.nodes[implementA]?.replyInFlight == "Tweak")
+        return (id, session)
+    }
+
+    @Test func resumedFollowUpWithALostSessionKeepsTheMessage() async throws {
+        let h = try Harness()
+        let (id, _) = try await interruptedFollowUp(h)
+        h.agent.script({ $0.prompt == "Continue where you left off." }, events: lostSession())
+        try await h.engine.resumeInterrupted(id)
+        let failed = await waitFor(h, id, "the lost session") { $0.nodes[self.implementA]?.state.isFailed == true
+            && $0.nodes[self.pick]?.state != .running && $0.status != .running }
+        await h.engine.waitForPass(id)
+        #expect(failed.nodes[implementA]?.pendingReply == "Tweak")
+        #expect(failed.nodes[implementA]?.sessionID == nil)
+        #expect(failed.nodes[implementA]?.followUpMessage == "Tweak")
+
+        h.agent.script({ $0.prompt.hasSuffix("\n\nThe user's message about this step:\nTweak") }, events: finished("fresh", "tweaked"))
+        let before = h.agent.requests.count
+        try await h.engine.retry(id, node: implementA)
+        await waitFor(h, id, "the retry") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.state == .succeeded }
+        let sent = try #require(h.agent.requests.dropFirst(before).first { $0.workingDirectory.lastPathComponent == "a" })
+        #expect(sent.resumeSessionID == nil)
+        #expect(sent.prompt.hasSuffix("\n\nThe user's message about this step:\nTweak"))
+    }
+
+    @Test func resumedFollowUpThatFailsRetriesWithTheMessage() async throws {
+        let h = try Harness()
+        let (id, session) = try await interruptedFollowUp(h)
+        h.agent.script({ $0.prompt == "Continue where you left off." }, events: finished(session, "limit", isError: true))
+        try await h.engine.resumeInterrupted(id)
+        let failed = await waitFor(h, id, "the failure") { $0.nodes[self.implementA]?.state.isFailed == true
+            && $0.nodes[self.pick]?.state != .running && $0.status != .running }
+        await h.engine.waitForPass(id)
+        #expect(failed.nodes[implementA]?.pendingReply == "Tweak", "the message, not the nudge, goes again")
+        h.agent.script({ $0.prompt == "Tweak" }, events: finished(session, "tweaked"))
+        let before = h.agent.requests.count
+        try await h.engine.retry(id, node: implementA)
+        let run = await waitFor(h, id, "the retry") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.state == .succeeded }
+        let sent = try #require(h.agent.requests.dropFirst(before).first { $0.workingDirectory.lastPathComponent == "a" })
+        #expect(sent.prompt == "Tweak" && sent.resumeSessionID == session)
+        #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
+    }
+
+    @Test func interruptedPlainStepStillResumesWithTheNudge() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let session = try #require(await h.engine.run(id)?.nodes[implementA]?.sessionID)
+        await h.engine.setDirect(id) { $0.nodes[self.implementA]?.state = .interrupted }
+        h.agent.script({ $0.prompt == "Continue where you left off." }, events: finished(session, "carried on"))
+        let before = h.agent.requests.count
+        try await h.engine.resumeInterrupted(id)
+        let run = await waitFor(h, id, "the resume") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.output == "carried on" }
+        let sent = try #require(h.agent.requests.dropFirst(before).first { $0.workingDirectory.lastPathComponent == "a" })
+        #expect(sent.prompt == "Continue where you left off." && sent.resumeSessionID == session)
+        #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
+    }
 }
