@@ -10,15 +10,19 @@ struct ReplyField: Component {
     var sending = false
     let send: () -> Void
 
+    private var canSend: Bool { !sending && !AppModel.trimmed(text.wrappedValue).isEmpty }
+
     var content: some ElementGroup {
+        let canSend = canSend, send = send
         HStack(spacing: Spacing.sm) {
             TextField(placeholder, text: text)
+                .onSubmit { if canSend { send() } }
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("\(id).field")
             Button("Send") { send() }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("\(id).send")
-                .disabled(sending || AppModel.trimmed(text.wrappedValue).isEmpty)
+                .disabled(!canSend)
         }
     }
 }

@@ -162,6 +162,51 @@ import Testing
         _ = try window.element(identifier: "\(id).field")
     }
 
+    @Test func returnSendsAFollowUp() async throws {
+        let run = seeded()
+        let (model, client, window) = try await fixture(run)
+        try await press("detail.node.implement@a.followUp", in: window)
+        let id = field(run, implementA)
+        try window.click(window.element(identifier: "\(id).field"))
+        window.typeText("Add tests")
+        window.typeKey(.return)
+        try await window.runUntilIdle()
+        #expect(await client.calls.filter { $0.hasPrefix("followUp") } == ["followUp(implement@a, Add tests)"])
+        #expect(model.followUpDrafts[AppModel.draftKey(run.id, implementA)] == nil)
+    }
+
+    @Test func returnOnBlankSendsNothing() async throws {
+        let run = seeded()
+        let (_, client, window) = try await fixture(run)
+        try await press("detail.node.implement@a.followUp", in: window)
+        let id = field(run, implementA)
+        try window.click(window.element(identifier: "\(id).field"))
+        window.typeKey(.return)
+        window.typeText("   ")
+        window.typeKey(.return)
+        try await window.runUntilIdle()
+        #expect(await !client.calls.contains { $0.hasPrefix("followUp") })
+    }
+
+    @Test func returnWhileSendingSendsNothing() async throws {
+        let run = seeded()
+        let (model, client, window) = try await fixture(run)
+        let key = AppModel.draftKey(run.id, implementA)
+        let id = field(run, implementA)
+        await client.holdFollowUps()
+        try await press("detail.node.implement@a.followUp", in: window)
+        try window.click(window.element(identifier: "\(id).field"))
+        window.typeText("first")
+        window.typeKey(.return)
+        try await window.runUntil { model.followUpSending.contains(key) }
+        window.typeText(" second")
+        window.typeKey(.return)
+        try await window.runUntilIdle()
+        await client.releaseFollowUps()
+        try await window.runUntilIdle()
+        #expect(await client.calls.filter { $0.hasPrefix("followUp") } == ["followUp(implement@a, first)"])
+    }
+
     @Test func closingKeepsTheDraft() async throws {
         let run = seeded()
         let (model, _, window) = try await fixture(run)

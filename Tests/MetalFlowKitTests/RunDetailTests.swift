@@ -266,6 +266,17 @@ import Testing
         _ = try window.element(identifier: "answer.\(run.id.rawValue).plan.field")
     }
 
+    @Test func returnSendsAnAnswer() async throws {
+        let run = makeRun("ask", status: .needsYou, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .needsYou(.question("Which file?")))])
+        let (_, client, window) = try await fixture(run)
+        try window.click(window.element(identifier: "answer.\(run.id.rawValue).plan.field"))
+        window.typeText("main.swift")
+        window.typeKey(.return)
+        try await window.runUntilIdle()
+        #expect(await client.calls.contains("answer(plan, main.swift, [])"))
+    }
+
     @Test func viewDiffLoadsAndShowsOneAtATime() async throws {
         let run = pickRun()
         let (model, client, window) = try await fixture(run)
