@@ -240,7 +240,6 @@ extension RunEngine {
             finish(id, key, .failed(result.text))
             return
         }
-        updateNode(id, key) { $0.replyInFlight = nil }
         // A reviewer never edits, so there is nothing of its to commit.
         if let lane, review == nil {
             let message = Self.laneCommitMessage(
@@ -248,10 +247,13 @@ extension RunEngine {
             do {
                 _ = try await git.commitAll(worktree: lane.worktree, message: message)
             } catch {
+                // The message stays for Retry: the session already has it, and a retry must resume with it.
+                keepReply(id, key)
                 finish(id, key, .failed("commit failed: \(error.localizedDescription)"), output: result.text)
                 return
             }
         }
+        updateNode(id, key) { $0.replyInFlight = nil }
         // The turn is over: a later one (an answer to a question) is ordinary work.
         if current.pendingFix != nil { updateNode(id, key) { $0.pendingFix = nil } }
         if !result.deniedTools.isEmpty {

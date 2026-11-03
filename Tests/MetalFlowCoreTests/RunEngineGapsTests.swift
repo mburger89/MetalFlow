@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import os
 @testable import MetalFlowCore
 
 /// Gaps found after the follow-up work: later steps failing, commits, lost sessions, refusals.
@@ -101,5 +102,52 @@ import Testing
         await h.engine.waitForPass(id)
         #expect(run.pickToRestore == nil)
         #expect(run.nodes.values.allSatisfy { !$0.state.isFailed })
+    }
+
+    // MARK: - 2. A commit failure keeps the follow-up's message
+
+    private func addsAFile(_ r: AgentRequest) throws {
+        try "x".write(to: r.workingDirectory.appendingPathComponent("extra.txt"), atomically: true, encoding: .utf8)
+    }
+
+    @Test func failedCommitRetriesWithTheSameSessionAndMessage() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let session = try #require(await h.engine.run(id)?.nodes[implementA]?.sessionID)
+        let failing = OSAllocatedUnfairLock(initialState: true)
+        let real = ProcessRunner(resolver: ExecutableResolver(searchPath: ["/usr/bin", "/bin", "/opt/homebrew/bin", "/usr/local/bin"]))
+        h.hooks.override({ $0.executable == "git" && CommandHooks.gitArguments($0).first == "commit"
+            && $0.arguments.contains { $0.hasSuffix("/a") } }) { c in
+            if failing.withLock({ $0 }) { return CommandResult(exitCode: 1, stdout: "", stderr: "hook said no") }
+            return try await real.run(c)
+        }
+        h.agent.script({ $0.prompt == "Add a file" }, effect: { try self.addsAFile($0) }, events: finished(session, "added"))
+        try await h.engine.followUp(id, node: implementA, message: "Add a file")
+        let failed = await waitFor(h, id, "the commit to fail") { $0.nodes[self.implementA]?.state.isFailed == true
+            && $0.nodes[self.pick]?.state != .running }
+        await h.engine.waitForPass(id)
+        #expect(failed.nodes[implementA]?.pendingReply == "Add a file")
+        #expect(failed.nodes[implementA]?.replyInFlight == nil)
+
+        failing.withLock { $0 = false }
+        let before = h.agent.requests.count
+        try await h.engine.retry(id, node: implementA)
+        let run = await waitFor(h, id, "the retry to finish") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.state == .succeeded }
+        let sent = h.agent.requests.dropFirst(before).filter { $0.workingDirectory.lastPathComponent == "a" }
+        #expect(sent.count == 1)
+        #expect(sent.first?.prompt == "Add a file")
+        #expect(sent.first?.resumeSessionID == session)
+        #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
+    }
+
+    @Test func cleanCommitClearsTheReply() async throws {
+        let h = try Harness()
+        let id = try await atPick(h)
+        let session = try #require(await h.engine.run(id)?.nodes[implementA]?.sessionID)
+        h.agent.script({ $0.prompt == "Add a file" }, effect: { try self.addsAFile($0) }, events: finished(session, "added"))
+        try await h.engine.followUp(id, node: implementA, message: "Add a file")
+        let run = await waitFor(h, id, "the pick") { self.pickIsOffered($0) && $0.nodes[self.implementA]?.output == "added" }
+        await h.engine.waitForPass(id)
+        #expect(run.nodes[implementA]?.pendingReply == nil && run.nodes[implementA]?.replyInFlight == nil)
     }
 }
