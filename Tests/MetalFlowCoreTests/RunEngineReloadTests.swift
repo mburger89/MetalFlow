@@ -187,5 +187,15 @@ import Testing
         _ = await h.engine.discover()
         let reloaded = try #require(await h.engine.reload(run.id))
         #expect(reloaded.nodes[NodeKey(node: "plan")]?.state == .running)
+        #expect(await h.engine.lockProbes == 0, "an idle run is not lock-probed")
+    }
+
+    @Test func reloadProbesARunCachedAsRunningOnce() async throws {
+        let h = try Harness()
+        let cached = try await discoveredRunning(h)
+        let lock = try #require(h.store.tryLock(cached.id))
+        defer { lock.release() }
+        _ = await h.engine.reload(cached.id)
+        #expect(await h.engine.lockProbes == 1)
     }
 }

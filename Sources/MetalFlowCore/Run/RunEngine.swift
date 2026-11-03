@@ -334,6 +334,14 @@ public actor RunEngine {
         locks[id] == nil && store.isLocked(id)
     }
 
+    /// How many times `reload` asked the store whether a run is locked; for tests that an idle run is never probed.
+    private(set) var lockProbes = 0
+
+    private func probeLock(_ id: RunID) -> Bool {
+        lockProbes += 1
+        return store.isLocked(id)
+    }
+
     /// The newest known state of a run. A run this engine drives is returned as held. Otherwise the saved state
     /// replaces the cached one when its revision is higher (another process has been working on it). Nothing is yielded
     /// on `updates`: the caller applies the result.
@@ -341,7 +349,7 @@ public actor RunEngine {
         if locks[id] != nil { return runs[id] }
         // A run cached as running that nobody here drives may have lost its driver after the last save the cache saw.
         // Only such a run is lock-probed when nothing newer was saved; an idle one never is.
-        let driverGone = tasks[id] == nil && runs[id]?.status == .running && !store.isLocked(id)
+        let driverGone = tasks[id] == nil && runs[id]?.status == .running && !probeLock(id)
         guard let saved = store.load(id) else { return runs[id] }
         if let cached = runs[id], saved.revision <= cached.revision {
             guard driverGone else { return cached }
