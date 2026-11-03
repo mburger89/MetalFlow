@@ -252,4 +252,70 @@ import os
         #expect(sent.prompt == "Polish draft\n\nThe user's message about this step:\nAgain")
         #expect(run.nodes[second]?.sessionID == "fresh")
     }
+
+    // MARK: - 4. A rerun continuer is told it is a rerun
+
+    private static let rerunPrefix = "This step already ran earlier in this conversation, and the work it builds on has changed since. Do it again for the work as it stands now, and keep what is still right.\n\n"
+
+    private func chainDone(_ h: Harness) async throws -> RunID {
+        h.agent.script({ $0.prompt.hasPrefix("Write in") }, events: finished("s1", "draft"))
+        h.agent.script({ $0.prompt.contains("Polish") }, events: finished("s1", "polished"))
+        let id = try await h.engine.launch(flow: chainFlow(), location: h.repoLocation, values: ["repo": h.repo.url.path])
+        _ = await h.settled(id)
+        await h.engine.waitForPass(id)
+        return id
+    }
+
+    @Test func firstRunContinuerHasNoPrefix() async throws {
+        let h = try Harness()
+        let id = try await chainDone(h)
+        let polish = try #require(h.agent.requests.first { $0.prompt.contains("Polish") })
+        #expect(polish.prompt == "Polish draft")
+        #expect(polish.resumeSessionID == "s1")
+        #expect(await h.engine.run(id)?.nodes[NodeKey(node: "second")]?.rerunsInSession == false)
+    }
+
+    @Test func rerunContinuerIsToldItIsARerun() async throws {
+        let h = try Harness()
+        let id = try await chainDone(h)
+        let second = NodeKey(node: "second")
+        let (hold, release) = AsyncStream<Void>.makeStream()
+        defer { release.finish() }
+        h.agent.script({ $0.prompt == "Redo" }, hold: hold, events: finished("s1", "draft two"))
+        try await h.engine.followUp(id, node: NodeKey(node: "first"), message: "Redo")
+        let held = await waitFor(h, id, "first running") { $0.nodes[NodeKey(node: "first")]?.state == .running }
+        #expect(held.nodes[second]?.rerunsInSession == true)
+        release.finish()
+        let run = await waitFor(h, id, "second done") { $0.status != .running && $0.nodes[second]?.state == .succeeded }
+        let sent = try #require(h.agent.requests.last { $0.prompt.contains("Polish") })
+        #expect(sent.prompt == Self.rerunPrefix + "Polish draft two")
+        #expect(sent.resumeSessionID == "s1")
+        #expect(run.nodes[second]?.rerunsInSession == false)
+    }
+
+    @Test func retriedFailedContinuerKeepsThePrefix() async throws {
+        let h = try Harness()
+        let id = try await chainDone(h)
+        let second = NodeKey(node: "second")
+        h.agent.script({ $0.prompt == "Redo" }, events: finished("s1", "draft two"))
+        h.agent.script({ $0.prompt.contains("Polish") }, events: finished("s1", "limit", isError: true))
+        try await h.engine.followUp(id, node: NodeKey(node: "first"), message: "Redo")
+        let failed = await waitFor(h, id, "second fails") { $0.status != .running && $0.nodes[second]?.state.isFailed == true }
+        #expect(failed.nodes[second]?.rerunsInSession == true)
+        h.agent.script({ $0.prompt.contains("Polish") }, events: finished("s1", "polished two"))
+        try await h.engine.retry(id, node: second)
+        let run = await waitFor(h, id, "second done") { $0.status != .running && $0.nodes[second]?.state == .succeeded }
+        let sent = try #require(h.agent.requests.last { $0.prompt.contains("Polish") })
+        #expect(sent.prompt == Self.rerunPrefix + "Polish draft two")
+        #expect(run.nodes[second]?.rerunsInSession == false)
+    }
+
+    @Test func rerunFlagCodableDefaultsAndStaysOutOfFilesWhenFalse() throws {
+        var node = NodeRun()
+        let plain = String(decoding: try JSONEncoder().encode(node), as: UTF8.self)
+        #expect(!plain.contains("rerunsInSession"))
+        #expect(try JSONDecoder().decode(NodeRun.self, from: Data(plain.utf8)).rerunsInSession == false)
+        node.rerunsInSession = true
+        #expect(try JSONDecoder().decode(NodeRun.self, from: JSONEncoder().encode(node)).rerunsInSession)
+    }
 }

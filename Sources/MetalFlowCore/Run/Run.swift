@@ -116,6 +116,9 @@ public struct NodeRun: Codable, Hashable, Sendable {
     /// Set while a Judge works on a follow-up: what the verdict was and what was asked, so a reply that carries no
     /// `RECOMMEND:` line is shown beside the verdict instead of replacing it. Cleared when the turn finishes.
     public var followUpBase: FollowUpBase?
+    /// Set when a step that continues an earlier step's session is reset to run again: its work is built on a conversation
+    /// that already had it. The next turn through the session says so; a clean finish clears it. Not written when false.
+    public var rerunsInSession: Bool = false
     /// Creates a node run with defaults (waiting, empty log).
     public init(
         state: NodeState = .waiting, output: String? = nil, sessionID: String? = nil,
@@ -138,7 +141,26 @@ public struct NodeRun: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed, pendingFix
-        case replyInFlight, followUpBase
+        case replyInFlight, followUpBase, rerunsInSession
+    }
+
+    /// Encodes a node run; `rerunsInSession` is left out while false.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(state, forKey: .state)
+        try c.encodeIfPresent(output, forKey: .output)
+        try c.encodeIfPresent(sessionID, forKey: .sessionID)
+        try c.encode(log, forKey: .log)
+        try c.encodeIfPresent(pendingReply, forKey: .pendingReply)
+        try c.encode(extraAllowedTools, forKey: .extraAllowedTools)
+        try c.encode(costUSD, forKey: .costUSD)
+        try c.encodeIfPresent(startedAt, forKey: .startedAt)
+        try c.encodeIfPresent(endedAt, forKey: .endedAt)
+        try c.encode(fixAttemptsUsed, forKey: .fixAttemptsUsed)
+        try c.encodeIfPresent(pendingFix, forKey: .pendingFix)
+        try c.encodeIfPresent(replyInFlight, forKey: .replyInFlight)
+        try c.encodeIfPresent(followUpBase, forKey: .followUpBase)
+        if rerunsInSession { try c.encode(true, forKey: .rerunsInSession) }
     }
 
     /// Decodes a node run; runs saved before fix attempts existed have no `fixAttemptsUsed` and mean 0.
@@ -157,6 +179,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
         pendingFix = try c.decodeIfPresent(PendingFix.self, forKey: .pendingFix)
         replyInFlight = try c.decodeIfPresent(String.self, forKey: .replyInFlight)
         followUpBase = try c.decodeIfPresent(FollowUpBase.self, forKey: .followUpBase)
+        rerunsInSession = try c.decodeIfPresent(Bool.self, forKey: .rerunsInSession) ?? false
     }
 
     /// Appends a log line, keeping only the last 50.

@@ -148,6 +148,9 @@ extension RunEngine {
         case review(ReviewConfig)
     }
 
+    /// What a step that continues a session is told when it runs again in a conversation that already had it.
+    static let rerunNotice = "This step already ran earlier in this conversation, and the work it builds on has changed since. Do it again for the work as it stands now, and keep what is still right.\n\n"
+
     func runAgent(_ id: RunID, _ key: NodeKey, node: Node, config: PromptConfig, plan: FlowPlan, role: AgentRole) async {
         guard let run = runs[id] else { return }
         let lane = key.lane.flatMap { laneID in run.lanes.first { $0.id == laneID } }
@@ -196,6 +199,7 @@ extension RunEngine {
             if let source = config.continuesSessionOf, !isReview {
                 if let session = runs[id]?.nodes[NodeKey(node: source, lane: key.lane)]?.sessionID {
                     request.resumeSessionID = session
+                    if current.rerunsInSession { request.prompt = Self.rerunNotice + request.prompt }
                 } else {
                     updateNode(id, key) { $0.appendLog("⚠ no session to continue; starting fresh") }
                 }
@@ -270,7 +274,7 @@ extension RunEngine {
                 return
             }
         }
-        updateNode(id, key) { $0.replyInFlight = nil }
+        updateNode(id, key) { $0.replyInFlight = nil; $0.rerunsInSession = false }
         // The turn is over: a later one (an answer to a question) is ordinary work.
         if current.pendingFix != nil { updateNode(id, key) { $0.pendingFix = nil } }
         if !result.deniedTools.isEmpty {

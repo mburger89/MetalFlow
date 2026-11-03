@@ -33,6 +33,14 @@ extension RunEngine {
         requestPass(id)
     }
 
+    /// Whether the node's config names a step whose session it continues.
+    static func continuesSession(_ node: NodeID, in flow: Flow) -> Bool {
+        switch flow.node(node)?.kind {
+        case .prompt(let c)?, .judge(let c)?: return c.continuesSessionOf != nil
+        default: return false
+        }
+    }
+
     /// Sends `node` and everything downstream of it back to `.waiting` with outputs cleared (see `retry`). The node keeps its
     /// `sessionID` and `pendingReply`; the run's status is left to the caller.
     func resetForRerun(_ node: NodeKey, plan: FlowPlan, in run: inout Run) {
@@ -74,7 +82,12 @@ extension RunEngine {
         }
         for key in keys where run.nodes[key] != nil {
             let old = run.nodes[key]
-            run.nodes[key] = NodeRun(extraAllowedTools: old?.extraAllowedTools ?? [], costUSD: old?.costUSD ?? 0)
+            var fresh = NodeRun(extraAllowedTools: old?.extraAllowedTools ?? [], costUSD: old?.costUSD ?? 0)
+            // A step that continues a session it already ran in is told, when it runs again, that this is a rerun.
+            if old?.rerunsInSession == true || (old?.sessionID != nil && Self.continuesSession(key.node, in: run.flow)) {
+                fresh.rerunsInSession = true
+            }
+            run.nodes[key] = fresh
         }
         let resetLanes = Set(keys.compactMap(\.lane) + (node.lane.map { [$0] } ?? []))
         for index in run.lanes.indices where resetLanes.contains(run.lanes[index].id) {
