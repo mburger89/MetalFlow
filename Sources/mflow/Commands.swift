@@ -374,6 +374,13 @@ func follow(engine: RunEngine, id: RunID, seed: Run?) async -> Int32 {
     return 1
 }
 
+/// The exit code of `follow-up` once `follow` returned `code`, and the line to print first. A run that carries on to the
+/// pick says nothing of the step that was followed up, so a failed one is named here; any other exit stands.
+func followUpOutcome(code: Int32, node: NodeKey, in run: Run?) -> (code: Int32, line: String?) {
+    guard code == 0, case .failed(let message)? = run?.nodes[node]?.state else { return (code, nil) }
+    return (1, "failed: \(node): \(message)")
+}
+
 private func finish(_ engine: RunEngine, _ id: RunID, _ run: Run, _ interrupted: OSAllocatedUnfairLock<Bool>) async -> Int32 {
     if interrupted.withLock({ $0 }), run.status == .cancelled {
         await engine.waitUntilSettled(id)
