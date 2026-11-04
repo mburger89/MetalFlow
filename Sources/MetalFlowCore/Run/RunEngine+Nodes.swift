@@ -222,7 +222,8 @@ extension RunEngine {
         // A reviewer never edits, so there is nothing of its to commit.
         if let lane, review == nil {
             let message = Self.laneCommitMessage(
-                runTitle: run.title, flowName: run.flow.name, lane: lane.id, nodeTitle: node.title, fix: current.pendingFix)
+                runTitle: run.title, flowName: run.flow.name, lane: lane.id, nodeTitle: node.title, fix: current.pendingFix,
+                followUp: current.pendingFollowUp)
             do {
                 _ = try await git.commitAll(worktree: lane.worktree, message: message)
             } catch {
@@ -231,7 +232,9 @@ extension RunEngine {
             }
         }
         // The turn is over: a later one (an answer to a question) is ordinary work.
-        if current.pendingFix != nil { updateNode(id, key) { $0.pendingFix = nil } }
+        if current.pendingFix != nil || current.pendingFollowUp != nil {
+            updateNode(id, key) { $0.pendingFix = nil; $0.pendingFollowUp = nil }
+        }
         if !result.deniedTools.isEmpty {
             let tools = result.deniedTools.joined(separator: ", ")
             updateNode(id, key) { $0.appendLog("⚠ denied: \(tools)") }

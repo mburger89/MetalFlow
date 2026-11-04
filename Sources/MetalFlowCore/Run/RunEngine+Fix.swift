@@ -15,11 +15,20 @@ extension RunEngine {
     }
 
     /// The commit message for a lane agent's turn: the issue's title (the flow's name when there is none) and the lane,
-    /// labelled as a fix attempt when a failing gate started the turn.
+    /// labelled as a fix attempt when a failing gate started the turn. A follow-up turn is an ordinary lane commit
+    /// with a `Follow-up:` line naming the first line of the message.
     static func laneCommitMessage(runTitle: String, flowName: String, lane: LaneID, nodeTitle: String,
-                                  fix: PendingFix?) -> String {
+                                  fix: PendingFix?, followUp: String? = nil) -> String {
         let name = commitName(runTitle: runTitle, flowName: flowName)
-        guard let fix else { return "\(name) (\(lane))\n\nNode: \(nodeTitle)" }
+        guard let fix else {
+            var message = "\(name) (\(lane))\n\nNode: \(nodeTitle)"
+            if let followUp {
+                let first = followUp.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline)
+                    .first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+                message += "\nFollow-up: \(first)"
+            }
+            return message
+        }
         return "Fix attempt \(fix.attempt) of \(fix.total): \(name) (\(lane))\n\nNode: \(nodeTitle)\n\(fix.label): \(fix.command)"
     }
 

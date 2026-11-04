@@ -29,6 +29,10 @@ public enum RunEngineError: Error, Equatable {
     case invalidBranchName(String)
     /// The node has not failed, or the run is not in a state that can be retried.
     case notRetryable(NodeKey)
+    /// The node cannot take a follow-up: it is not a finished candidate agent, or the run is not waiting for a winner.
+    case notFollowable(NodeKey)
+    /// The follow-up message is empty.
+    case emptyFollowUp
     /// A launch field has no value and no default.
     case missingInput(String)
     /// The value given for the repo differs from the repo the flow is bound to.
@@ -54,6 +58,9 @@ extension RunEngineError: LocalizedError {
         case .runBusy(let id): return "run \(id.rawValue) is busy: running in another mflow, or still stopping"
         case .invalidBranchName(let name): return "'\(name)' is not a valid branch name"
         case .notRetryable(let key): return "\(key) cannot be retried: it has not failed, or the run is busy or over"
+        case .notFollowable(let key):
+            return "\(key) cannot take a follow-up: it is not a finished candidate agent, or the run is not waiting for a winner"
+        case .emptyFollowUp: return "a follow-up needs a message"
         case .missingInput(let name): return "'\(name)' needs a value"
         case .repoMismatch(let expected): return "this flow always runs on \(expected.path)"
         case .launch(let error): return error.localizedDescription

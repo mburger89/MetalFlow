@@ -110,14 +110,17 @@ public struct NodeRun: Codable, Hashable, Sendable {
     public var fixAttemptsUsed: Int
     /// Set while the agent works on a failing gate's behalf: the fix its next turn carries out. It labels that turn's commit.
     public var pendingFix: PendingFix?
+    /// Set while the agent works on a follow-up the user sent a finished candidate: the message it carries out. Its first line labels that turn's commit.
+    public var pendingFollowUp: String?
     /// Creates a node run with defaults (waiting, empty log).
     public init(
         state: NodeState = .waiting, output: String? = nil, sessionID: String? = nil,
         log: [String] = [], pendingReply: String? = nil, extraAllowedTools: [String] = [],
         costUSD: Double = 0, startedAt: Date? = nil, endedAt: Date? = nil, fixAttemptsUsed: Int = 0,
-        pendingFix: PendingFix? = nil
+        pendingFix: PendingFix? = nil, pendingFollowUp: String? = nil
     ) {
         self.pendingFix = pendingFix
+        self.pendingFollowUp = pendingFollowUp
         self.fixAttemptsUsed = fixAttemptsUsed
         self.state = state
         self.output = output
@@ -131,7 +134,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed, pendingFix
+        case state, output, sessionID, log, pendingReply, extraAllowedTools, costUSD, startedAt, endedAt, fixAttemptsUsed, pendingFix, pendingFollowUp
     }
 
     /// Decodes a node run; runs saved before fix attempts existed have no `fixAttemptsUsed` and mean 0.
@@ -148,6 +151,7 @@ public struct NodeRun: Codable, Hashable, Sendable {
         endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
         fixAttemptsUsed = try c.decodeIfPresent(Int.self, forKey: .fixAttemptsUsed) ?? 0
         pendingFix = try c.decodeIfPresent(PendingFix.self, forKey: .pendingFix)
+        pendingFollowUp = try c.decodeIfPresent(String.self, forKey: .pendingFollowUp)
     }
 
     /// Appends a log line, keeping only the last 50.
