@@ -58,6 +58,7 @@ struct CandidateCard: Component {
             Button("Branch from here") { model.toggleBranch(runID, laneID) }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("\(id).branch")
+            followUpSection(id: id)
             if model.isBranchOpen(runID, laneID) {
                 let name = model.branchDrafts[key] ?? ""
                 HStack(spacing: Spacing.sm) {
@@ -84,6 +85,35 @@ struct CandidateCard: Component {
         .roundedBorder(recommended ? Palette.accent : Palette.line, radius: 10)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(id)
+    }
+
+    @ElementBuilder
+    private func followUpSection(id: String) -> some ElementGroup {
+        let runID = run.id
+        if let node = model.followUpNode(run, lane: lane.id) {
+            let draftKey = AppModel.draftKey(runID, node)
+            let fid = "\(id).followUp"
+            Button("Follow up") { model.toggleFollowUp(runID, node) }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier(fid)
+            if model.followUpOpen.contains(draftKey) {
+                HStack(spacing: Spacing.sm) {
+                    TextField("Follow up", text: Binding(
+                        get: { model.followUpDrafts[draftKey] ?? "" },
+                        set: { model.followUpDrafts[draftKey] = $0 }))
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("\(fid).field")
+                    Button("Send") { Task { await model.sendFollowUp(run: runID, node: node) } }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("\(fid).send")
+                        .disabled(AppModel.trimmed(model.followUpDrafts[draftKey] ?? "").isEmpty)
+                }
+            }
+        }
+        if model.pendingFollowUp(run, lane: lane.id) != nil {
+            Text(verbatim: "Working on follow-up").font(size: 12).foregroundColor(Palette.muted)
+                .accessibilityIdentifier("\(id).followUp.pending")
+        }
     }
 
     @ElementBuilder

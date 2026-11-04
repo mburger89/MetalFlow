@@ -154,6 +154,12 @@ public final class AppModel {
     public var branchDrafts: [String: String] = [:]
     /// The lanes whose "Branch from here" field is open, keyed by `AppModel.laneKey(_:_:)`.
     public var branchOpen: Set<String> = []
+    /// Follow-up drafts, keyed by `AppModel.draftKey(_:_:)` of the candidate's agent node.
+    public var followUpDrafts: [String: String] = [:]
+    /// The agent nodes whose "Follow up" field is open, keyed by `AppModel.draftKey(_:_:)`.
+    public var followUpOpen: Set<String> = []
+    /// The agent nodes with a follow-up send in flight, keyed by `AppModel.draftKey(_:_:)`.
+    var followUpSending: Set<String> = []
     /// The lane whose diff is open, if any.
     public internal(set) var openDiff: DiffKey?
     /// Parsed diffs by lane. Absent while loading.

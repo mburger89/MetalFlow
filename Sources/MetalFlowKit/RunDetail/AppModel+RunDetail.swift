@@ -38,6 +38,40 @@ public struct DiffKey: Hashable, Sendable {
 }
 
 extension AppModel {
+    /// The candidate's agent node that can take a follow-up now, or nil. Plan order decides when a lane has several.
+    public func followUpNode(_ run: Run, lane: LaneID) -> NodeKey? {
+        let keys = run.nodes.keys.filter { $0.lane == lane && RunEngine.canFollowUp(run, node: $0) }
+        let order = (try? run.flow.validate().order) ?? run.flow.nodes.map(\.id)
+        return keys.min { (order.firstIndex(of: $0.node) ?? .max) < (order.firstIndex(of: $1.node) ?? .max) }
+    }
+
+    /// The follow-up a candidate's agent is working on, if any.
+    public func pendingFollowUp(_ run: Run, lane: LaneID) -> String? {
+        run.nodes.first { $0.key.lane == lane && $0.value.pendingFollowUp != nil }?.value.pendingFollowUp
+    }
+
+    /// Opens or closes a candidate's follow-up field.
+    public func toggleFollowUp(_ run: RunID, _ node: NodeKey) {
+        let key = Self.draftKey(run, node)
+        if !followUpOpen.insert(key).inserted { followUpOpen.remove(key) }
+    }
+
+    /// Sends the follow-up drafted for a candidate's agent. The draft is cleared and the field closed only once the
+    /// engine accepts it, and the draft only if the user has not typed something else meanwhile. A second send while
+    /// one is in flight, or an empty draft, does nothing.
+    @discardableResult
+    public func sendFollowUp(run id: RunID, node: NodeKey) async -> Bool {
+        let key = Self.draftKey(id, node)
+        let typed = followUpDrafts[key] ?? ""
+        let message = Self.trimmed(typed)
+        guard !message.isEmpty, followUpSending.insert(key).inserted else { return false }
+        defer { followUpSending.remove(key) }
+        guard await followUp(id, node: node, message: message) else { return false }
+        if followUpDrafts[key] == typed { followUpDrafts[key] = nil }
+        followUpOpen.remove(key)
+        return true
+    }
+
     /// The key of a per-lane draft or flag.
     public static func laneKey(_ run: RunID, _ lane: LaneID) -> String { "\(run.rawValue)#\(lane)" }
 

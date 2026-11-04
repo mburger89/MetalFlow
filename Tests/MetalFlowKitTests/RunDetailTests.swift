@@ -184,6 +184,64 @@ import Testing
         #expect(!model.isBranchOpen(run.id, "a"))
     }
 
+    func followableRun() -> Run {
+        pickRun(extra: [NodeKey(node: "implement", lane: "a"): NodeRun(state: .succeeded, sessionID: "sa")])
+    }
+
+    @Test func followUpControlShowsOnlyForAnEligibleCandidate() async throws {
+        let (_, _, window) = try await fixture(followableRun())
+        _ = try window.element(identifier: "cand.a.followUp")
+        #expect((try? window.element(identifier: "cand.b.followUp")) == nil, "no finished agent session")
+        #expect((try? window.element(identifier: "cand.a.followUp.field")) == nil, "closed until pressed")
+        #expect((try? window.element(identifier: "cand.a.followUp.pending")) == nil)
+
+        var running = followableRun()
+        running.status = .running
+        let (_, _, other) = try await fixture(running)
+        #expect((try? other.element(identifier: "cand.a.followUp")) == nil, "run is not waiting for a winner")
+    }
+
+    @Test func followUpSendNeedsTextAndForwardsIt() async throws {
+        let run = followableRun()
+        let (model, client, window) = try await fixture(run)
+        try await press("cand.a.followUp", in: window)
+        #expect(try !window.element(identifier: "cand.a.followUp.send").isEnabled)
+        try window.click(window.element(identifier: "cand.a.followUp.field"))
+        window.typeText("   ")
+        try await window.runUntilIdle()
+        #expect(try !window.element(identifier: "cand.a.followUp.send").isEnabled, "whitespace is not a message")
+        window.typeText("add tests")
+        try await window.runUntilIdle()
+        #expect(try window.element(identifier: "cand.a.followUp.send").isEnabled)
+        try await press("cand.a.followUp.send", in: window)
+        #expect(await client.calls.contains("followUp(implement@a, add tests)"))
+        #expect(model.followUpDrafts.values.allSatisfy { $0.isEmpty })
+        #expect((try? window.element(identifier: "cand.a.followUp.field")) == nil, "closes after a send")
+    }
+
+    @Test func followUpFailureKeepsTheDraftAndShowsANotice() async throws {
+        let run = followableRun()
+        let (model, client, window) = try await fixture(run)
+        await client.setFailure(FakeFailure())
+        try await press("cand.a.followUp", in: window)
+        try window.click(window.element(identifier: "cand.a.followUp.field"))
+        window.typeText("again")
+        try await window.runUntilIdle()
+        try await press("cand.a.followUp.send", in: window)
+        #expect(model.notice?.text == "engine said no")
+        #expect(try window.element(identifier: "cand.a.followUp.field").value == "again")
+    }
+
+    @Test func workingOnFollowUpShowsWhilePending() async throws {
+        var run = pickRun(extra: [NodeKey(node: "implement", lane: "b"):
+            NodeRun(state: .waiting, sessionID: "sb", pendingFollowUp: "more")])
+        run.status = .running
+        let (_, _, window) = try await fixture(run)
+        #expect(try window.element(identifier: "cand.b.followUp.pending").value == "Working on follow-up")
+        #expect((try? window.element(identifier: "cand.a.followUp.pending")) == nil)
+        #expect((try? window.element(identifier: "cand.b.followUp")) == nil)
+    }
+
     @Test func discardNeedsConfirmation() async throws {
         let run = pickRun()
         let (model, client, window) = try await fixture(run)
