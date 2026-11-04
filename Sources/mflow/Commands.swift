@@ -13,6 +13,8 @@ commands:
   show <id>                                       nodes, needs-you items, lanes, recommendation
   answer <id> <nodeKey> [--] <reply...> [--allow Tool]
                                                   answer a paused node (-- ends options) and follow the run
+  follow-up <id> <node> <lane> <message...>       send a follow-up to a finished candidate's agent while the run
+                                                  waits for a pick, and follow the run
   resume <id>                                     resume interrupted nodes and follow the run
   pick <id> <lane>                                merge a candidate into the base branch; when the flow has an Open PR
                                                   node, push it and open a pull request instead, follow the run and
@@ -97,7 +99,7 @@ func requirePositionals(_ a: Arguments, min: Int, max: Int? = nil, name: String)
 }
 
 /// The commands `run()` dispatches.
-let knownCommands: Set<String> = ["init-flow", "launch", "list", "show", "answer", "resume", "pick", "discard", "branch"]
+let knownCommands: Set<String> = ["init-flow", "launch", "list", "show", "answer", "follow-up", "resume", "pick", "discard", "branch"]
 
 /// The stderr text for a missing or unknown command (exit 64), or nil when `argv` names a known one.
 func commandLineProblem(_ argv: [String]) -> String? {

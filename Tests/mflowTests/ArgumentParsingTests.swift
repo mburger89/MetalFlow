@@ -80,6 +80,18 @@ import MetalFlowCore
         #expect(usageMessage { try requirePositionals(a, min: 3, name: "answer") } == "wrong arguments for answer")
     }
 
+    @Test func followUpTakesRunNodeLaneAndJoinedMessage() throws {
+        let u = UUID().uuidString
+        let a = try parseArguments([u, "implement", "b", "also", "add", "tests", "--allow", "Bash"])
+        #expect(a.positionals == [u, "implement", "b", "also", "add", "tests"])
+        #expect(throws: Never.self) { try requirePositionals(a, min: 4, name: "follow-up") }
+        #expect(a.positionals.dropFirst(3).joined(separator: " ") == "also add tests")
+        #expect(NodeKey(node: NodeKey(description: a.positionals[1])!.node, lane: a.positionals[2]).description == "implement@b")
+        #expect(knownCommands.contains("follow-up"))
+        let missing = try parseArguments([u, "implement", "b"])
+        #expect(usageMessage { try requirePositionals(missing, min: 4, name: "follow-up") } == "wrong arguments for follow-up")
+    }
+
     @Test func parseRunIDValidatesAndUppercases() throws {
         let u = UUID().uuidString
         #expect(try parseRunID(u.lowercased()).rawValue == u)
@@ -91,7 +103,7 @@ import MetalFlowCore
     }
 
     @Test func usageTextListsEveryCommand() {
-        for c in ["init-flow", "launch", "list", "show", "answer", "resume", "pick", "discard", "branch"] {
+        for c in ["init-flow", "launch", "list", "show", "answer", "follow-up", "resume", "pick", "discard", "branch"] {
             #expect(usageText.contains("  \(c) "))
         }
     }

@@ -158,6 +158,24 @@ import MetalFlowCore
         #expect(m.pickOutcomes[id]?["a"] == .failed("engine said no"))
     }
 
+    @Test func followUpForwardsToTheClient() async {
+        let client = FakeEngineClient()
+        let m = model(client)
+        let ok = await m.followUp(RunID(), node: NodeKey(node: "implement", lane: "a"), message: "also add tests")
+        #expect(ok)
+        #expect(await client.calls == ["followUp(implement@a, also add tests)"])
+        #expect(m.notice == nil)
+    }
+
+    @Test func followUpReturnsFalseWhenTheClientThrows() async {
+        let client = FakeEngineClient()
+        let m = model(client)
+        await client.setFailure(FakeFailure())
+        let ok = await m.followUp(RunID(), node: NodeKey(node: "implement", lane: "a"), message: "again")
+        #expect(!ok)
+        #expect(m.notice?.text == "engine said no")
+    }
+
     @Test func conflictingPickBecomesOutcome() async {
         let client = FakeEngineClient()
         await client.setPick(.conflict(files: ["a.swift"]))

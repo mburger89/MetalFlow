@@ -11,6 +11,8 @@ public protocol EngineClient: Sendable {
     func launch(flow: Flow, location: FlowLocation, values: [String: String]) async throws -> RunID
     /// Answers a node that asked a question, optionally allowing more tools.
     func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws
+    /// Sends a follow-up message to a finished candidate's agent while the run waits for a winner.
+    func followUp(_ id: RunID, node: NodeKey, message: String) async throws
     /// Resumes a run that was cut short.
     func resumeInterrupted(_ id: RunID) async throws
     /// Re-runs a failed node.
@@ -102,6 +104,9 @@ public struct LiveEngineClient: EngineClient {
     }
     public func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
         try await engine.value.answer(id, node: node, reply: reply, allowTools: allowTools)
+    }
+    public func followUp(_ id: RunID, node: NodeKey, message: String) async throws {
+        try await engine.value.followUp(id, node: node, message: message)
     }
     public func resumeInterrupted(_ id: RunID) async throws { try await engine.value.resumeInterrupted(id) }
     public func retry(_ id: RunID, node: NodeKey) async throws { try await engine.value.retry(id, node: node) }

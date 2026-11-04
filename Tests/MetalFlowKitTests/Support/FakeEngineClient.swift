@@ -73,6 +73,9 @@ actor FakeEngineClient: EngineClient {
     func answer(_ id: RunID, node: NodeKey, reply: String, allowTools: [String]) async throws {
         try record("answer(\(node), \(reply), \(allowTools))")
     }
+    func followUp(_ id: RunID, node: NodeKey, message: String) async throws {
+        try record("followUp(\(node), \(message))")
+    }
     func resumeInterrupted(_ id: RunID) async throws { try record("resume") }
     func retry(_ id: RunID, node: NodeKey) async throws { try record("retry(\(node))") }
     func cancel(_ id: RunID) async { calls.append("cancel") }

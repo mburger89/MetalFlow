@@ -221,7 +221,7 @@ private final class Scratch: Sendable {
 
     @Test func knownCommandsPass() {
         for c in knownCommands { #expect(commandLineProblem([c]) == nil) }
-        #expect(knownCommands.count == 9)
+        #expect(knownCommands.count == 10)
     }
 
     @Test func failureReportMapsErrorsToExitCodes() {

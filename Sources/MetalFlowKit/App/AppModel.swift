@@ -449,6 +449,12 @@ public final class AppModel {
         await perform { try await self.client.answer(id, node: node, reply: reply, allowTools: allowTools) }
     }
 
+    /// Sends a follow-up to a finished candidate's agent. Returns false (with a notice) when the engine refuses.
+    @discardableResult
+    public func followUp(_ id: RunID, node: NodeKey, message: String) async -> Bool {
+        await perform { try await self.client.followUp(id, node: node, message: message) }
+    }
+
     /// Allows the tools a node was denied and lets it carry on. The one reply both screens send.
     @discardableResult
     public func allowAndContinue(run id: RunID, node: NodeKey, tools: [String]) async -> Bool {
