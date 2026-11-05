@@ -50,9 +50,24 @@ import Testing
         #expect(try window.element(identifier: "cand.c.gate").value == "Tests not finished")
         #expect(try window.element(identifier: "cand.a.added").value == "+12")
         #expect(try window.element(identifier: "cand.b.model").value == "opus")
-        #expect(try window.element(identifier: "detail.judge").value == "B is the most complete.")
+        // The judge's output is Markdown now, so the id is on a container; its text is the parsed block.
+        _ = try window.element(identifier: "detail.judge")
+        #expect(MarkdownBlocks.parse("B is the most complete.") == [.paragraph("B is the most complete.")])
         #expect((try? window.element(identifier: "detail.allGatesFailed")) == nil)
         #expect(try window.element(identifier: "cand.b.pick").isEnabled)
+    }
+
+    @Test func aQuestionWithMarkdownParsesIntoBlocks() async throws {
+        let question = "## Which file?\nPick **one**."
+        let run = makeRun("ask", status: .needsYou, nodes: [
+            NodeKey(node: "plan"): NodeRun(state: .needsYou(.question(question)))])
+        let (_, _, window) = try await fixture(run)
+        _ = try window.element(identifier: "detail.node.plan")
+        let blocks = MarkdownBlocks.parse(question)
+        #expect(blocks.first == .heading(level: 2, text: "Which file?"))
+        #expect(blocks.count == 2)
+        guard case let .paragraph(text) = blocks[1] else { Issue.record("expected a paragraph"); return }
+        #expect(String(MarkdownStyle.inline(text).characters) == "Pick one.")
     }
 
     @Test func aGateOutsideTheLanesDoesNotMakeTestsNotFinished() async throws {

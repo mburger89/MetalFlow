@@ -572,7 +572,13 @@ import Testing
         draft.canvasSelection = CanvasSelection(notes: [id])
         try await window.runUntilIdle()
         _ = try window.element(identifier: "inspector.note")
+        // The note's text opens on Preview (the Inspector has no field to edit it), and Edit shows it verbatim.
+        _ = try window.element(identifier: "inspector.noteText.preview")
+        #expect((try? window.element(identifier: "inspector.noteText")) == nil)
+        try window.click(window.element(identifier: "markdown.edit"))
+        try await window.runUntilIdle()
         #expect(try window.element(identifier: "inspector.noteText").value == "Remember this")
+        #expect((try? window.element(identifier: "inspector.noteText.preview")) == nil)
         draft.canvasSelection = CanvasSelection(nodes: ["plan"], notes: [id])
         try await window.runUntilIdle()
         #expect(try window.element(identifier: "inspector.selectionCount").value == "2 selected")

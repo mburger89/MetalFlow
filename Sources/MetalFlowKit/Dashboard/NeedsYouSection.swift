@@ -47,7 +47,11 @@ struct NeedsCard: Component {
         VStack(alignment: .leading, spacing: 6) {
             Text(verbatim: label).font(size: 11).foregroundColor(color).accessibilityIdentifier("\(id).label")
             Text(verbatim: run.title).font(size: 13).foregroundColor(Palette.text)
-            Text(verbatim: detail).font(size: 13).foregroundColor(Palette.body)
+            if case .question(let question) = item.kind {
+                MarkdownView(text: question)
+            } else {
+                Text(verbatim: detail).font(size: 13).foregroundColor(Palette.body)
+            }
             if case .question = item.kind {
                 AnswerBox(model: model, runID: run.id, key: item.key)
             }

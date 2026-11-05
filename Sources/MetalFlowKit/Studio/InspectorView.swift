@@ -116,8 +116,7 @@ struct InspectorView: Component {
                       let note = draft.flow.notes.first(where: { $0.id == id }) {
                 Text(verbatim: "Note").font(size: 11).foregroundColor(Palette.muted)
                     .accessibilityIdentifier("inspector.note")
-                Text(verbatim: note.text).font(size: 13).foregroundColor(Palette.text)
-                    .accessibilityIdentifier("inspector.noteText")
+                NoteTextPreview(model: model, id: id, text: note.text)
                 Text(verbatim: "Double-click the note to edit it. Delete removes it.")
                     .font(size: 12).foregroundColor(Palette.muted)
             } else if let wire = draft.selectedWire {
@@ -170,9 +169,9 @@ struct NodeInspector: Component {
                 switch node.kind {
                 case .flowInput: FlowInputFields(draft: draft, id: id)
                 case .repo: RepoFields(model: model, draft: draft, id: id, repos: repos)
-                case .prompt, .judge: PromptFields(draft: draft, id: id)
+                case .prompt, .judge: PromptFields(model: model, draft: draft, id: id)
                 case .review:
-                    PromptFields(draft: draft, id: id)
+                    PromptFields(model: model, draft: draft, id: id)
                     FixAttemptsFields(draft: draft, id: id)
                 case .shell, .gate:
                     label("Command")
@@ -517,7 +516,33 @@ struct FlowInputFields: Component {
 }
 
 /// Model, candidates (not for a review), prompt, tools and max turns of a prompt, judge or review.
+/// The Inspector's view of a note's text: Markdown preview or the raw text. The note is edited on the canvas, so
+/// this is read-only and opens on Preview.
+struct NoteTextPreview: Component {
+    let model: AppModel
+    let id: NoteID
+    let text: String
+
+    var content: some ElementGroup {
+        let model = model, id = id
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            MarkdownPreviewToggle(isPreview: Binding(
+                get: { model.notePreview[id] ?? true },
+                set: { model.notePreview[id] = $0 }))
+            if model.notePreview[id] ?? true {
+                VStack(alignment: .leading, spacing: 0) { MarkdownView(text: text) }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("inspector.noteText.preview")
+            } else {
+                Text(verbatim: text).font(size: 13).foregroundColor(Palette.text)
+                    .accessibilityIdentifier("inspector.noteText")
+            }
+        }
+    }
+}
+
 struct PromptFields: Component {
+    let model: AppModel
     let draft: FlowDraft
     let id: NodeID
 
@@ -548,12 +573,24 @@ struct PromptFields: Component {
             }
         }
         Text(verbatim: "Prompt").font(size: 11).foregroundColor(Palette.muted)
-        TextEditor(text: Binding(
-            get: { draft.promptConfig(id)?.prompt ?? "" },
-            set: { value in draft.editPrompt(id, "prompt") { $0.prompt = value } }))
-            .font(family: "Menlo", size: 12)
+        MarkdownPreviewToggle(isPreview: Binding(
+            get: { model.promptPreview[id] ?? false },
+            set: { model.promptPreview[id] = $0 }))
+        if model.promptPreview[id] ?? false {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 0) { MarkdownView(text: config.prompt) }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("inspector.prompt.preview")
+            }
             .frame(height: Pixels(180))
-            .accessibilityIdentifier("inspector.prompt")
+        } else {
+            TextEditor(text: Binding(
+                get: { draft.promptConfig(id)?.prompt ?? "" },
+                set: { value in draft.editPrompt(id, "prompt") { $0.prompt = value } }))
+                .font(family: "Menlo", size: 12)
+                .frame(height: Pixels(180))
+                .accessibilityIdentifier("inspector.prompt")
+        }
         Text(verbatim: "Allowed tools (one per line)").font(size: 11).foregroundColor(Palette.muted)
         TextEditor(text: Binding(
             get: { Self.toolsText(draft, id) },

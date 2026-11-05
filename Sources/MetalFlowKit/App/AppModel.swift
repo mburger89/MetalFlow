@@ -62,6 +62,11 @@ public final class AppModel {
             studioValues = [:]
         }
     }
+    /// Nodes whose prompt editor shows its Markdown preview. In memory only; absent means Edit.
+    public var promptPreview: [NodeID: Bool] = [:]
+    /// Notes whose Inspector text shows its Markdown preview. In memory only; absent means Preview, since the
+    /// Inspector has no field to edit a note in.
+    public var notePreview: [NoteID: Bool] = [:]
     /// The run overlaid on the Studio canvas; nil shows the definition only.
     public var studioRun: RunID?
     /// What was typed in the Studio's launch row, by field name.

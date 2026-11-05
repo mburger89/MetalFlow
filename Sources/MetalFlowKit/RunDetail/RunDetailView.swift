@@ -65,8 +65,9 @@ struct DetailBody: Component {
                 if let judge = judgeOutput {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text(verbatim: "JUDGE").font(size: 11).foregroundColor(Palette.muted)
-                        Text(verbatim: judge).font(size: 13).foregroundColor(Palette.text)
-                            .accessibilityIdentifier("detail.judge")
+                        VStack(alignment: .leading, spacing: 0) { MarkdownView(text: judge) }
+                            .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("detail.judge")
                     }
                 }
                 if allGatesFailed {
@@ -181,7 +182,7 @@ struct StepRow: Component {
         let runID = run.id
         let key = row.key
         if case .needsYou(.question(let question)) = row.state {
-            Text(verbatim: question).font(size: 13).foregroundColor(Palette.body)
+            MarkdownView(text: question)
             AnswerBox(model: model, runID: runID, key: key)
         }
         if case .needsYou(.deniedTools(let tools)) = row.state {

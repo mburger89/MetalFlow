@@ -52,6 +52,23 @@ import Testing
         return run
     }
 
+    @Test func promptPreviewToggleSwitchesBetweenEditorAndPreview() async throws {
+        let (model, _, window) = try await fixture()
+        try await showStudio(model, window)
+        try await press("node.plan", in: window)
+        _ = try window.element(identifier: "inspector.prompt")
+        #expect((try? window.element(identifier: "inspector.prompt.preview")) == nil)
+        #expect(model.promptPreview["plan"] == nil)
+        try await press("markdown.preview", in: window)
+        #expect(model.promptPreview["plan"] == true)
+        _ = try window.element(identifier: "inspector.prompt.preview")
+        #expect((try? window.element(identifier: "inspector.prompt")) == nil)
+        try await press("markdown.edit", in: window)
+        #expect(model.promptPreview["plan"] == false)
+        _ = try window.element(identifier: "inspector.prompt")
+        #expect((try? window.element(identifier: "inspector.prompt.preview")) == nil)
+    }
+
     @Test func studioShowsBuiltinFlowNodes() async throws {
         let (model, _, window) = try await fixture()
         try await showStudio(model, window)
