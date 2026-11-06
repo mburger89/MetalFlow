@@ -137,7 +137,7 @@ public struct URLSessionChatClient: LocalChatClient {
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw LocalChatError.http(status: http.statusCode, message: Self.errorMessage(in: data))
         }
-        return try Self.reply(from: data)
+        return try Self.reply(from: data, toolNames: tools.map(\.name))
     }
 
     static func body(model: String, messages: [ChatMessage], tools: [ToolSpec]) throws -> Data {
@@ -179,7 +179,7 @@ public struct URLSessionChatClient: LocalChatClient {
         return (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static func reply(from data: Data) throws -> ChatReply {
+    static func reply(from data: Data, toolNames: [String] = []) throws -> ChatReply {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
               let first = choices.first,
@@ -198,6 +198,41 @@ public struct URLSessionChatClient: LocalChatClient {
             }
             calls.append(ToolCall(id: (raw["id"] as? String) ?? "call_\(index)", name: name, arguments: arguments))
         }
-        return ChatReply(content: message["content"] as? String, toolCalls: calls, finishReason: first["finish_reason"] as? String)
+        let reply = ChatReply(content: message["content"] as? String, toolCalls: calls, finishReason: first["finish_reason"] as? String)
+        return textToolCallFallback(reply, toolNames: toolNames)
+    }
+
+    /// Some servers return a tool call as JSON text in `content` instead of `tool_calls`. When the reply has no
+    /// tool calls and its content (optionally in a Markdown code fence) is one JSON object with a `name` that is in
+    /// `toolNames` and `arguments` (an object, or a string holding JSON), returns the reply with that one call
+    /// (id `text_0`). The content is kept. Any other reply is returned unchanged.
+    static func textToolCallFallback(_ reply: ChatReply, toolNames: [String]) -> ChatReply {
+        guard reply.toolCalls.isEmpty, let content = reply.content, !toolNames.isEmpty else { return reply }
+        var text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("```"), text.hasSuffix("```"), text.count >= 6 {
+            text = String(text.dropFirst(3).dropLast(3))
+            if let newline = text.firstIndex(of: "\n") {
+                let tag = text[..<newline].trimmingCharacters(in: .whitespaces)
+                if tag.allSatisfy({ $0.isLetter || $0.isNumber }) { text = String(text[text.index(after: newline)...]) }
+            }
+            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard text.hasPrefix("{"), text.hasSuffix("}"),
+              let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+              let name = object["name"] as? String, toolNames.contains(name) else { return reply }
+        let arguments: String
+        switch object["arguments"] {
+        case let dictionary as [String: Any]:
+            guard let data = try? JSONSerialization.data(withJSONObject: dictionary, options: [.sortedKeys]) else { return reply }
+            arguments = String(decoding: data, as: UTF8.self)
+        case let string as String:
+            guard (try? JSONSerialization.jsonObject(with: Data(string.utf8)) as? [String: Any]) != nil else { return reply }
+            arguments = string
+        default:
+            return reply
+        }
+        var result = reply
+        result.toolCalls = [ToolCall(id: "text_0", name: name, arguments: arguments)]
+        return result
     }
 }

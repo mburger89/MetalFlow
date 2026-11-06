@@ -103,6 +103,58 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         #expect(reply == ChatReply(content: "Hello", toolCalls: [], finishReason: "stop"))
     }
 
+    private func textReply(_ content: String, toolCalls: [ToolCall] = []) -> ChatReply {
+        ChatReply(content: content, toolCalls: toolCalls, finishReason: "stop")
+    }
+
+    @Test func jsonTextForAKnownToolBecomesAToolCall() {
+        let text = #"{"name": "read", "arguments": {"path": "hello.txt"}}"#
+        let out = URLSessionChatClient.textToolCallFallback(textReply(text), toolNames: ["read", "grep"])
+        #expect(out.toolCalls == [ToolCall(id: "text_0", name: "read", arguments: #"{"path":"hello.txt"}"#)])
+        #expect(out.content == text)
+    }
+
+    @Test func jsonTextWithStringArgumentsBecomesAToolCall() {
+        let text = #"{"name":"read","arguments":"{\"path\":\"a\"}"}"#
+        let out = URLSessionChatClient.textToolCallFallback(textReply(text), toolNames: ["read"])
+        #expect(out.toolCalls == [ToolCall(id: "text_0", name: "read", arguments: #"{"path":"a"}"#)])
+    }
+
+    @Test func jsonTextForAnUnknownToolStaysText() {
+        let reply = textReply(#"{"name": "launch", "arguments": {"path": "x"}}"#)
+        #expect(URLSessionChatClient.textToolCallFallback(reply, toolNames: ["read"]) == reply)
+    }
+
+    @Test func fencedJsonBecomesAToolCall() {
+        let text = "```json\n{\"name\": \"read\", \"arguments\": {\"path\": \"hello.txt\"}}\n```"
+        let out = URLSessionChatClient.textToolCallFallback(textReply(text), toolNames: ["read"])
+        #expect(out.toolCalls == [ToolCall(id: "text_0", name: "read", arguments: #"{"path":"hello.txt"}"#)])
+    }
+
+    @Test func existingToolCallsAreNotChanged() {
+        let existing = ToolCall(id: "call_1", name: "grep", arguments: "{}")
+        let reply = textReply(#"{"name": "read", "arguments": {"path": "x"}}"#, toolCalls: [existing])
+        #expect(URLSessionChatClient.textToolCallFallback(reply, toolNames: ["read", "grep"]) == reply)
+    }
+
+    @Test func proseIsNotChanged() {
+        for text in ["Hello there", #"I will call {"name": "read", "arguments": {}} now"#, "{not json}", ""] {
+            let reply = textReply(text)
+            #expect(URLSessionChatClient.textToolCallFallback(reply, toolNames: ["read"]) == reply)
+        }
+    }
+
+    @Test func replyParsingAppliesTheFallbackUsingTheRequestToolNames() async throws {
+        StubURLProtocol.handler = { _, _ in
+            (200, Data(#"{"choices":[{"message":{"role":"assistant","content":"{\"name\": \"read\", \"arguments\": {\"path\": \"hello.txt\"}}"},"finish_reason":"stop"}]}"#.utf8))
+        }
+        let spec = ToolSpec(name: "read", description: "d", parameters: "{}")
+        let reply = try await makeClient().complete(provider: .ollama, model: "m", messages: [], tools: [spec])
+        #expect(reply.toolCalls.map(\.name) == ["read"])
+        let none = try await makeClient().complete(provider: .ollama, model: "m", messages: [], tools: [])
+        #expect(none.toolCalls.isEmpty)
+    }
+
     @Test func httpErrorSurfacesTheServerMessage() async throws {
         StubURLProtocol.handler = { _, _ in (500, Data(#"{"error":{"message":"boom"}}"#.utf8)) }
         await #expect(throws: LocalChatError.http(status: 500, message: "boom")) {
