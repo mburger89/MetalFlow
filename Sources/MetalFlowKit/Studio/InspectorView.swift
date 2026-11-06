@@ -5,6 +5,12 @@ import MetalUI
 /// The models a prompt, judge or candidate can use.
 let inspectorModels = ["opus", "sonnet", "haiku"]
 
+/// Picker tag of the "Local model…" entry.
+let localModelTag = "local-model"
+
+/// True for `ollama:<name>` or `lmstudio:<name>` with a non-empty name.
+func isValidLocalModel(_ name: String) -> Bool { AgentRouter.split(model: name) != nil }
+
 extension FlowDraft {
     /// Edits one field of a node as an undo step named `<field>.<id>`, which coalesces with the previous edit of
     /// that field.
@@ -527,8 +533,33 @@ struct PromptFields: Component {
         let config = draft.promptConfig(id) ?? PromptConfig(model: "sonnet", prompt: "", candidates: [], allowedTools: [], maxTurns: nil)
         Text(verbatim: "Model").font(size: 11).foregroundColor(Palette.muted)
         modelPicker(selection: Binding(
-            get: { draft.promptConfig(id)?.model ?? "sonnet" },
-            set: { value in draft.editPrompt(id, "model", coalescing: false) { $0.model = value } }), identifier: "inspector.model")
+            get: {
+                let model = draft.promptConfig(id)?.model ?? "sonnet"
+                if draft.localModelBuffer?.node == id || isValidLocalModel(model) { return localModelTag }
+                return model
+            },
+            set: { value in
+                if value == localModelTag {
+                    let model = draft.promptConfig(id)?.model ?? ""
+                    draft.localModelBuffer = (id, isValidLocalModel(model) ? model : "")
+                } else {
+                    draft.localModelBuffer = nil
+                    draft.editPrompt(id, "model", coalescing: false) { $0.model = value }
+                }
+            }), identifier: "inspector.model", allowsLocal: true)
+        if draft.localModelBuffer?.node == id || isValidLocalModel(config.model) {
+            let typed = draft.localModelBuffer?.node == id ? draft.localModelBuffer!.text : config.model
+            TextField("ollama:qwen2.5-coder:7b", text: Binding(
+                get: { typed },
+                set: { value in
+                    draft.localModelBuffer = (id, value)
+                    if isValidLocalModel(value) { draft.editPrompt(id, "model") { $0.model = value } }
+                }))
+                .accessibilityIdentifier("inspector.localModel.field")
+            if !isValidLocalModel(typed) {
+                Text(verbatim: "Use ollama:<name> or lmstudio:<name>").font(size: 12).foregroundColor(Palette.bad)
+            }
+        }
         if !isReview {
             Stepper("Candidates: \(config.candidateCount)", value: Binding(
                 get: { draft.promptConfig(id)?.candidateCount ?? 1 },
@@ -583,9 +614,12 @@ struct PromptFields: Component {
         return tools.joined(separator: "\n")
     }
 
-    func modelPicker(selection: Binding<String>, identifier: String) -> some Element {
+    func modelPicker(selection: Binding<String>, identifier: String, allowsLocal: Bool = false) -> some Element {
         Picker("", selection: selection) {
             ForEach(inspectorModels, id: \.self) { Text(verbatim: $0).tag($0) }
+            if allowsLocal {
+                Text(verbatim: "Local model…").accessibilityIdentifier("inspector.localModel").tag(localModelTag)
+            }
         }
         .pickerStyle(.menu)
         .labelsHidden()

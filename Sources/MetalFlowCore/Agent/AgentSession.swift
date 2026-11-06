@@ -14,9 +14,12 @@ public struct AgentRequest: Sendable, Equatable {
     public var maxTurns: Int?
     /// Session to resume, if continuing an earlier one.
     public var resumeSessionID: String?
+    /// The local provider (`ollama` or `lmstudio`) set by `AgentRouter`; nil for Claude.
+    public var provider: String?
 
     /// Creates a request.
-    public init(prompt: String, workingDirectory: URL, model: String, allowedTools: [String] = [], maxTurns: Int? = nil, resumeSessionID: String? = nil) {
+    public init(prompt: String, workingDirectory: URL, model: String, allowedTools: [String] = [], maxTurns: Int? = nil, resumeSessionID: String? = nil, provider: String? = nil) {
+        self.provider = provider
         self.prompt = prompt
         self.workingDirectory = workingDirectory
         self.model = model
