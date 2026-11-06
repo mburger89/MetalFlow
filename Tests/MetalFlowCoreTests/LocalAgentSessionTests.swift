@@ -66,7 +66,7 @@ private final class ScriptedClient: LocalChatClient, @unchecked Sendable {
         let r = try #require(result(events))
         #expect(r.text == "hello" && !r.isError && r.costUSD == 0 && r.turns == 1 && r.sessionID == id)
         let sent = client.calls[0]
-        #expect(sent[0].role == .system && sent[0].content == ClaudeCLI.questionConvention)
+        #expect(sent[0].role == .system && sent[0].content == LocalAgentSession.systemPrompt)
         #expect(sent.last == ChatMessage(role: .user, content: "go"))
         #expect(client.tools[0] == ["read", "grep", "glob", "edit", "write", "bash"])
     }

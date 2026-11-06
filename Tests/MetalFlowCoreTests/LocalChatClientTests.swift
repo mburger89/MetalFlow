@@ -73,6 +73,29 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         #expect((tfn["parameters"] as? [String: Any])?["type"] as? String == "object")
     }
 
+    @Test func textToolCallIsSentBackAsTextWithoutToolCalls() async throws {
+        nonisolated(unsafe) var captured = Data()
+        StubURLProtocol.handler = { _, body in
+            captured = body
+            return (200, Data(#"{"choices":[{"message":{"content":"ok"}}]}"#.utf8))
+        }
+        let text = #"{"name":"Read","arguments":{"path":"a"}}"#
+        let messages = [
+            ChatMessage(role: .assistant, content: text, toolCalls: [ToolCall(id: "text_0", name: "Read", arguments: #"{"path":"a"}"#)]),
+            ChatMessage(role: .tool, content: "file text", toolCallID: "text_0"),
+            ChatMessage(role: .assistant, content: nil, toolCalls: [ToolCall(id: "call_1", name: "Read", arguments: #"{"path":"a"}"#)]),
+        ]
+        _ = try await makeClient().complete(provider: .ollama, model: "m", messages: messages, tools: [])
+        let json = try #require(JSONSerialization.jsonObject(with: captured) as? [String: Any])
+        let msgs = try #require(json["messages"] as? [[String: Any]])
+        #expect(msgs[0]["tool_calls"] == nil)
+        #expect(msgs[0]["content"] as? String == text)
+        #expect(msgs[1]["role"] as? String == "tool")
+        #expect(msgs[1]["tool_call_id"] as? String == "text_0")
+        let calls = try #require(msgs[2]["tool_calls"] as? [[String: Any]])
+        #expect(calls[0]["id"] as? String == "call_1")
+    }
+
     @Test func omitsToolsWhenEmpty() async throws {
         nonisolated(unsafe) var captured = Data()
         StubURLProtocol.handler = { _, body in

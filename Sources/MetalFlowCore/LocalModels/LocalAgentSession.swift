@@ -8,6 +8,11 @@ public struct LocalAgentError: Error, CustomStringConvertible {
 public struct LocalAgentSession: AgentSession {
     public static let defaultMaxTurns = 30
 
+    /// The system prompt for local models. The question convention alone makes qwen2.5-coder reply with a QUESTION
+    /// line after a tool result instead of its answer (verified against Ollama), so the second sentence tells it to
+    /// answer directly when it can.
+    static let systemPrompt = ClaudeCLI.questionConvention + " Otherwise do not ask questions; answer the user directly."
+
     private let client: LocalChatClient
     private let transcripts: LocalTranscriptStore
 
@@ -44,7 +49,7 @@ public struct LocalAgentSession: AgentSession {
         let sessionID = r.resumeSessionID ?? "local-" + UUID().uuidString
         var messages = try transcripts.load(sessionID: sessionID)
         if messages.first?.role != .system {
-            messages.insert(ChatMessage(role: .system, content: ClaudeCLI.questionConvention), at: 0)
+            messages.insert(ChatMessage(role: .system, content: Self.systemPrompt), at: 0)
         }
         messages.append(ChatMessage(role: .user, content: r.prompt))
         out.yield(.started(sessionID: sessionID))

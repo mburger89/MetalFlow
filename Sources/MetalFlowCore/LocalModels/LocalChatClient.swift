@@ -162,7 +162,10 @@ public struct URLSessionChatClient: LocalChatClient {
         } else if message.role == .assistant {
             out["content"] = NSNull()
         }
-        if !message.toolCalls.isEmpty {
+        // Calls the text fallback produced (ids `text_*`) go back as the text the model wrote, without `tool_calls`:
+        // some local models answer wrongly on the next turn when an assistant message carries `tool_calls`.
+        let wroteCallsAsText = message.role == .assistant && message.toolCalls.contains { $0.id.hasPrefix("text_") }
+        if !message.toolCalls.isEmpty, !wroteCallsAsText {
             out["tool_calls"] = message.toolCalls.map { call -> [String: Any] in
                 ["id": call.id, "type": "function", "function": ["name": call.name, "arguments": call.arguments]]
             }

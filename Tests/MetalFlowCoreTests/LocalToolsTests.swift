@@ -30,6 +30,20 @@ struct LocalToolsTests {
         }
     }
 
+    @Test func readsInsideATempFolderReachedThroughASymlink() async throws {
+        try await withTemp { dir, tools in
+            try put(dir, "hello.txt", "hi")
+            #expect(try tools.read(path: "hello.txt") == "hi")
+            #expect(try tools.read(path: dir.appendingPathComponent("hello.txt").path) == "hi")
+            let outside = FileManager.default.temporaryDirectory.appendingPathComponent("lt-out-\(UUID().uuidString).txt")
+            try "secret".write(to: outside, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: outside) }
+            try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("link.txt"), withDestinationURL: outside)
+            #expect(refuses { try tools.read(path: "link.txt") })
+            #expect(refuses { try tools.read(path: "../" + outside.lastPathComponent) })
+        }
+    }
+
     @Test func readRefusesADirectory() async throws {
         try await withTemp { dir, tools in
             try put(dir, "sub/a.txt", "x")
