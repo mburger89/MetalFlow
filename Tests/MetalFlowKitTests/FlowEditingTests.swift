@@ -304,7 +304,7 @@ struct KindMismatch: Error {}
         try await press("node.plan", in: window)
         try window.click(window.element(identifier: "inspector.model"))
         let menu = try #require(window.presentedMenu)
-        #expect(menu.items.map(\.title) == ["opus", "sonnet", "haiku"])
+        #expect(menu.items.map(\.title) == ["opus", "sonnet", "haiku", "Local model…"])
         #expect(menu.items.first?.isOn == true)
         try window.chooseMenuItem("sonnet")
         try await window.runUntilIdle()

@@ -100,6 +100,8 @@ public final class FlowDraft {
     @ObservationIgnored var lastEditName: String?
     /// The allowed-tools text being typed, as long as it still parses to the node's tools.
     var toolsBuffer: (node: NodeID, text: String)?
+    /// The local-model name being typed for a node, once "Local model…" is picked.
+    var localModelBuffer: (node: NodeID, text: String)?
     @ObservationIgnored var pinchStart: (pan: ScreenPoint, zoom: Double)?
 
     /// Creates a draft.
