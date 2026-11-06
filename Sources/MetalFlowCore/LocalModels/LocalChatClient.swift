@@ -34,7 +34,7 @@ public enum LocalProvider: String, Sendable, CaseIterable {
     }
 }
 
-public struct ToolCall: Sendable, Equatable {
+public struct ToolCall: Sendable, Equatable, Codable {
     public var id: String
     public var name: String
     /// The arguments as a JSON string, as the server sent them.
@@ -47,8 +47,8 @@ public struct ToolCall: Sendable, Equatable {
     }
 }
 
-public struct ChatMessage: Sendable, Equatable {
-    public enum Role: String, Sendable, Equatable { case system, user, assistant, tool }
+public struct ChatMessage: Sendable, Equatable, Codable {
+    public enum Role: String, Sendable, Equatable, Codable { case system, user, assistant, tool }
 
     public var role: Role
     public var content: String?

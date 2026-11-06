@@ -29,7 +29,12 @@ func run() async -> Int32 {
 
         let path = await resolver.searchPath().joined(separator: ":")
         let engine = RunEngine(
-            store: RunStore(root: storeRoot()), runner: runner, agent: ClaudeCLI(runner: runner),
+            store: RunStore(root: storeRoot()), runner: runner,
+            agent: AgentRouter(
+                claude: ClaudeCLI(runner: runner),
+                local: LocalAgentSession(
+                    client: URLSessionChatClient(),
+                    transcripts: LocalTranscriptStore(directory: storeRoot().appendingPathComponent("local-sessions")))),
             issues: GitHubIssues(runner: runner), shellEnvironment: ["PATH": path])
         let runs = try await engine.restore()
 

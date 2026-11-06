@@ -93,7 +93,12 @@ public struct LiveEngineClient: EngineClient {
             let runner = ProcessRunner(resolver: resolver)
             let path = await resolver.searchPath().joined(separator: ":")
             return RunEngine(
-                store: store, runner: runner, agent: ClaudeCLI(runner: runner),
+                store: store, runner: runner,
+                agent: AgentRouter(
+                    claude: ClaudeCLI(runner: runner),
+                    local: LocalAgentSession(
+                        client: URLSessionChatClient(),
+                        transcripts: LocalTranscriptStore(directory: root.appendingPathComponent("local-sessions")))),
                 issues: GitHubIssues(runner: runner), shellEnvironment: ["PATH": path])
         }
     }
