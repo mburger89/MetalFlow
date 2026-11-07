@@ -8,10 +8,10 @@ public struct LocalAgentError: Error, CustomStringConvertible {
 public struct LocalAgentSession: AgentSession {
     public static let defaultMaxTurns = 30
 
-    /// The system prompt for local models. The question convention alone makes qwen2.5-coder reply with a QUESTION
-    /// line after a tool result instead of its answer (verified against Ollama), so the second sentence tells it to
-    /// answer directly when it can.
-    static let systemPrompt = ClaudeCLI.questionConvention + " Otherwise do not ask questions; answer the user directly."
+    /// The system prompt for local models. The question convention made qwen2.5-coder stop after a failed tool call and
+    /// ask a QUESTION line instead of retrying (reproduced 5 of 5 against Ollama), so local sessions are told to keep
+    /// working and answer directly. A model that still writes a QUESTION line is parsed as before.
+    static let systemPrompt = "You are running unattended inside MetalFlow. Use the tools to do the task, then give a short final answer. Do not ask questions."
 
     private let client: LocalChatClient
     private let transcripts: LocalTranscriptStore
@@ -56,7 +56,9 @@ public struct LocalAgentSession: AgentSession {
 
         let tools = LocalTools(workingDirectory: r.workingDirectory)
         let permissions = ToolPermissions(allowedTools: r.allowedTools)
-        let specs = LocalTools.specs.map { ToolSpec(name: $0.name, description: $0.description, parameters: $0.parametersJSON) }
+        let specs = LocalTools.specs
+            .filter { Self.offers($0.name, permissions) }
+            .map { ToolSpec(name: $0.name, description: $0.description, parameters: $0.parametersJSON) }
         let limit = r.maxTurns ?? Self.defaultMaxTurns
         var denied: [String] = []
         var lastText = ""
@@ -85,6 +87,14 @@ public struct LocalAgentSession: AgentSession {
         }
         let text = "Stopped: the turn limit of \(limit) was reached."
         out.yield(.finished(AgentResult(sessionID: sessionID, text: text, isError: true, deniedTools: denied, costUSD: 0, turns: turns)))
+    }
+
+    /// Whether a tool is offered to the model at all. A tool the node may not use is left out, so the model does not
+    /// call it and retry (reproduced with qwen2.5-coder, which kept retrying a denied Write).
+    static func offers(_ tool: String, _ permissions: ToolPermissions) -> Bool {
+        if tool == "bash" { return permissions.allowsAnyBash }
+        guard let permission = permissionNames[tool] else { return false }
+        return permissions.allows(tool: permission)
     }
 
     private func execute(_ call: ToolCall, tools: LocalTools, permissions: ToolPermissions, denied: inout [String]) async -> String {

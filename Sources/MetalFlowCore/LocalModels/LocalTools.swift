@@ -229,11 +229,22 @@ public struct LocalTools: Sendable {
 
     // MARK: edit and write
 
+    /// The file's text for an error message, cut to a size a small local model can use.
+    static func contents(of text: String, path: String) -> String {
+        let limit = 4000
+        let shown = text.count > limit ? String(text.prefix(limit)) + "\n[truncated]" : text
+        return "Current contents of \(path):\n\(shown)"
+    }
+
     public func edit(path: String, oldString: String, newString: String) throws -> String {
-        guard !oldString.isEmpty else { throw LocalToolError("old_string must not be empty.") }
         let text = try read(path: path)
+        guard !oldString.isEmpty else {
+            throw LocalToolError("old_string must not be empty. Copy exact text from the file as old_string.\n\(Self.contents(of: text, path: path))")
+        }
         let count = text.components(separatedBy: oldString).count - 1
-        if count == 0 { throw LocalToolError("old_string was not found in \(path).") }
+        if count == 0 {
+            throw LocalToolError("old_string was not found in \(path). Copy exact text from the file.\n\(Self.contents(of: text, path: path))")
+        }
         if count > 1 {
             throw LocalToolError("old_string appears \(count) times in \(path). Include more surrounding text so it is unique.")
         }

@@ -41,6 +41,11 @@ public struct ToolPermissions: Sendable {
         plainTools.contains(tool)
     }
 
+    /// Whether any Bash command may run, so the Bash tool is worth offering to the model.
+    public var allowsAnyBash: Bool {
+        bashAllowsAny || !bashPrefixes.isEmpty || !bashExact.isEmpty
+    }
+
     /// Whether `command` may run. A command with a shell operator is never
     /// allowed; otherwise its leading words must match an allowed prefix.
     public func allowsBash(command: String) -> Bool {

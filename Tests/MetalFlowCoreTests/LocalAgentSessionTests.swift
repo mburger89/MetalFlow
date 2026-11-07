@@ -68,7 +68,7 @@ private final class ScriptedClient: LocalChatClient, @unchecked Sendable {
         let sent = client.calls[0]
         #expect(sent[0].role == .system && sent[0].content == LocalAgentSession.systemPrompt)
         #expect(sent.last == ChatMessage(role: .user, content: "go"))
-        #expect(client.tools[0] == ["read", "grep", "glob", "edit", "write", "bash"])
+        #expect(client.tools[0] == [])
     }
 
     @Test func toolCallThenAnswer() async throws {
@@ -101,6 +101,24 @@ private final class ScriptedClient: LocalChatClient, @unchecked Sendable {
         let second = client.calls[1]
         #expect(second.suffix(2).allSatisfy { $0.content == "Denied: Write is not allowed for this node." })
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("x.txt").path))
+    }
+
+    @Test func onlyAllowedToolsAreOffered() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let client = ScriptedClient([ChatReply(content: "done")])
+        let session = LocalAgentSession(client: client, transcripts: LocalTranscriptStore(directory: dir.appendingPathComponent("t")))
+        _ = try await collect(session.run(request(dir, allowed: ["Read"])))
+        #expect(client.tools.first == ["read"])
+    }
+
+    @Test func aPrefixBashRuleOffersBash() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let client = ScriptedClient([ChatReply(content: "done")])
+        let session = LocalAgentSession(client: client, transcripts: LocalTranscriptStore(directory: dir.appendingPathComponent("t")))
+        _ = try await collect(session.run(request(dir, allowed: ["Bash(git log:*)"])))
+        #expect(client.tools.first == ["bash"])
     }
 
     @Test func resumeSendsEarlierMessagesFirst() async throws {

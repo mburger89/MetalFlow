@@ -97,6 +97,24 @@ struct LocalToolsTests {
         }
     }
 
+    @Test func editErrorsShowTheCurrentContents() async throws {
+        try await withTemp { dir, tools in
+            try put(dir, "a.txt", "alpha beta")
+            do {
+                _ = try tools.edit(path: "a.txt", oldString: "", newString: "y")
+                Issue.record("an empty old_string must be refused")
+            } catch let e as LocalToolError {
+                #expect(e.message.contains("Current contents of a.txt:\nalpha beta"))
+            }
+            do {
+                _ = try tools.edit(path: "a.txt", oldString: "nope", newString: "y")
+                Issue.record("a missing old_string must be refused")
+            } catch let e as LocalToolError {
+                #expect(e.message.contains("alpha beta"))
+            }
+        }
+    }
+
     @Test func writeCreatesANestedFile() async throws {
         try await withTemp { _, tools in
             _ = try tools.write(path: "one/two/c.txt", content: "data")
