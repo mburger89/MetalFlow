@@ -591,6 +591,25 @@ import Testing
         #expect(model.running.count == 1)
     }
 
+    @Test func newerSavedStateOfAKnownRunIsShown() async throws {
+        let asks = makeRun("asks", status: .needsYou, nodes: [
+            NodeKey(node: "pick"): NodeRun(state: .needsYou(.pickWinner(recommended: "a", allGatesFailed: false)))])
+        let client = FakeEngineClient(restored: [asks], repos: [repo], flowFiles: [flowFile])
+        let model = AppModel(client: client, notifier: RecordingNotifier())
+        let window = try appWindow(model: model)
+        try await window.runUntilIdle()
+        await model.waitUntilReady()
+        await model.flushNotifications()
+        var moved = asks
+        moved.title = "asks, after a follow-up"
+        moved.revision += 1
+        moved.recommendation = "b"
+        await client.setDiscoverable([moved])
+        await model.discoverRuns()
+        #expect(model.runs[asks.id]?.title == "asks, after a follow-up")
+        #expect(model.runs[asks.id]?.recommendation == "b")
+    }
+
     @Test func vanishedRunLeavesDashboard() async throws {
         let theirs = makeRun("theirs", status: .running)
         let keep = makeRun("keep", status: .completed, createdAt: Date(timeIntervalSince1970: 2_000))

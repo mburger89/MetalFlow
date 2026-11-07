@@ -86,6 +86,22 @@ import Testing
         #expect(store(h).isLocked(run.id) == false, "discovering takes no lock")
     }
 
+    @Test func discoverTakesANewerSavedStateOfAKnownRun() async throws {
+        let h = try Harness()
+        let theirs = RunStore(root: h.store.root)
+        var run = Run(flow: h.flow(), title: "before", repo: h.repo.url, baseBranch: "main", branch: "mf/y",
+                      worktree: h.repo.url, createdAt: Date(timeIntervalSince1970: 5), status: .needsYou, nodes: [:])
+        try theirs.save(run)
+        _ = await h.engine.discover()
+        // Another process follows up on the run and saves a newer state.
+        run.title = "after"
+        run.revision += 3
+        try theirs.save(run)
+        let found = await h.engine.discover().found
+        #expect(found.map(\.title) == ["after"])
+        #expect(await h.engine.run(run.id)?.title == "after")
+    }
+
     @Test func discoverIgnoresKnownRuns() async throws {
         let (hold, cont) = AsyncStream<Void>.makeStream()
         defer { cont.finish() }

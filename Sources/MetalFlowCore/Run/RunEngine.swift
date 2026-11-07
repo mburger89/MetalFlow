@@ -354,6 +354,13 @@ public actor RunEngine {
             runs[id] = run
             discovery.found.append(run)
         }
+        // A run this engine knows but does not drive can still change in another process (an `mflow follow-up`, for
+        // example), so take its newer saved state too.
+        for id in saved where locks[id] == nil && tasks[id] == nil {
+            guard let known = runs[id], let stored = store.load(id), stored.revision > known.revision else { continue }
+            runs[id] = stored
+            discovery.found.append(stored)
+        }
         for id in runs.keys where !saved.contains(id) && locks[id] == nil && tasks[id] == nil {
             runs[id] = nil
             discovery.vanished.append(id)

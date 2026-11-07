@@ -232,7 +232,8 @@ public final class AppModel {
     /// Adds the runs another process started since the app last looked, and forgets the ones it deleted.
     public func discoverRuns() async {
         let discovery = await client.discover()
-        for run in discovery.found where runs[run.id] == nil {
+        // Known runs too: another process may have moved them on (apply keeps only newer revisions).
+        for run in discovery.found {
             if run.status == .running, await client.isRunningElsewhere(run.id) { runningElsewhere.insert(run.id) }
             apply(run, restoring: false, fromElsewhere: true)
         }
