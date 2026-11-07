@@ -593,13 +593,41 @@ struct PromptFields: Component {
         }
         if config.candidates.count > 1 {
             ForEach(Array(config.candidates.indices), id: \.self) { index in
+                let candidate = config.candidates[index]
+                let bufferActive = draft.candidateLocalModelBuffer.map { $0.node == id && $0.index == index } ?? false
                 HStack(spacing: Spacing.sm) {
                     Text(verbatim: "Candidate \(index + 1)").font(size: 12).foregroundColor(Palette.muted)
                     modelPicker(selection: Binding(
-                        get: { draft.promptConfig(id)?.candidates[safe: index] ?? "sonnet" },
+                        get: {
+                            let current = draft.promptConfig(id)?.candidates[safe: index] ?? "sonnet"
+                            let active = draft.candidateLocalModelBuffer.map { $0.node == id && $0.index == index } ?? false
+                            if active || isValidLocalModel(current) { return localModelTag }
+                            return current
+                        },
                         set: { value in
-                            draft.editPrompt(id, "candidate\(index)", coalescing: false) { if $0.candidates.indices.contains(index) { $0.candidates[index] = value } }
-                        }), identifier: "inspector.candidate.\(index)")
+                            if value == localModelTag {
+                                let current = draft.promptConfig(id)?.candidates[safe: index] ?? ""
+                                draft.candidateLocalModelBuffer = (id, index, isValidLocalModel(current) ? current : "")
+                            } else {
+                                draft.candidateLocalModelBuffer = nil
+                                draft.editPrompt(id, "candidate\(index)", coalescing: false) { if $0.candidates.indices.contains(index) { $0.candidates[index] = value } }
+                            }
+                        }), identifier: "inspector.candidate.\(index)", allowsLocal: true)
+                }
+                if bufferActive || isValidLocalModel(candidate) {
+                    let typed = bufferActive ? draft.candidateLocalModelBuffer!.text : candidate
+                    TextField("ollama:qwen2.5-coder:7b", text: Binding(
+                        get: { typed },
+                        set: { value in
+                            draft.candidateLocalModelBuffer = (id, index, value)
+                            if isValidLocalModel(value) {
+                                draft.editPrompt(id, "candidate\(index)") { if $0.candidates.indices.contains(index) { $0.candidates[index] = value } }
+                            }
+                        }))
+                        .accessibilityIdentifier("inspector.candidate.\(index).localModel.field")
+                    if !isValidLocalModel(typed) {
+                        Text(verbatim: "Use ollama:<name> or lmstudio:<name>").font(size: 12).foregroundColor(Palette.bad)
+                    }
                 }
             }
         }

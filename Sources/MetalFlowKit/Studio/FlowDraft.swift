@@ -102,6 +102,8 @@ public final class FlowDraft {
     var toolsBuffer: (node: NodeID, text: String)?
     /// The local-model name being typed for a node, once "Local model…" is picked.
     var localModelBuffer: (node: NodeID, text: String)?
+    /// The local-model name being typed for one candidate of a node, once "Local model…" is picked there.
+    var candidateLocalModelBuffer: (node: NodeID, index: Int, text: String)?
     @ObservationIgnored var pinchStart: (pan: ScreenPoint, zoom: Double)?
 
     /// Creates a draft.

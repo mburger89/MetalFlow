@@ -343,6 +343,49 @@ struct KindMismatch: Error {}
         #expect(c.candidates == ["sonnet", "haiku", "haiku"])
     }
 
+    @Test func candidatePickerOffersLocalModel() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.implement", in: window)
+        try window.click(window.element(identifier: "inspector.candidate.1"))
+        let menu = try #require(window.presentedMenu)
+        #expect(menu.items.map(\.title) == ["opus", "sonnet", "haiku", "Local model…"])
+        try window.chooseMenuItem("Local model…")
+        try await window.runUntilIdle()
+        #expect(draft.candidateLocalModelBuffer?.index == 1)
+        let field = try window.element(identifier: "inspector.candidate.1.localModel.field")
+        try window.click(field)
+        window.typeText("ollama:qwen2.5-coder:7b")
+        try await window.runUntilIdle()
+        guard case .prompt(let c) = try node(draft, "implement").kind else { return }
+        #expect(c.candidates[1] == "ollama:qwen2.5-coder:7b")
+        #expect(c.candidates[0] != "ollama:qwen2.5-coder:7b")
+    }
+
+    @Test func candidateLocalModelRejectsInvalidName() async throws {
+        let (model, _, window) = try await fixture()
+        let draft = try #require(model.draft)
+        try await press("node.implement", in: window)
+        guard case .prompt(let before) = try node(draft, "implement").kind else { return }
+        try window.click(window.element(identifier: "inspector.candidate.1"))
+        try window.chooseMenuItem("Local model…")
+        try await window.runUntilIdle()
+        let field = try window.element(identifier: "inspector.candidate.1.localModel.field")
+        try window.click(field)
+        window.typeText("nonsense")
+        try await window.runUntilIdle()
+        guard case .prompt(let after) = try node(draft, "implement").kind else { return }
+        #expect(after.candidates == before.candidates, "an invalid name is not stored")
+        #expect(draft.candidateLocalModelBuffer?.text == "nonsense")
+        // Choosing a Claude model clears the buffer.
+        try window.click(window.element(identifier: "inspector.candidate.1"))
+        try window.chooseMenuItem("haiku")
+        try await window.runUntilIdle()
+        #expect(draft.candidateLocalModelBuffer == nil)
+        guard case .prompt(let end) = try node(draft, "implement").kind else { return }
+        #expect(end.candidates[1] == "haiku")
+    }
+
     @Test func toolsAndMaxTurnsParse() async throws {
         #expect(InspectorView.parseTools("  Read \n\n Grep\n   \nBash(git log:*)\n") == ["Read", "Grep", "Bash(git log:*)"])
         let (model, _, window) = try await fixture()
