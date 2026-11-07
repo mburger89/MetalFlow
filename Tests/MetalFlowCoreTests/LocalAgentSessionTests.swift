@@ -149,8 +149,11 @@ private final class ScriptedClient: LocalChatClient, @unchecked Sendable {
         for try await event in session.run(request(dir, allowed: ["Glob"], maxTurns: 1000)) {
             if case .toolUse = event { break }
         }
+        // Once cancelled, the loop must stop: the call count settles and does not keep growing.
+        try await Task.sleep(for: .milliseconds(100))
+        let settled = client.calls.count
         try await Task.sleep(for: .milliseconds(400))
-        #expect(client.calls.count < 5)
+        #expect(client.calls.count == settled)
     }
 
     @Test func badProviderThrows() async throws {
