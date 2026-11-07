@@ -98,7 +98,12 @@ struct OpenDiffSection: Component {
     var content: some ElementGroup {
         if let key = model.openDiff, key.run == run {
             if let chunks = model.diffChunks[key] {
-                DiffView(chunks: chunks)
+                VStack(alignment: .leading, spacing: Spacing.sm) {
+                    Button("Expand") { model.openDiffViewer(key) }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("diff.expand")
+                    DiffView(chunks: chunks)
+                }
             } else {
                 Text(verbatim: "Loading diff…").font(size: 12).foregroundColor(Palette.muted)
                     .accessibilityIdentifier("diff.loading")

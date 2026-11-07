@@ -169,6 +169,12 @@ public final class AppModel {
     public internal(set) var openDiff: DiffKey?
     /// Parsed diffs by lane. Absent while loading.
     public internal(set) var diffChunks: [DiffKey: [AttributedString]] = [:]
+    /// The raw text behind `diffChunks`, for the diff viewer. Loaded and dropped together with the chunks.
+    public internal(set) var diffTexts: [DiffKey: String] = [:]
+    /// The lane whose diff the full-window viewer shows, if any.
+    public var diffViewer: DiffKey?
+    /// The viewer's selected file (index into the parsed files).
+    public var diffViewerFile = 0
     /// The run whose "Discard this run?" confirmation is up, if any.
     public var confirmingDiscard: RunID?
     var diffRevisions: [DiffKey: Int] = [:]
@@ -252,8 +258,10 @@ public final class AppModel {
         workingOn.removeAll { $0 == .run(id) }
         pickOutcomes[id] = nil
         for key in diffChunks.keys where key.run == id { diffChunks[key] = nil }
+        for key in diffTexts.keys where key.run == id { diffTexts[key] = nil }
         for key in diffRevisions.keys where key.run == id { diffRevisions[key] = nil }
         if openDiff?.run == id { openDiff = nil }
+        if diffViewer?.run == id { diffViewer = nil }
         if studioRun == id { studioRun = nil }
         if confirmingDiscard == id { confirmingDiscard = nil }
         postedBodies[id] = nil

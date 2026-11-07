@@ -111,6 +111,7 @@ extension AppModel {
             let revision = runs[key.run]?.revision ?? 0
             let text = await client.diff(key.run, lane: key.lane)
             diffChunks[key] = diffAttributed(text)
+            diffTexts[key] = text
             diffRevisions[key] = revision
         } while diffReloadWanted.contains(key)
     }
@@ -127,9 +128,19 @@ extension AppModel {
     func dropStaleDiffs(of run: RunID) {
         for key in diffChunks.keys where key.run == run && key != openDiff {
             diffChunks[key] = nil
+            diffTexts[key] = nil
             diffRevisions[key] = nil
         }
     }
+
+    /// Opens the full-window diff viewer on a lane's loaded diff, at its first file.
+    public func openDiffViewer(_ key: DiffKey) {
+        diffViewer = key
+        diffViewerFile = 0
+    }
+
+    /// Closes the diff viewer.
+    public func closeDiffViewer() { diffViewer = nil }
 
     /// Whether the branch-name field of a lane is open.
     public func isBranchOpen(_ run: RunID, _ lane: LaneID) -> Bool { branchOpen.contains(Self.laneKey(run, lane)) }

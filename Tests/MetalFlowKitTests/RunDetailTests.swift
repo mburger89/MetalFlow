@@ -387,6 +387,47 @@ import Testing
         #expect(calls.contains("retry(gate@a)"))
     }
 
+    @Test func openAndCloseDiffViewerSelectTheFirstFile() async throws {
+        let run = pickRun()
+        let (model, _, _) = try await fixture(run)
+        let key = DiffKey(run: run.id, lane: "a")
+        model.diffViewerFile = 3
+        model.openDiffViewer(key)
+        #expect(model.diffViewer == key)
+        #expect(model.diffViewerFile == 0)
+        model.closeDiffViewer()
+        #expect(model.diffViewer == nil)
+    }
+
+    @Test func expandOpensTheViewerForTheSameLane() async throws {
+        let run = pickRun()
+        let (model, client, window) = try await fixture(run)
+        await client.setDiff("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n")
+        try await press("cand.a.diff", in: window)
+        let key = DiffKey(run: run.id, lane: "a")
+        #expect(model.diffTexts[key]?.contains("+b") == true)
+        try await press("diff.expand", in: window)
+        #expect(model.diffViewer == key)
+        _ = try window.element(identifier: "diff.viewer")
+        _ = try window.element(identifier: "diff.viewer.file.0")
+        window.typeKey(.escape)
+        try await window.runUntilIdle()
+        #expect(model.diffViewer == nil)
+        try await press("diff.expand", in: window)
+        try await press("diff.viewer.close", in: window)
+        #expect(model.diffViewer == nil)
+    }
+
+    @Test func viewerWithNoChangesShowsTheEmptyLine() async throws {
+        let run = pickRun()
+        let (model, client, window) = try await fixture(run)
+        await client.setDiff("")
+        try await press("cand.a.diff", in: window)
+        try await press("diff.expand", in: window)
+        #expect(model.diffViewer != nil)
+        _ = try window.element(identifier: "diff.viewer.empty")
+    }
+
     @Test func loadingLineShowsWhileTheDiffLoads() async throws {
         let (_, client, window) = try await fixture(pickRun())
         await client.holdDiffs()

@@ -104,6 +104,9 @@ struct ScreenBody: Component {
 public func rootView(model: AppModel) -> some Element {
     ZStack {
         RootView(model: model)
+        if model.diffViewer != nil {
+            DiffViewer(model: model)
+        }
         if model.isOpenFlowVisible {
             OpenFlowPanel(model: model)
         }
